@@ -1,0 +1,26 @@
+release_id: runtime-supervisor-repair-loop
+title: Runtime supervisor repair and resume loop
+objective: Add a runtime supervisor that consumes structured release events, summaries,
+  evidence bundles, raw logs, budget and tuning signals, and current repo-state, then
+  emits and executes bounded repair actions before resuming release execution.
+non_goals:
+- Do not execute implementation workers while planning the backlog.
+- Do not broaden the selected epic beyond its acceptance criteria.
+acceptance_criteria:
+- A RuntimeSupervisor service exists with typed inputs for release events, release
+  summaries, evidence paths, raw log references, budget and tuning artifacts, current
+  backlog state, and repair policy classifications.
+- The supervisor emits typed repair actions with retry budgets and explicit stop reasons
+  for at least environment repair, planner contract normalization, task splitting
+  or scope narrowing, release resume, long-running worker inspection, model escalation,
+  and repo-state update proposals.
+- Release execution can invoke the supervisor after supported contract-contained failures
+  and either apply a bounded repair plus resume or stop with structured evidence explaining
+  why repair was unsafe or exhausted.
+- Repaired contracts and resumed releases still pass deterministic admission, verification,
+  review, budget, and finalization gates; the supervisor cannot bypass hard invariants.
+- Tests cover successful repair/resume paths and stop paths for planner schema drift,
+  verification environment drift, over-budget or over-broad generated work, long-running
+  worker inspection, and previously accepted task continuation.
+- Documentation and repo-state notes describe only implemented supervisor behavior
+  and keep the broader N-epic governor loop marked as planned until shipped.

@@ -1,0 +1,52 @@
+task_id: rs-0006
+release_id: runtime-supervisor-repair-loop
+title: Preserve accepted task continuation under repair
+task_type: code_only
+budget_class: M
+objective: Add release tests and minimal release-flow adjustments proving that previously
+  accepted tasks remain completed dependencies when a later task is repaired and resumed.
+  Verify repaired and resumed releases still pass overlap admission, deterministic
+  verification, review, budget, and finalization gates, and that accepted task evidence
+  remains inspectable and unchanged.
+allowed_files:
+- src/agentic_devloop/release.py
+- src/agentic_devloop/runtime_supervisor.py
+- tests/test_release.py
+- tests/test_runtime_supervisor.py
+forbidden_changes:
+- Do not rerun accepted tasks solely because a later task was repaired.
+- Do not alter completed task branch naming, dependency analysis, or finalization
+  target branch semantics.
+- Do not bypass overlap findings, budget violations, review decisions, or finalization
+  guards.
+- Do not change planner behavior in this task.
+- Do not delete accepted task evidence or runtime logs.
+required_evidence:
+- git diff
+- focused release continuation pytest output
+- focused RuntimeSupervisor pytest output
+- changed-files list
+verification:
+  commands: []
+  profile: code_only
+stop_conditions:
+- Stop if preserving accepted continuation requires changing task branch or worktree
+  safety rules.
+- Stop if a repaired later task would need to mutate evidence for an accepted earlier
+  task.
+- Stop if deterministic gates cannot be asserted in focused tests.
+- Stop if the implementation conflicts with stop_on_failure semantics for unrepaired
+  failures.
+non_goals:
+- Do not implement new repair action categories.
+- Do not change CLI flags.
+- Do not update docs or repo_state notes.
+- Do not modify planner normalization.
+scientific_assumptions:
+- Not applicable; developer tooling task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- rs-0003

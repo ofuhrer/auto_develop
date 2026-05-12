@@ -1,0 +1,51 @@
+task_id: rs-0002
+release_id: runtime-supervisor-repair-loop
+title: Implement bounded supervisor repair appliers
+task_type: code_only
+budget_class: M
+objective: 'Extend `agentic_devloop.runtime_supervisor` with bounded applier functions
+  for supported repair actions: planner contract normalization, task splitting or
+  scope narrowing proposals, verification environment repair evidence capture, release
+  resume intent construction, long-running worker inspection summaries, model escalation
+  recommendations, and repo-state update proposals. Add tests proving appliers preserve
+  deterministic admission requirements and return structured stop evidence when a
+  repair would broaden allowed files, exceed retry budget, or bypass a hard gate.'
+allowed_files:
+- src/agentic_devloop/runtime_supervisor.py
+- tests/test_runtime_supervisor.py
+forbidden_changes:
+- Do not modify release.py, planning.py, objective.py, executor.py, orchestrator.py,
+  or CLI code in this task.
+- Do not write actual contract files or repo_state files from appliers; return typed
+  proposals only.
+- Do not bypass TaskContract validation, release overlap analysis, review decisions,
+  budget checks, or finalization gates.
+- Do not add network calls, live agent calls, or destructive Git operations.
+required_evidence:
+- git diff
+- focused RuntimeSupervisor applier pytest output
+- changed-files list
+verification:
+  commands: []
+  profile: code_only
+stop_conditions:
+- Stop if an applier needs to mutate files outside a provided temporary evidence path.
+- Stop if planner normalization cannot re-validate through existing TaskContract or
+  ContractPlan models.
+- Stop if scope narrowing cannot prove the narrowed allowed_files remain a subset
+  of the original contract scope.
+- Stop if any repair path would resume a release without an explicit action id, retry
+  budget, and stop reason fallback.
+non_goals:
+- Do not hook appliers into release execution yet.
+- Do not add CLI flags.
+- Do not change existing RepairPolicy semantics.
+- Do not update documentation or repo-state notes.
+scientific_assumptions:
+- Not applicable; developer tooling task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- rs-0001

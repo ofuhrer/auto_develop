@@ -1,0 +1,59 @@
+task_id: rs-0007
+release_id: runtime-supervisor-repair-loop
+title: Document implemented runtime supervisor behavior
+task_type: documentation
+budget_class: S
+objective: Document implemented RuntimeSupervisor behavior, including supported inputs,
+  repair action categories, retry budget handling, structured stop evidence, release
+  resume constraints, planner normalization behavior, long-running worker inspection
+  behavior, and repo-state update proposal limits. Update repo-state notes to reflect
+  shipped behavior while keeping the broader N-epic governor loop marked as planned
+  until it is actually implemented.
+allowed_files:
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/README.md
+- docs/design/ARCHITECTURE.md
+- docs/design/ROADMAP_AND_BACKLOG.md
+- repo_state/auto_develop/architecture_summary.md
+- repo_state/auto_develop/release_plan.yaml
+- repo_state/auto_develop/active_constraints.yaml
+forbidden_changes:
+- Do not describe unimplemented N-epic autonomous governor behavior as shipped.
+- Do not modify source code or tests in this task.
+- Do not edit generated runtime evidence under runs/.
+- Do not remove existing safety constraints from repo_state notes.
+- Do not add aspirational CLI examples that are not backed by implemented behavior.
+required_evidence:
+- git diff
+- documentation review notes
+- changed-files list
+verification:
+  commands:
+  - PYTHONPATH=src .venv/bin/python -m agentic_devloop --help
+  - PYTHONPATH=src .venv/bin/python -m agentic_devloop run-release --help
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if implementation details are not yet merged enough to distinguish shipped
+  behavior from planned behavior.
+- Stop if documentation would require changing CLI behavior or public schemas.
+- Stop if repo_state release_plan changes would select nonexistent contract ids.
+- Stop if any doc statement cannot be tied to implemented behavior or explicit planned
+  status.
+non_goals:
+- Do not implement RuntimeSupervisor code.
+- Do not add tests.
+- Do not modify contracts beyond repo_state release notes.
+- Do not change user-facing CLI flags.
+scientific_assumptions:
+- Not applicable; documentation task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- rs-0003
+- rs-0004
+- rs-0005
+- rs-0006

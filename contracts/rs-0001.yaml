@@ -1,0 +1,49 @@
+task_id: rs-0001
+release_id: runtime-supervisor-repair-loop
+title: Add typed RuntimeSupervisor decision service
+task_type: code_only
+budget_class: M
+objective: Create `agentic_devloop.runtime_supervisor` with typed supervisor inputs
+  and outputs. Include typed input structures for release events, release summaries,
+  evidence bundle paths, raw log paths, budget ledger paths, tuning report paths,
+  backlog state references, and `RepairDecision` classifications. Add repair action
+  types for environment repair, planner contract normalization, task splitting or
+  scope narrowing, release resume, long-running worker inspection, model escalation,
+  and repo-state update proposals. Add focused pure-unit tests for action selection,
+  retry budgets, and explicit stop reasons.
+allowed_files:
+- src/agentic_devloop/runtime_supervisor.py
+- tests/test_runtime_supervisor.py
+forbidden_changes:
+- Do not modify release execution, planning, executor, orchestrator, or CLI control
+  flow in this task.
+- Do not execute shell commands, mutate files, invoke agents, or call Git from RuntimeSupervisor.
+- Do not loosen RepairPolicy stop decisions or hard invariants.
+- Do not add broad catch-all action types without explicit retry and stop metadata.
+required_evidence:
+- git diff
+- focused RuntimeSupervisor pytest output
+- changed-files list
+verification:
+  commands: []
+  profile: code_only
+stop_conditions:
+- Stop if typed supervisor inputs require changing existing release summary or evidence
+  schemas.
+- Stop if action selection cannot preserve retry budget, stop reason, and source evidence
+  path metadata on every emitted action.
+- Stop if implementation requires executing repairs instead of returning typed actions.
+- Stop if the action taxonomy cannot distinguish unsafe policy expansion from retryable
+  contract-contained failures.
+non_goals:
+- Do not integrate the supervisor into run-release.
+- Do not normalize planner contracts yet.
+- Do not repair verification environments yet.
+- Do not update documentation or repo-state notes.
+scientific_assumptions:
+- Not applicable; developer tooling task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []
