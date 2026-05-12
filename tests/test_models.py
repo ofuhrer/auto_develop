@@ -9,6 +9,11 @@ from pydantic import ValidationError
 from agentic_devloop.models import (
     Decision,
     EvidenceBundle,
+    FailureDiagnosis,
+    FailureDiagnosisGuidance,
+    FailureDiagnosisInput,
+    FailureDiagnosisSourceMetadata,
+    FailureEvidenceExcerpt,
     ProjectConfig,
     ReleaseObjective,
     ReviewDecision,
@@ -95,3 +100,58 @@ def test_runtime_state_models_validate() -> None:
     assert run.state == TaskState.VERIFYING
     assert evidence.task_id == "rr-0001"
     assert decision.decision == Decision.ACCEPTED
+
+
+def test_failure_diagnosis_model_validates_and_serializes() -> None:
+    diagnosis = FailureDiagnosis(
+        diagnosis_inputs=[
+            FailureDiagnosisInput(name="executor_exit_code", value="1", source="executor_result"),
+            FailureDiagnosisInput(name="timed_out", value="false"),
+        ],
+        category="executor_error",
+        confidence=0.86,
+        supporting_evidence_excerpts=[
+            FailureEvidenceExcerpt(
+                source="executor_stderr.log",
+                excerpt="traceback: missing dependency",
+                path=Path("runs/example/task/evidence/executor_stderr.log"),
+            )
+        ],
+        recommendation="Inspect the missing dependency and retry after fixing the environment.",
+        guidance=FailureDiagnosisGuidance(
+            retryable=True,
+            escalate=False,
+            retry_reason="The failure is consistent with an environment issue.",
+        ),
+        source_metadata=FailureDiagnosisSourceMetadata(
+            backend="codex_cli",
+            model="gpt-5.3-codex-spark",
+            command=["codex", "run"],
+            exit_code=1,
+            timed_out=False,
+            stdout_path=Path("runs/example/task/evidence/executor_stdout.log"),
+            stderr_path=Path("runs/example/task/evidence/executor_stderr.log"),
+        ),
+    )
+
+    dumped = diagnosis.model_dump(mode="json")
+
+    assert dumped["category"] == "executor_error"
+    assert dumped["guidance"]["retryable"] is True
+    assert dumped["source_metadata"]["backend"] == "codex_cli"
+    assert dumped["supporting_evidence_excerpts"][0]["source"] == "executor_stderr.log"
+
+
+def test_failure_diagnosis_model_rejects_invalid_confidence() -> None:
+    with pytest.raises(ValidationError, match="confidence"):
+        FailureDiagnosis.model_validate(
+            {
+                "diagnosis_inputs": [],
+                "category": "executor_error",
+                "confidence": 1.5,
+                "supporting_evidence_excerpts": [],
+                "recommendation": "Retry later.",
+                "guidance": {"retryable": True, "escalate": False},
+                "source_metadata": {"backend": "codex_cli"},
+            }
+        )

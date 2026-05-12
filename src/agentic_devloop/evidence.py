@@ -9,6 +9,7 @@ from agentic_devloop.git_state import changed_files, diff_patch
 from agentic_devloop.models import (
     ConflictRepairResult,
     EvidenceBundle,
+    FailureDiagnosis,
     ExecutorResult,
     ReviewDecision,
     TaskContract,
@@ -162,9 +163,13 @@ def write_conflict_repair_result(bundle: EvidenceBundle, result: ConflictRepairR
     return bundle.model_copy(update={"conflict_repair_path": conflict_repair_path})
 
 
-def write_failure_diagnosis(bundle: EvidenceBundle, diagnosis: dict) -> EvidenceBundle:
+def write_failure_diagnosis(bundle: EvidenceBundle, diagnosis: FailureDiagnosis | dict) -> EvidenceBundle:
     failure_diagnosis_path = bundle.bundle_path / "failure_diagnosis.yaml"
-    failure_diagnosis_path.write_text(_yaml(diagnosis), encoding="utf-8")
+    if isinstance(diagnosis, FailureDiagnosis):
+        payload = diagnosis.model_dump(mode="json")
+    else:
+        payload = diagnosis
+    failure_diagnosis_path.write_text(_yaml(payload), encoding="utf-8")
     return bundle.model_copy(update={"failure_diagnosis_path": failure_diagnosis_path})
 
 
