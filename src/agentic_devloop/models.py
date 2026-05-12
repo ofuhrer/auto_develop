@@ -149,6 +149,16 @@ class BacklogPlan(StrictModel):
     planner_metadata_path: Path | None = None
 
 
+class BacklogEvidenceManifest(StrictModel):
+    backlog_plan_path: Path | None = None
+    generated_objective_path: Path | None = None
+    contract_plan_path: Path | None = None
+    release_summary_path: Path | None = None
+    release_metrics_path: Path | None = None
+    release_budget_path: Path | None = None
+    release_tuning_path: Path | None = None
+
+
 class ReleasePlan(StrictModel):
     release_id: str = Field(min_length=1)
     active_objective: str = Field(min_length=1)

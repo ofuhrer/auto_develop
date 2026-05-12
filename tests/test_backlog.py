@@ -370,6 +370,14 @@ def test_run_backlog_selects_one_epic_reuses_objective_and_runs_release(tmp_path
     assert result.release_metrics_path is not None and result.release_metrics_path.exists()
     assert result.release_budget_path is not None and result.release_budget_path.exists()
     assert result.release_tuning_path is not None and result.release_tuning_path.exists()
+    assert result.evidence_manifest is not None
+    assert result.evidence_manifest.backlog_plan_path == result.plan_path
+    assert result.evidence_manifest.generated_objective_path is None
+    assert result.evidence_manifest.contract_plan_path == result.contract_plan_path
+    assert result.evidence_manifest.release_summary_path == result.release_summary_path
+    assert result.evidence_manifest.release_metrics_path == result.release_metrics_path
+    assert result.evidence_manifest.release_budget_path == result.release_budget_path
+    assert result.evidence_manifest.release_tuning_path == result.release_tuning_path
 
 
 def _write_yaml(path: Path, data: dict[str, object]) -> None:

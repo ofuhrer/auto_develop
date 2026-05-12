@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from agentic_devloop.budget import reserve_strong_model_call
 from agentic_devloop.config import load_project_config
-from agentic_devloop.models import BacklogEpic, BacklogPlan, ReleaseObjective
+from agentic_devloop.models import BacklogEpic, BacklogEvidenceManifest, BacklogPlan, ReleaseObjective
 from agentic_devloop.objective import run_objective
 from agentic_devloop.orchestrator import ExecutorProtocol
 from agentic_devloop.planning import PlannerBackend
@@ -44,6 +44,7 @@ class BacklogRunResult:
     release_metrics_path: Path | None = None
     release_budget_path: Path | None = None
     release_tuning_path: Path | None = None
+    evidence_manifest: BacklogEvidenceManifest | None = None
 
 
 @dataclass(frozen=True)
@@ -320,6 +321,15 @@ def run_backlog(
         debug_keep_artifacts=debug_keep_artifacts,
         progress=progress,
     )
+    evidence_manifest = BacklogEvidenceManifest(
+        backlog_plan_path=plan_result.plan_path,
+        generated_objective_path=objective_path if created_objective else None,
+        contract_plan_path=objective_run.planning.plan_path,
+        release_summary_path=objective_run.release.summary_path,
+        release_metrics_path=objective_run.release.metrics_path,
+        release_budget_path=objective_run.release.budget_path,
+        release_tuning_path=objective_run.release.tuning_path,
+    )
     return BacklogRunResult(
         selected_epic_id=epic.epic_id,
         plan_path=plan_result.plan_path,
@@ -334,6 +344,7 @@ def run_backlog(
         release_metrics_path=objective_run.release.metrics_path,
         release_budget_path=objective_run.release.budget_path,
         release_tuning_path=objective_run.release.tuning_path,
+        evidence_manifest=evidence_manifest,
     )
 
 
