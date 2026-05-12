@@ -168,6 +168,19 @@ def test_plan_backlog_command_is_registered(capsys) -> None:
     assert "--execute-planner" in captured.out
 
 
+def test_run_backlog_command_is_registered(capsys) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["run-backlog", "--help"])
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 0
+    assert "--epic-id" in captured.out
+    assert "--goal" in captured.out
+    assert "--execute-planner" in captured.out
+    assert "--release-finalize" in captured.out
+
+
 def test_plan_backlog_command_outputs_selected_epic(monkeypatch, capsys, tmp_path) -> None:
     from agentic_devloop.models import BacklogEpic, BacklogPlan
 
@@ -220,6 +233,75 @@ def test_plan_backlog_command_outputs_selected_epic(monkeypatch, capsys, tmp_pat
     assert exit_code == 0
     assert '"selected_epic_id": "epic-0001"' in captured.out
     assert "demo-20260512-add-backlog-planner" in captured.out
+
+
+def test_run_backlog_wires_selected_epic_and_release_flags(monkeypatch, capsys, tmp_path) -> None:
+    seen_kwargs: dict[str, object] = {}
+    result = SimpleNamespace(
+        selected_epic_id="run-backlog",
+        plan_path=tmp_path / "runs" / "backlog_plan.json",
+        objective_path=tmp_path / "objectives" / "run-backlog.yaml",
+        release=SimpleNamespace(
+            release_id="run-backlog-20260512",
+            run_id="run-1",
+            summary_path=tmp_path / "runs" / "summary.json",
+            log_path=tmp_path / "runs" / "release.log",
+            decision="accepted",
+            task_results=[],
+        ),
+    )
+
+    def fake_run_backlog(**kwargs):
+        seen_kwargs.update(kwargs)
+        return result
+
+    monkeypatch.setattr(cli_module, "run_backlog", fake_run_backlog)
+    monkeypatch.setattr(cli_module, "_codex_backlog_planner_backend", lambda **kwargs: object())
+
+    exit_code = main(
+        [
+            "run-backlog",
+            "--project",
+            "demo",
+            "--epic-id",
+            "run-backlog",
+            "--goal",
+            "Move toward fully autonomous roadmap-driven development",
+            "--execute-planner",
+            "--merge-on-accept",
+            "--continue-on-failure",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert seen_kwargs["selected_epic_id"] == "run-backlog"
+    assert seen_kwargs["mode"] == "strong-model"
+    assert seen_kwargs["merge_on_accept"] is True
+    assert seen_kwargs["stop_on_failure"] is False
+    assert '"selected_epic_id": "run-backlog"' in captured.out
+    assert '"release_id": "run-backlog-20260512"' in captured.out
+
+
+def test_run_backlog_requires_execute_planner(capsys) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "run-backlog",
+                "--project",
+                "demo",
+                "--epic-id",
+                "run-backlog",
+                "--goal",
+                "Move toward fully autonomous roadmap-driven development",
+            ]
+        )
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 2
+    assert "run-backlog requires --execute-planner" in captured.err
 
 
 def test_cleanup_command_is_registered(capsys) -> None:

@@ -758,6 +758,31 @@ Key options:
 
 This is the highest-level command. Use it only when you trust the planner output and admission checks enough to proceed directly into execution.
 
+### `agent-loop run-backlog`
+
+Selects one epic from backlog planning and executes it through the objective/release orchestration flow.
+
+```bash
+agent-loop run-backlog \
+  --project my_project \
+  --epic-id run-backlog \
+  --goal "Move toward fully autonomous roadmap-driven development" \
+  --mode strong-model \
+  --execute-planner \
+  --merge-on-accept \
+  --release-finalize push-feature
+```
+
+Key options:
+
+- `--project`: project identifier.
+- `--epic-id`: backlog epic identifier that must be selected for execution.
+- `--goal`: repository goal passed to backlog planning.
+- `--roadmap`: roadmap Markdown file to analyze.
+- `--mode strong-model`: required execution mode for backlog runs.
+- `--execute-planner`: required; executes planner backend instead of prompt-only output.
+- All relevant `run-release` execution and finalization options.
+
 ### `agent-loop status`
 
 Shows recent run summaries.

@@ -17,6 +17,12 @@ from agentic_devloop.planner_backend import CodexPlannerBackend
 from agentic_devloop.release import run_release
 from agentic_devloop.status import load_run_summaries
 
+try:
+    from agentic_devloop.backlog import run_backlog
+except ImportError:
+    def run_backlog(**_kwargs):
+        raise NotImplementedError("run-backlog orchestrator is not available in this build")
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -137,6 +143,32 @@ def build_parser() -> argparse.ArgumentParser:
         "--write-objective",
         action="store_true",
         help="Write an objective YAML for the highest-priority epic.",
+    )
+
+    run_backlog_parser = subparsers.add_parser(
+        "run-backlog",
+        help="Select one backlog epic and execute it through objective orchestration.",
+    )
+    run_backlog_parser.add_argument("--project", required=True, help="Project identifier.")
+    run_backlog_parser.add_argument("--epic-id", required=True, help="Backlog epic identifier to execute.")
+    run_backlog_parser.add_argument("--goal", required=True, help="Repository goal used to prioritize epics.")
+    run_backlog_parser.add_argument(
+        "--roadmap",
+        default="docs/design/ROADMAP_AND_BACKLOG.md",
+        help="Roadmap Markdown file to analyze.",
+    )
+    run_backlog_parser.add_argument(
+        "--mode",
+        choices=["strong-model"],
+        default="strong-model",
+        help="Backlog execution mode. Only strong-model execution is supported.",
+    )
+    _add_execute_planner_argument(run_backlog_parser, help_text="Execute the configured planner backend.")
+    _add_release_execution_arguments(run_backlog_parser)
+    run_backlog_parser.add_argument(
+        "--objectives-dir",
+        default="objectives",
+        help="Directory where selected objective YAML should be written.",
     )
 
     status_parser = subparsers.add_parser("status", help="Show orchestrator status.")
@@ -475,6 +507,45 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(_backlog_plan_result(result), indent=2))
         return 0
 
+    if args.command == "run-backlog":
+        try:
+            if not args.execute_planner:
+                raise ValueError("run-backlog requires --execute-planner")
+            planner_backend = _codex_backlog_planner_backend(
+                project_id=args.project,
+                config_dir=Path(args.config_dir),
+            )
+            result = run_backlog(
+                project_id=args.project,
+                goal=args.goal,
+                roadmap_path=Path(args.roadmap),
+                selected_epic_id=args.epic_id,
+                config_dir=Path(args.config_dir),
+                contracts_dir=Path(args.contracts_dir),
+                runs_dir=Path(args.runs_dir),
+                objectives_dir=Path(args.objectives_dir),
+                mode=args.mode,
+                planner_backend=planner_backend,
+                verification_timeout_seconds=args.verification_timeout_seconds,
+                allow_dirty=args.allow_dirty,
+                commit_on_accept=args.commit_on_accept,
+                merge_on_accept=args.merge_on_accept,
+                push_on_accept=args.push_on_accept,
+                release_finalize=args.release_finalize,
+                integration_branch=args.integration_branch,
+                stop_on_failure=not args.continue_on_failure,
+                execution_mode=args.execution_mode,
+                debug_keep_artifacts=args.debug_keep_artifacts,
+                progress=_print_progress,
+            )
+        except KeyboardInterrupt:
+            parser.exit(130, "\ninterrupted: run-backlog stopped before completion\n")
+        except Exception as error:
+            parser.exit(2, f"error: {error}\n")
+
+        print(json.dumps(_backlog_run_result(result), indent=2))
+        return 0
+
     if args.command == "status":
         summaries = load_run_summaries(Path(args.runs_dir), limit=args.limit)
         if not summaries:
@@ -600,6 +671,19 @@ def _cleanup_result(result) -> dict[str, object]:
         "deleted_branches": result.deleted_branches,
         "errors": result.errors,
     }
+
+
+def _backlog_run_result(result) -> dict[str, object]:
+    output: dict[str, object] = {}
+    if getattr(result, "selected_epic_id", None) is not None:
+        output["selected_epic_id"] = result.selected_epic_id
+    if getattr(result, "objective_path", None) is not None:
+        output["objective_path"] = str(result.objective_path)
+    if getattr(result, "plan_path", None) is not None:
+        output["plan_path"] = str(result.plan_path)
+    if getattr(result, "release", None) is not None:
+        output["release"] = _release_run_result(result.release)
+    return output
 
 
 def _codex_planner_backend(*, project_id: str | None, config_dir: Path, runs_dir: Path) -> CodexPlannerBackend:
