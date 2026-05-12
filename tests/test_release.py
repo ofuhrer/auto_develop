@@ -73,6 +73,46 @@ class SlowFakeExecutor(FakeExecutor):
                 self._active -= 1
 
 
+class SharedSourceExecutor:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active = 0
+        self.max_active = 0
+
+    def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        prompt_text = prompt_path.read_text(encoding="utf-8")
+        task_id = "unknown"
+        if "task_id: demo-0001" in prompt_text:
+            task_id = "demo-0001"
+        elif "task_id: demo-0002" in prompt_text:
+            task_id = "demo-0002"
+        with self._lock:
+            self._active += 1
+            self.max_active = max(self.max_active, self._active)
+        try:
+            time.sleep(0.2)
+            shared = worktree_path / "src" / "shared.py"
+            shared.parent.mkdir(parents=True, exist_ok=True)
+            shared.write_text(f'LAST_TASK = "{task_id}"\n', encoding="utf-8")
+            stdout_path = output_dir / "executor_stdout.log"
+            stderr_path = output_dir / "executor_stderr.log"
+            stdout_path.write_text("shared source executor\n", encoding="utf-8")
+            stderr_path.write_text("", encoding="utf-8")
+            return ExecutorResult(
+                command=["shared-source-executor"],
+                exit_code=0,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                duration_seconds=0.01,
+                backend="fake",
+                model=None,
+            )
+        finally:
+            with self._lock:
+                self._active -= 1
+
+
 class FlakyVerificationExecutor(FakeExecutor):
     def __init__(self) -> None:
         self._attempts: dict[str, int] = {}
@@ -1086,11 +1126,11 @@ def test_analyze_contract_overlaps_classifies_broad_scope_as_parallel_blocker() 
     )
 
     assert report.has_blocking_findings is False
-    assert report.has_parallel_blockers is True
-    assert report.findings[0].severity == "broad"
+    assert report.has_parallel_blockers is False
+    assert report.findings[0].severity == "minor"
 
 
-def test_analyze_contract_overlaps_blocks_same_concrete_file() -> None:
+def test_analyze_contract_overlaps_treats_same_concrete_file_as_soft_finding() -> None:
     report = analyze_contract_overlaps(
         [
             _task_contract("demo-0001", allowed_files=["README.md"]),
@@ -1098,14 +1138,123 @@ def test_analyze_contract_overlaps_blocks_same_concrete_file() -> None:
         ]
     )
 
+    assert report.has_blocking_findings is False
+    assert report.findings[0].severity == "minor"
+
+
+def test_analyze_contract_overlaps_blocks_configured_unsafe_overlap_paths() -> None:
+    report = analyze_contract_overlaps(
+        [
+            _task_contract("demo-0001", allowed_files=["src/shared.py"]),
+            _task_contract("demo-0002", allowed_files=["src/shared.py"]),
+        ],
+        unsafe_overlap_paths=["src/shared.py"],
+    )
+
     assert report.has_blocking_findings is True
     assert report.findings[0].severity == "blocking"
+
+
+def test_run_release_parallel_serializes_same_non_unsafe_source_overlap_and_accepts(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, verification_command="true")
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract(
+            "demo-0001",
+            allowed_files=["src/shared.py"],
+            verification_commands=["true"],
+        ).model_dump(mode="json"),
+    )
+    _write_yaml(
+        contracts_dir / "demo-0002.yaml",
+        _task_contract(
+            "demo-0002",
+            allowed_files=["src/shared.py"],
+            verification_commands=["true"],
+        ).model_dump(mode="json"),
+    )
+
+    executor = SharedSourceExecutor()
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=executor,
+        execution_mode="parallel",
+    )
+
+    assert result.decision == Decision.ACCEPTED
+    assert executor.max_active == 1
+    log = result.log_path.read_text(encoding="utf-8")
+    assert "Contract overlap findings: 1" in log
+    assert "Execution DAG" in log
+
+
+def test_run_release_rejects_configured_unsafe_overlap_paths(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, unsafe_overlap_paths=["src/shared.py"])
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["src/shared.py"]).model_dump(mode="json"),
+    )
+    _write_yaml(
+        contracts_dir / "demo-0002.yaml",
+        _task_contract("demo-0002", allowed_files=["src/shared.py"]).model_dump(mode="json"),
+    )
+
+    try:
+        run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=SharedSourceExecutor(),
+            execution_mode="parallel",
+        )
+    except ValueError as error:
+        assert "release contracts are unsafe for parallel execution" in str(error)
+    else:
+        raise AssertionError("expected unsafe overlap configuration to hard-reject the release")
+
+
+def test_analyze_contract_overlaps_blocks_lockfiles_and_migrations_and_out_of_scope() -> None:
+    lockfile_report = analyze_contract_overlaps(
+        [
+            _task_contract("demo-0001", allowed_files=["poetry.lock"]),
+            _task_contract("demo-0002", allowed_files=["poetry.lock"]),
+        ]
+    )
+    migration_report = analyze_contract_overlaps(
+        [
+            _task_contract("demo-0001", allowed_files=["migrations/001_init.sql"]),
+            _task_contract("demo-0002", allowed_files=["migrations/001_init.sql"]),
+        ]
+    )
+    out_of_scope_report = analyze_contract_overlaps(
+        [
+            _task_contract("demo-0001", allowed_files=["**"]),
+            _task_contract("demo-0002", allowed_files=["src/app.py"]),
+        ]
+    )
+
+    assert lockfile_report.has_blocking_findings is True
+    assert migration_report.has_blocking_findings is True
+    assert out_of_scope_report.has_blocking_findings is True
 
 
 def _task_contract(
     task_id: str,
     budget_class: str = "S",
     allowed_files: list[str] | None = None,
+    verification_commands: list[str] | None = None,
 ) -> TaskContract:
     return TaskContract.model_validate(
         {
@@ -1118,7 +1267,7 @@ def _task_contract(
             "allowed_files": allowed_files or ["docs/**"],
             "forbidden_changes": [],
             "required_evidence": ["git diff", "test output"],
-            "verification": {"commands": ["test -d docs"]},
+            "verification": {"commands": verification_commands or ["test -d docs"]},
             "stop_conditions": ["Verification fails twice."],
         }
     )
@@ -1166,6 +1315,8 @@ def _write_demo_config(
     repo: Path,
     *,
     max_strong_model_calls_per_release: int = 10,
+    verification_command: str = "test -d docs",
+    unsafe_overlap_paths: list[str] | None = None,
 ) -> Path:
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
@@ -1181,7 +1332,8 @@ def _write_demo_config(
                 "model": "gpt-5.3-codex-spark",
                 "max_walltime_minutes": 5,
             },
-            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "verification_profiles": {"default": {"commands": [verification_command]}},
+            "unsafe_overlap_paths": unsafe_overlap_paths or [],
             "budget": {
                 "max_executor_attempts_per_task": 2,
                 "max_strong_model_calls_per_release": max_strong_model_calls_per_release,

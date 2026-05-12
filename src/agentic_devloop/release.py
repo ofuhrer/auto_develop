@@ -135,14 +135,15 @@ def run_release(
                 f"contract {contract_path} belongs to release {task.release_id}, expected {release_id}"
             )
     _ensure_no_existing_task_branches(config.repo_path, release_id, selected_tasks)
-    overlap_report = analyze_contract_overlaps(selected_tasks)
-    if overlap_report.has_blocking_findings or (
-        execution_mode == "parallel" and overlap_report.has_parallel_blockers
-    ):
+    overlap_report = analyze_contract_overlaps(
+        selected_tasks,
+        unsafe_overlap_paths=config.unsafe_overlap_paths,
+    )
+    if overlap_report.has_blocking_findings:
         details = "; ".join(
             f"{finding.first_task_id}/{finding.second_task_id}: {finding.pattern}"
             for finding in overlap_report.findings
-            if finding.severity in {"broad", "blocking"}
+            if finding.severity == "blocking"
         )
         raise ValueError(f"release contracts are unsafe for {execution_mode} execution: {details}")
 
@@ -1490,13 +1491,22 @@ def _context_chars_for_task(raw_log_path: Path, task_id: str) -> int:
     return 0
 
 
-def analyze_contract_overlaps(tasks: list[TaskContract]) -> ReleaseOverlapReport:
+def analyze_contract_overlaps(
+    tasks: list[TaskContract],
+    *,
+    unsafe_overlap_paths: list[str] | None = None,
+) -> ReleaseOverlapReport:
     findings: list[OverlapFinding] = []
+    unsafe_overlap_paths = unsafe_overlap_paths or []
     for index, first in enumerate(tasks):
         for second in tasks[index + 1 :]:
             for first_pattern in first.allowed_files:
                 for second_pattern in second.allowed_files:
-                    severity = _overlap_severity(first_pattern, second_pattern)
+                    severity = _overlap_severity(
+                        first_pattern,
+                        second_pattern,
+                        unsafe_overlap_paths=unsafe_overlap_paths,
+                    )
                     if severity is not None:
                         findings.append(
                             OverlapFinding(
@@ -1554,7 +1564,7 @@ def _release_dependency_map(
                 f"task {task.task_id} depends on unknown release task(s): {', '.join(unknown)}"
             )
     for finding in overlap_report.findings:
-        if finding.severity in {"minor", "broad"}:
+        if finding.severity == "minor":
             dependencies[finding.second_task_id].add(finding.first_task_id)
     return {
         task_id: sorted(values - completed_task_ids)
@@ -1563,14 +1573,88 @@ def _release_dependency_map(
     }
 
 
-def _overlap_severity(first: str, second: str) -> str | None:
+def _overlap_severity(
+    first: str,
+    second: str,
+    *,
+    unsafe_overlap_paths: list[str],
+) -> str | None:
     if not _patterns_overlap(first, second):
         return None
-    if _is_broad_pattern(first) or _is_broad_pattern(second):
-        return "broad"
-    if not _has_glob(first) and not _has_glob(second) and first == second:
+    if _is_hard_unsafe_overlap(first, second, unsafe_overlap_paths=unsafe_overlap_paths):
         return "blocking"
     return "minor"
+
+
+def _is_hard_unsafe_overlap(first: str, second: str, *, unsafe_overlap_paths: list[str]) -> bool:
+    return any(
+        (
+            _is_configured_unsafe_overlap(first, second, unsafe_pattern)
+            for unsafe_pattern in unsafe_overlap_paths
+        )
+    ) or any(
+        (
+            _is_forbidden_overlap_path(first),
+            _is_forbidden_overlap_path(second),
+            _is_out_of_scope_overlap_path(first),
+            _is_out_of_scope_overlap_path(second),
+            _is_generated_artifact_path(first),
+            _is_generated_artifact_path(second),
+            _is_lockfile_path(first),
+            _is_lockfile_path(second),
+            _is_migration_path(first),
+            _is_migration_path(second),
+        )
+    )
+
+
+def _is_configured_unsafe_overlap(first: str, second: str, unsafe_pattern: str) -> bool:
+    return _patterns_overlap(first, unsafe_pattern) or _patterns_overlap(second, unsafe_pattern)
+
+
+def _is_forbidden_overlap_path(pattern: str) -> bool:
+    normalized = pattern.strip().lstrip("./")
+    return normalized == ".git" or normalized.startswith(".git/")
+
+
+def _is_out_of_scope_overlap_path(pattern: str) -> bool:
+    normalized = pattern.strip()
+    return normalized in {"*", "**", "**/*", "./**", "./**/*", "/**", "/**/*"}
+
+
+def _is_generated_artifact_path(pattern: str) -> bool:
+    normalized = pattern.strip().lstrip("./").lower()
+    if normalized.startswith("dist/") or normalized.startswith("build/") or normalized.startswith("runs/"):
+        return True
+    if normalized.endswith(".min.js") or normalized.endswith(".generated.py"):
+        return True
+    return "/generated/" in normalized or normalized.startswith("generated/")
+
+
+def _is_lockfile_path(pattern: str) -> bool:
+    normalized = pattern.strip().lstrip("./")
+    lockfile_names = {
+        "poetry.lock",
+        "uv.lock",
+        "pdm.lock",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "Cargo.lock",
+        "Gemfile.lock",
+        "composer.lock",
+    }
+    return Path(normalized).name in lockfile_names
+
+
+def _is_migration_path(pattern: str) -> bool:
+    normalized = pattern.strip().lstrip("./").lower()
+    return (
+        "/migrations/" in normalized
+        or normalized.startswith("migrations/")
+        or normalized.endswith("/migrations")
+        or normalized.startswith("alembic/versions/")
+    )
 
 
 def _patterns_overlap(first: str, second: str) -> bool:
@@ -1590,23 +1674,6 @@ def _glob_prefix(pattern: str) -> str:
     if wildcard_index < 0:
         return pattern
     return pattern[:wildcard_index].rstrip("/")
-
-
-def _has_glob(pattern: str) -> bool:
-    return "*" in pattern or "?" in pattern
-
-
-def _is_broad_pattern(pattern: str) -> bool:
-    normalized = pattern.strip().rstrip("/")
-    if normalized in {"*", "**", "**/*"}:
-        return True
-    if normalized.endswith("/**"):
-        prefix = normalized.removesuffix("/**")
-        return "/" not in prefix
-    if normalized.endswith("/**/*"):
-        prefix = normalized.removesuffix("/**/*")
-        return "/" not in prefix
-    return False
 
 
 def _report(progress: Callable[[str], None] | None, message: str) -> None:

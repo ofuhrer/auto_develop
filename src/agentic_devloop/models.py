@@ -88,8 +88,21 @@ class ProjectConfig(StrictModel):
     model_roles: dict[str, ExecutorConfig] = Field(default_factory=dict)
     model_routing: ModelRouting = Field(default_factory=ModelRouting)
     verification_profiles: dict[str, VerificationProfile] = Field(min_length=1)
+    unsafe_overlap_paths: list[str] = Field(default_factory=list)
     budget: Budget
     repo_state_path: Path | None = None
+
+    @field_validator("unsafe_overlap_paths")
+    @classmethod
+    def unsafe_overlap_paths_must_not_be_empty_or_repo_wide(cls, values: list[str]) -> list[str]:
+        broad = {"*", "**", "**/*", "./**", "./**/*"}
+        for value in values:
+            normalized = value.strip()
+            if not normalized:
+                raise ValueError("unsafe overlap paths must not be empty")
+            if normalized in broad:
+                raise ValueError("unsafe overlap paths must not include repo-wide globs")
+        return values
 
     @model_validator(mode="after")
     def model_routing_roles_must_exist(self) -> "ProjectConfig":

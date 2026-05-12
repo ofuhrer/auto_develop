@@ -111,6 +111,12 @@ verification_profiles:
     commands:
       - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
 
+unsafe_overlap_paths:
+  - src/agentic_devloop/release.py
+  - repo_state/**
+  - contracts/**
+  - objectives/**
+
 budget:
   max_executor_attempts_per_task: 2
   max_strong_model_calls_per_release: 10
