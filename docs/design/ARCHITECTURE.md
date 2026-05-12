@@ -110,6 +110,26 @@ cheap deterministic checks first
 
 Current implementation supports configurable task execution roles through `model_roles` and `model_routing`. Worker roles may define `fallback_models`, and every executor attempt is recorded in evidence. Release queues classify overlapping allowed-file scopes before execution: minor overlap becomes a sequencing dependency, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected. In parallel mode the orchestrator builds a DAG from explicit `depends_on` fields and inferred overlap dependencies, submits ready tasks concurrently, monitors completions, and schedules newly unblocked tasks as outcomes arrive. Release-level planning supports deterministic scaffolding, strong-model budget reservation, explicit planner backend execution with planner stdout/stderr/metadata evidence, and `run-objective` composition from objective to generated contracts to release execution. Generated-contract admission rejects unsafe release IDs, missing diff evidence, weak stop conditions, whole-repo file scope, unknown or inconsistent verification profiles, and allowed-file counts above project budget. Strong-model review and model-based failure diagnosis are still explicit future control points rather than active automated calls.
 
+## Model Policy
+
+Model quality for autonomous development is operational, not just benchmark-based. A stronger model can still be the wrong default if it drifts during long loops, burns quota quickly, or retries noisy edits. The project config therefore separates model capability policy from routing mechanics:
+
+- `model_catalog` records known models, intended capabilities, budget class, and availability.
+- `model_roles` binds orchestration roles to concrete executor models and fallbacks.
+- `model_routing` maps task types and budget classes to roles.
+
+Recommended default hierarchy:
+
+```text
+strategic planner:      gpt-5.5
+runtime/review control: gpt-5.2
+coding worker:          gpt-5.3-codex
+micro repair:           gpt-5.3-codex-spark
+cheap routing/fallback: gpt-5.4-mini
+```
+
+The current runtime orchestrator remains deterministic Python. It owns state transitions, worktrees, DAG scheduling, finalization, evidence, and budget checks. Model-backed runtime supervision is a future extension point; it should consume the same bounded state and evidence rather than replacing deterministic governance.
+
 The `doctor` command is the preflight entry point for release governance. It checks repo cleanliness, dirty working trees, stale worktree-root entries, existing integration or task branches for a release, and model-routing warnings before a governed release starts.
 
 Merge finalization uses a local lock, rebases the task worktree onto the orchestrator-owned integration branch, then merges the accepted task branch into that feature branch. The feature branch, not `main`, is the release integration unit. Release finalization can then merge the feature branch into `main`, push the feature branch for PR review, or merge and push `main`. Contract-contained rebase conflicts get one bounded autonomous repair attempt followed by verification and one finalization retry. Remaining conflicts are surfaced as evidence.
@@ -121,6 +141,13 @@ Release runs write a human-cockpit `release.log` for live monitoring and retain 
 ## Context Controls
 
 Project state must be externalized. Do not keep long-lived state primarily inside model conversation history.
+
+Autonomous systems fail quickly when context grows without discipline. Keep memory layered:
+
+- Immutable project memory: human-curated architecture, API contracts, domain rules, and operational constraints.
+- Dynamic episodic memory: compressed summaries of recent runs, unresolved failures, branch state, and open TODOs.
+- Retrieval memory: searchable prior commits, logs, failures, and discussions, retrieved only when relevant.
+- Working memory: the current task contract plus the smallest necessary context slice.
 
 Required state files:
 

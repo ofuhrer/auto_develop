@@ -24,6 +24,26 @@ class ExecutorConfig(StrictModel):
         return values
 
 
+class ModelAvailability(StrEnum):
+    SUPPORTED = "supported"
+    UNSUPPORTED = "unsupported"
+    UNKNOWN = "unknown"
+
+
+class ModelCatalogEntry(StrictModel):
+    model: str = Field(min_length=1)
+    capabilities: list[str] = Field(default_factory=list)
+    budget_class: str = Field(min_length=1)
+    availability: ModelAvailability = ModelAvailability.UNKNOWN
+
+    @field_validator("capabilities")
+    @classmethod
+    def capabilities_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("model capabilities must not be empty")
+        return values
+
+
 class VerificationProfile(StrictModel):
     commands: list[str] = Field(min_length=1)
 
@@ -64,6 +84,7 @@ class ProjectConfig(StrictModel):
     default_base_branch: str = Field(min_length=1)
     worktree_root: Path
     executor: ExecutorConfig
+    model_catalog: dict[str, ModelCatalogEntry] = Field(default_factory=dict)
     model_roles: dict[str, ExecutorConfig] = Field(default_factory=dict)
     model_routing: ModelRouting = Field(default_factory=ModelRouting)
     verification_profiles: dict[str, VerificationProfile] = Field(min_length=1)

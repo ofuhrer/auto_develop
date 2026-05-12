@@ -295,7 +295,7 @@ def run_task(
             repair_result = _attempt_conflict_repair(
                 error=error,
                 task=task,
-                executor_configs=executor_configs,
+                executor_configs=conflict_repair_executor_configs(config, executor_configs),
                 executor=executor,
                 worktree_path=worktree_path,
                 scratch_dir=scratch_dir,
@@ -345,6 +345,19 @@ def executor_configs_for_task(config: ProjectConfig, task: TaskContract) -> list
     if role is None:
         role = config.model_routing.default_role
 
+    return _executor_configs_for_role(config, role)
+
+
+def conflict_repair_executor_configs(
+    config: ProjectConfig,
+    default_executor_configs: list[ExecutorConfig],
+) -> list[ExecutorConfig]:
+    if "repair" not in config.model_roles:
+        return default_executor_configs
+    return _executor_configs_for_role(config, "repair")
+
+
+def _executor_configs_for_role(config: ProjectConfig, role: str) -> list[ExecutorConfig]:
     if role in config.model_roles:
         primary = config.model_roles[role]
     else:

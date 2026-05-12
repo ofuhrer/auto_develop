@@ -16,6 +16,8 @@ from agentic_devloop.models import (
     FailureDiagnosisInput,
     FailureDiagnosisSourceMetadata,
     FailureEvidenceExcerpt,
+    ModelAvailability,
+    ModelCatalogEntry,
     ProjectConfig,
     ReleaseObjective,
     ReviewDecision,
@@ -36,8 +38,49 @@ def test_sample_yaml_files_validate() -> None:
     contract = load_yaml_model(ROOT / "contracts" / "rr-0001.yaml", TaskContract)
 
     assert project.project_id == "rust_rockfall"
+    assert project.model_catalog["coding_worker"].model == "gpt-5.3-codex"
+    assert project.model_catalog["micro_repair"].availability == ModelAvailability.UNKNOWN
     assert objective.release_id == "v0.8.0"
     assert contract.task_id == "rr-0001"
+
+
+def test_project_config_accepts_model_catalog_and_legacy_configs() -> None:
+    legacy = ProjectConfig.model_validate(
+        {
+            "project_id": "legacy",
+            "repo_path": "/tmp/legacy",
+            "default_base_branch": "main",
+            "worktree_root": "/tmp/legacy-worktrees",
+            "executor": {
+                "type": "codex_cli",
+                "model": "worker",
+                "max_walltime_minutes": 5,
+            },
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        }
+    )
+    modern = ProjectConfig.model_validate(
+        legacy.model_dump(mode="python")
+        | {
+            "model_catalog": {
+                "worker": ModelCatalogEntry(
+                    model="gpt-5.3-codex",
+                    capabilities=["implementation"],
+                    budget_class="M",
+                    availability=ModelAvailability.UNKNOWN,
+                )
+            }
+        }
+    )
+
+    assert legacy.model_catalog == {}
+    assert modern.model_catalog["worker"].capabilities == ["implementation"]
 
 
 def test_missing_required_field_fails_clearly() -> None:

@@ -99,18 +99,61 @@ repo_state_path: repo_state/my_project
 
 executor:
   type: codex_cli
-  model: gpt-5.4-mini
+  model: gpt-5.3-codex
   max_walltime_minutes: 25
+  fallback_models:
+    - gpt-5.4-mini
+
+model_catalog:
+  strategic_planner:
+    model: gpt-5.5
+    capabilities: [strategic_planning, hard_debugging, semantic_review]
+    budget_class: XL
+    availability: supported
+  runtime_supervisor:
+    model: gpt-5.2
+    capabilities: [runtime_supervision, review, long_running_stability]
+    budget_class: L
+    availability: unknown
+  coding_worker:
+    model: gpt-5.3-codex
+    capabilities: [implementation, refactoring, tests]
+    budget_class: M
+    availability: unknown
+  micro_repair:
+    model: gpt-5.3-codex-spark
+    capabilities: [conflict_repair, lint_repair, tiny_patches]
+    budget_class: XS
+    availability: unknown
+  cheap_router:
+    model: gpt-5.4-mini
+    capabilities: [routing, summarization, fallback_worker]
+    budget_class: S
+    availability: supported
 
 model_roles:
   worker:
     type: codex_cli
-    model: gpt-5.4-mini
+    model: gpt-5.3-codex
     max_walltime_minutes: 25
+    fallback_models:
+      - gpt-5.4-mini
+  repair:
+    type: codex_cli
+    model: gpt-5.3-codex-spark
+    max_walltime_minutes: 10
+    fallback_models:
+      - gpt-5.4-mini
+  router:
+    type: codex_cli
+    model: gpt-5.4-mini
+    max_walltime_minutes: 10
   reviewer:
     type: codex_cli
-    model: gpt-5.5
+    model: gpt-5.2
     max_walltime_minutes: 20
+    fallback_models:
+      - gpt-5.5
   planner:
     type: codex_cli
     model: gpt-5.5
@@ -119,6 +162,7 @@ model_roles:
 model_routing:
   default_role: worker
   task_type_roles:
+    documentation: router
     release_preparation: reviewer
   budget_class_roles:
     L: reviewer
@@ -158,10 +202,23 @@ Important config fields:
 - `worktree_root`: absolute path where agent worktrees are created.
 - `repo_state_path`: optional project state directory. Relative paths resolve against the orchestrator repo first.
 - `executor`: default execution agent.
-- `model_roles`: named model roles for workers, reviewers, and planners.
+- `model_catalog`: advisory model policy with capabilities, budget class, and support status.
+- `model_roles`: named model roles for workers, reviewers, planners, routers, and repair agents.
 - `model_routing`: routing rules from task type or budget class to model role.
 - `verification_profiles`: named command sets task contracts can reference.
 - `budget`: deterministic limits used during planning and review.
+
+### Model Policy
+
+The recommended hierarchy is:
+
+- `gpt-5.5` for strategic planning, hard debugging, and semantic review.
+- `gpt-5.2` for runtime/review supervision where long-session stability matters.
+- `gpt-5.3-codex` for implementation workers.
+- `gpt-5.3-codex-spark` for tiny repair loops, when supported by the account.
+- `gpt-5.4-mini` for cheap routing, summarization, and safe fallbacks.
+
+The current `agent-loop` runtime orchestrator is deterministic Python. It schedules tasks, manages branches, verifies work, and writes evidence. Models are bounded executors or planners behind explicit roles. Because model availability can change by account and over time, mark uncertain catalog entries as `unknown` and keep at least one known supported fallback for worker and repair roles.
 
 ## Step 4: Run Doctor
 

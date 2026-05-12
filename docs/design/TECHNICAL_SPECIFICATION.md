@@ -52,18 +52,61 @@ worktree_root: /path/to/worktrees/rust_rockfall
 
 executor:
   type: codex_cli
-  model: gpt-5.4-mini
+  model: gpt-5.3-codex
   max_walltime_minutes: 25
+  fallback_models:
+    - gpt-5.4-mini
+
+model_catalog:
+  strategic_planner:
+    model: gpt-5.5
+    capabilities: [strategic_planning, hard_debugging, semantic_review]
+    budget_class: XL
+    availability: supported
+  runtime_supervisor:
+    model: gpt-5.2
+    capabilities: [runtime_supervision, review, long_running_stability]
+    budget_class: L
+    availability: unknown
+  coding_worker:
+    model: gpt-5.3-codex
+    capabilities: [implementation, refactoring, tests]
+    budget_class: M
+    availability: unknown
+  micro_repair:
+    model: gpt-5.3-codex-spark
+    capabilities: [conflict_repair, lint_repair, tiny_patches]
+    budget_class: XS
+    availability: unknown
+  cheap_router:
+    model: gpt-5.4-mini
+    capabilities: [routing, summarization, fallback_worker]
+    budget_class: S
+    availability: supported
 
 model_roles:
   worker:
     type: codex_cli
-    model: gpt-5.4-mini
+    model: gpt-5.3-codex
     max_walltime_minutes: 25
+    fallback_models:
+      - gpt-5.4-mini
+  repair:
+    type: codex_cli
+    model: gpt-5.3-codex-spark
+    max_walltime_minutes: 10
+    fallback_models:
+      - gpt-5.4-mini
+  router:
+    type: codex_cli
+    model: gpt-5.4-mini
+    max_walltime_minutes: 10
   reviewer:
     type: codex_cli
-    model: gpt-5.5
+    model: gpt-5.2
     max_walltime_minutes: 20
+    fallback_models:
+      - gpt-5.5
   planner:
     type: codex_cli
     model: gpt-5.5
@@ -72,6 +115,7 @@ model_roles:
 model_routing:
   default_role: worker
   task_type_roles:
+    documentation: router
     scientific_validation: reviewer
     release_preparation: reviewer
   budget_class_roles:
@@ -95,6 +139,8 @@ budget:
 
 repo_state_path: repo_state/rust_rockfall
 ```
+
+`model_catalog` is advisory policy, not an execution backend. It lets `doctor` report whether configured roles point at supported, unsupported, or unproven models. `model_roles` remains the execution source of truth. If a primary model is unavailable, bounded executor attempts can fall back through `fallback_models`; conflict repair uses the `repair` role when configured.
 
 ### ReleaseObjective
 

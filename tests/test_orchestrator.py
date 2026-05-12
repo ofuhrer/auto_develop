@@ -14,6 +14,7 @@ from agentic_devloop.models import (
     FailureDiagnosisGuidance,
     FailureDiagnosisInput,
     FailureDiagnosisSourceMetadata,
+    ProjectConfig,
 )
 from agentic_devloop import orchestrator as orchestrator_module
 from agentic_devloop.orchestrator import run_task
@@ -243,6 +244,51 @@ def test_executor_attempts_stream_codex_output_to_progress(tmp_path, monkeypatch
         in progress
     )
     assert "agent task=demo-0001 phase=executor attempt=1 stream=stderr | agent warns" in progress
+
+
+def test_conflict_repair_uses_configured_repair_role() -> None:
+    config = ProjectConfig.model_validate(
+        {
+            "project_id": "demo",
+            "repo_path": "/tmp/repo",
+            "default_base_branch": "main",
+            "worktree_root": "/tmp/worktrees",
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex",
+                "fallback_models": ["gpt-5.4-mini"],
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {
+                "worker": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex",
+                    "fallback_models": ["gpt-5.4-mini"],
+                    "max_walltime_minutes": 5,
+                },
+                "repair": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "fallback_models": ["gpt-5.4-mini"],
+                    "max_walltime_minutes": 5,
+                }
+            },
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        }
+    )
+
+    configs = orchestrator_module.conflict_repair_executor_configs(
+        config,
+        [ExecutorConfig(type="codex_cli", model="worker", max_walltime_minutes=5)],
+    )
+
+    assert [config.model for config in configs] == ["gpt-5.3-codex-spark", "gpt-5.4-mini"]
 
 
 def test_run_task_uses_verification_profile_and_writes_phase3_evidence(tmp_path) -> None:

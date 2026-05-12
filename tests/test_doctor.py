@@ -37,19 +37,46 @@ def test_run_doctor_reports_repo_git_worktree_release_and_model_risks(tmp_path) 
             "worktree_root": str(tmp_path / "worktrees"),
             "executor": {
                 "type": "codex_cli",
-                "model": "gpt-5.3-codex-spark",
+                "model": "gpt-5.3-codex",
                 "max_walltime_minutes": 5,
+            },
+            "model_catalog": {
+                "coding_worker": {
+                    "model": "gpt-5.3-codex",
+                    "capabilities": ["implementation"],
+                    "budget_class": "M",
+                    "availability": "unsupported",
+                },
+                "micro_repair": {
+                    "model": "gpt-5.3-codex-spark",
+                    "capabilities": ["conflict_repair"],
+                    "budget_class": "XS",
+                    "availability": "unknown",
+                },
+                "cheap_router": {
+                    "model": "gpt-5.4-mini",
+                    "capabilities": ["fallback_worker"],
+                    "budget_class": "S",
+                    "availability": "supported",
+                },
             },
             "model_roles": {
                 "worker": {
                     "type": "codex_cli",
+                    "model": "gpt-5.3-codex",
+                    "fallback_models": ["gpt-5.4-mini"],
+                    "max_walltime_minutes": 5,
+                },
+                "repair": {
+                    "type": "codex_cli",
                     "model": "gpt-5.3-codex-spark",
                     "fallback_models": ["gpt-5.4-mini"],
                     "max_walltime_minutes": 5,
-                }
+                },
             },
             "model_routing": {
                 "default_role": "worker",
+                "escalation_role": "repair",
             },
             "verification_profiles": {
                 "default": {
@@ -83,7 +110,8 @@ def test_run_doctor_reports_repo_git_worktree_release_and_model_risks(tmp_path) 
         "cargo fmt --check",
         "cargo test --all-targets --all-features",
     ]
-    assert payload["model_routing"]["resolved_roles"]["worker"]["model"] == "gpt-5.3-codex-spark"
+    assert payload["model_routing"]["resolved_roles"]["worker"]["model"] == "gpt-5.3-codex"
+    assert payload["model_routing"]["resolved_roles"]["worker"]["catalog"]["availability"] == "unsupported"
     assert payload["release"]["integration_branch"] == ["feature/v1.0.0"]
     assert payload["release"]["task_branches"] == ["agent/v1.0.0/demo-0001"]
 
@@ -92,7 +120,9 @@ def test_run_doctor_reports_repo_git_worktree_release_and_model_risks(tmp_path) 
     assert any("stale entries" in message for message in messages)
     assert any("integration branch already exists" in message for message in messages)
     assert any("task branches already exist" in message for message in messages)
-    assert any("known unsupported model gpt-5.3-codex-spark" in message for message in messages)
+    assert any("primary model gpt-5.3-codex, which model_catalog marks unsupported" in message for message in messages)
+    assert any("primary model gpt-5.3-codex-spark, which model_catalog marks unknown" in message for message in messages)
+    assert not any("role worker has no confirmed supported fallback" in message for message in messages)
 
 
 def _write_yaml(path: Path, data: dict[str, object]) -> None:

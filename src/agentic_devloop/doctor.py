@@ -4,11 +4,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from agentic_devloop.config import load_project_config
-from agentic_devloop.models import ExecutorConfig, ProjectConfig
+from agentic_devloop.models import ExecutorConfig, ModelAvailability, ModelCatalogEntry, ProjectConfig
 from agentic_devloop.process import run_process
 
 
-UNSUPPORTED_WORKER_MODELS = {"gpt-5.3-codex-spark"}
+DEFAULT_MODEL_CATALOG = {
+    "gpt-5.3-codex-spark": ModelCatalogEntry(
+        model="gpt-5.3-codex-spark",
+        capabilities=["micro_repair"],
+        budget_class="XS",
+        availability=ModelAvailability.UNSUPPORTED,
+    )
+}
 
 
 @dataclass(frozen=True)
@@ -173,8 +180,17 @@ def _build_model_routing_summary(config: ProjectConfig) -> dict[str, object]:
                 "type": executor_config.type,
                 "model": executor_config.model,
                 "fallback_models": executor_config.fallback_models,
+                "catalog": _model_catalog_summary(config, executor_config.model),
+                "fallback_catalog": {
+                    model: _model_catalog_summary(config, model)
+                    for model in executor_config.fallback_models
+                },
             }
             for role, executor_config in resolved_roles.items()
+        },
+        "model_catalog": {
+            name: entry.model_dump(mode="json")
+            for name, entry in config.model_catalog.items()
         },
     }
 
@@ -193,24 +209,78 @@ def _model_routing_diagnostics(
     diagnostics: list[DoctorDiagnostic] = []
     for role, summary in resolved_roles.items():
         model = str(summary["model"])
-        if model in UNSUPPORTED_WORKER_MODELS:
-            diagnostics.append(
-                DoctorDiagnostic(
-                    check="model_routing",
-                    severity="warning",
-                    message=f"role {role} resolves to known unsupported model {model}. Switch the role to a supported worker primary before release execution.",
-                )
-            )
+        primary_entry = _model_catalog_entry(config, model)
+        diagnostics.extend(_model_availability_diagnostics(role=role, model=model, entry=primary_entry, primary=True))
         fallback_models = summary["fallback_models"]
-        if any(fallback in UNSUPPORTED_WORKER_MODELS for fallback in fallback_models):
+        fallback_entries = [_model_catalog_entry(config, str(fallback)) for fallback in fallback_models]
+        for fallback, entry in zip(fallback_models, fallback_entries):
+            diagnostics.extend(_model_availability_diagnostics(role=role, model=str(fallback), entry=entry, primary=False))
+        if _model_unusable(primary_entry) and not any(_model_supported(entry) for entry in fallback_entries):
             diagnostics.append(
                 DoctorDiagnostic(
                     check="model_routing",
                     severity="warning",
-                    message=f"role {role} includes known unsupported fallback model(s): {', '.join(fallback for fallback in fallback_models if fallback in UNSUPPORTED_WORKER_MODELS)}",
+                    message=f"role {role} has no confirmed supported fallback after unavailable primary model {model}.",
                 )
             )
     return diagnostics
+
+
+def _model_catalog_summary(config: ProjectConfig, model: str) -> dict[str, object]:
+    entry = _model_catalog_entry(config, model)
+    if entry is None:
+        return {"model": model, "availability": ModelAvailability.UNKNOWN.value}
+    return entry.model_dump(mode="json")
+
+
+def _model_catalog_entry(config: ProjectConfig, model: str) -> ModelCatalogEntry | None:
+    for key, entry in config.model_catalog.items():
+        if key == model or entry.model == model:
+            return entry
+    return DEFAULT_MODEL_CATALOG.get(model)
+
+
+def _model_availability_diagnostics(
+    *,
+    role: str,
+    model: str,
+    entry: ModelCatalogEntry | None,
+    primary: bool,
+) -> list[DoctorDiagnostic]:
+    subject = "resolves to primary model" if primary else "includes fallback model"
+    if entry is None:
+        return [
+            DoctorDiagnostic(
+                check="model_routing",
+                severity="warning",
+                message=f"role {role} {subject} {model}, which is not listed in model_catalog; availability is unknown.",
+            )
+        ]
+    if entry.availability == ModelAvailability.SUPPORTED:
+        return []
+    if entry.availability == ModelAvailability.UNSUPPORTED:
+        return [
+            DoctorDiagnostic(
+                check="model_routing",
+                severity="warning",
+                message=f"role {role} {subject} {model}, which model_catalog marks unsupported.",
+            )
+        ]
+    return [
+        DoctorDiagnostic(
+            check="model_routing",
+            severity="warning",
+            message=f"role {role} {subject} {model}, which model_catalog marks unknown; run a small probe or keep a supported fallback before release execution.",
+        )
+    ]
+
+
+def _model_supported(entry: ModelCatalogEntry | None) -> bool:
+    return entry is not None and entry.availability == ModelAvailability.SUPPORTED
+
+
+def _model_unusable(entry: ModelCatalogEntry | None) -> bool:
+    return entry is None or entry.availability != ModelAvailability.SUPPORTED
 
 
 def _is_git_repo(repo_path: Path) -> bool:
