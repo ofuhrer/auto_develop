@@ -1,192 +1,67 @@
 # Agentic Devloop
 
-Agentic Devloop is a local CLI orchestrator for bounded AI development tasks.
+`agentic-devloop` is a local CLI orchestrator for bounded autonomous development tasks. It creates isolated Git worktrees, runs coding agents inside explicit task contracts, verifies results deterministically, collects evidence, and optionally finalizes accepted work through Git.
 
-The first implementation target is a pragmatic loop that can:
+The CLI entry point is:
 
-1. Load project and task definitions.
-2. Create isolated Git worktrees.
-3. Run a bounded coding agent.
-4. Run deterministic verification.
-5. Collect evidence.
-6. Produce an accept, reject, or escalate decision.
+```bash
+agent-loop
+```
 
-See [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) and [docs/design](docs/design) for the design documents.
-
-## Development
+## Quick Start
 
 Install locally:
 
 ```bash
 uv venv
-uv pip install ".[dev]"
-```
-
-For editable development installs in environments that ignore editable `.pth` path entries, use:
-
-```bash
-PYTHONPATH=src uv run agent-loop --help
-```
-
-Run tests:
-
-```bash
-pytest
+uv pip install -e ".[dev]"
 ```
 
 Check the CLI:
 
 ```bash
-agent-loop --help
-agent-loop --version
+.venv/bin/agent-loop --help
 ```
 
-Run the local CLI smoke checks:
+If the editable console script cannot import the package, use:
 
 ```bash
-PYTHONPATH=src uv run agent-loop --help
-PYTHONPATH=src uv run agent-loop --version
-PYTHONPATH=src uv run agent-loop config --project rust_rockfall
+PYTHONPATH=src .venv/bin/python -m agentic_devloop --help
 ```
 
-Planner-backend smoke checks:
+Run tests:
 
 ```bash
-PYTHONPATH=src uv run agent-loop plan-release --objective objectives/v0.8.0.yaml
-PYTHONPATH=src uv run agent-loop plan-release \
-  --objective objectives/v0.8.0.yaml \
-  --mode strong-model \
-  --project auto_develop
-PYTHONPATH=src uv run agent-loop run-objective \
-  --project auto_develop \
-  --objective objectives/v0.8.0.yaml
-PYTHONPATH=src uv run agent-loop status --limit 5
+.venv/bin/python -m pytest
 ```
 
-Load a project config:
+## Typical Workflow
 
-```bash
-agent-loop config --project rust_rockfall
-```
+1. Configure a target repository in `configs/<project>.yaml`.
+2. Write or generate an objective in `objectives/<release>.yaml`.
+3. Write or generate bounded task contracts in `contracts/`.
+4. Run one contract with `agent-loop run-task`, or run a release queue with `agent-loop run-release`.
+5. Monitor `runs/<release-run-id>/release.log`.
+6. Review evidence under `runs/`.
+7. Push the feature branch or merge to `main` only when the project policy allows it.
 
-Run one bounded task:
-
-```bash
-agent-loop run-task \
-  --project rust_rockfall \
-  --contract contracts/rr-0001.yaml
-```
-
-`run-task` creates an isolated worktree, writes an executor prompt, runs the configured executor, runs the contract verification commands, collects an evidence bundle, and writes `decision.yaml`.
-
-Run an ordered release task queue:
-
-```bash
-agent-loop run-release \
-  --project auto_develop \
-  --release sprint-0
-```
-
-`run-release` executes existing task contracts. If no `--contract` arguments are provided, it reads `current_tasks` from `repo_state/<project>/release_plan.yaml` and maps each task ID to `contracts/<task-id>.yaml`. Sequential mode runs the queue in order. Parallel mode lets the orchestrator build a dependency DAG from explicit `depends_on` fields and inferred file-overlap dependencies, submit ready tasks concurrently, and continue scheduling as task outcomes arrive. It stops after the first non-accepted task by default and writes `release_summary.json` plus `release_review.md` under `runs/`.
-
-By default the orchestrator owns `feature/<release>` as the release integration branch. Task branches are based on that feature branch, and `--merge-on-accept` merges accepted task branches into the feature branch, not directly into `main`. Use `--release-finalize merge-main` after the release is accepted to merge the feature branch into `main`, `--release-finalize push-feature` to push the feature branch for PR review, or `--release-finalize push-main` to merge and push `main`.
-
-Before running tasks, `run-release` classifies overlapping `allowed_files` patterns. Minor overlap becomes a sequencing dependency in parallel mode, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected.
-
-`run-release` also writes a filtered multiplexed progress log at `runs/<release-run-id>/release.log` and prints that path as `release_log=...` at startup. Full unfiltered agent stdout/stderr is retained in `release.raw.log`. Monitor a live run with:
-
-```bash
-tail -f runs/<release-run-id>/release.log
-```
-
-Before starting, `run-release` requires the configured project `worktree_root` to be empty and rejects pre-existing task branches for the release. This prevents stale debug or unmerged task artifacts from contaminating a new release run. Task worktrees and merged task branches are removed after each task by default. Accepted work that was not finalized, unmerged accepted branches, and failed-finalization branches are preserved to keep work reachable. Use `--debug-keep-artifacts` to preserve all task artifacts for inspection.
-
-If a debug run leaves stale release artifacts behind, inspect them first:
-
-```bash
-agent-loop cleanup --project auto_develop --release v1.0.0
-```
-
-Remove matching task worktrees and `agent/<release>/*` branches only after reviewing the dry run:
-
-```bash
-agent-loop cleanup --project auto_develop --release v1.0.0 --force
-```
-
-Add `--include-integration-branch` only when the orchestrator-owned `feature/<release>` branch is no longer needed.
-
-Create a conservative release contract plan:
-
-```bash
-agent-loop plan-release \
-  --objective objectives/v0.8.0.yaml
-```
-
-`plan-release` validates whether a release objective has matching contracts and writes `contract_plan.json` under `runs/`. Deterministic mode emits conservative planning scaffolds. Strong-model mode reserves planner budget and writes `planner_prompt.md`; add `--execute-planner` to call the configured planner backend, persist planner stdout/stderr/metadata paths, parse generated contracts, and run admission checks.
-
-To reserve strong-model planning budget and write the planner prompt artifact:
-
-```bash
-agent-loop plan-release \
-  --objective objectives/v0.8.0.yaml \
-  --mode strong-model \
-  --project auto_develop \
-  --execute-planner
-```
-
-Reviewing generated planning artifacts is a manual step:
-
-1. Inspect `contract_plan.json` for objective coverage, missing tasks, and scope drift.
-2. If `--mode strong-model` was used, inspect `planner_prompt.md` for the draft inputs that were sent to the planner.
-3. Approve the draft only when the proposed release queue stays within the contract and the follow-up task contracts remain bounded.
-4. Promote the approved plan into explicit task contracts before running `run-release`.
-
-To plan, write generated contracts, and immediately execute the resulting queue:
-
-```bash
-agent-loop run-objective \
-  --project auto_develop \
-  --objective objectives/v0.8.0.yaml \
-  --mode strong-model \
-  --execute-planner
-```
-
-`run-objective` applies the same generated-contract validation as `plan-release`, writes accepted contract drafts to `contracts/`, then runs those exact contract paths with `run-release`. With a project config, generated contracts are rejected if they reference unknown verification profiles or exceed `budget.max_changed_files_per_task` allowed-file entries.
-
-To provide an explicit queue:
+Example:
 
 ```bash
 agent-loop run-release \
   --project auto_develop \
   --release sprint-0 \
-  --contract contracts/ad-0001.yaml
+  --merge-on-accept \
+  --release-finalize push-feature
 ```
 
-To let an accepted task complete the Git path automatically:
+## Documentation
 
-```bash
-agent-loop run-task \
-  --project auto_develop \
-  --contract contracts/ad-0001.yaml \
-  --push-on-accept
-```
+- [Documentation Index](docs/README.md)
+- [User Guide](docs/USER_GUIDE.md)
+- [Development Guide](docs/DEVELOPMENT.md)
+- [Architecture](docs/design/ARCHITECTURE.md)
+- [Roadmap and Backlog](docs/design/ROADMAP_AND_BACKLOG.md)
+- [Technical Specification](docs/design/TECHNICAL_SPECIFICATION.md)
 
-`--push-on-accept` commits accepted changes in the task worktree, merges the task branch into the configured base branch, and pushes the base branch to `origin`. Use `--merge-on-accept` to commit and merge without pushing, or `--commit-on-accept` to only commit in the task worktree.
-
-Repo-specific context can be stored under `repo_state/<project>/` and referenced with `repo_state_path` in the project config. Relative paths resolve against the controller repo first and the target repo second, which lets external projects use state kept in this orchestration repo. `run-task` injects selected state into executor prompts and writes `model_call_metadata.json` into the evidence bundle.
-
-Scientific and benchmark contracts can set `task_type`, use named verification profiles, and declare fixture/tolerance permissions. Phase 3 evidence includes `scientific_review.yaml`, optional `benchmark_delta.json`, and optional `remote_dispatch.yaml`.
-
-Project configs may define `model_roles` and `model_routing` so low-risk tasks use cheap workers while large or release-preparation tasks route to stronger models. Executor roles can also define `fallback_models`; retries and fallback attempts are persisted in `executor_attempts.json`, and executor failures write `failure_diagnosis.yaml`.
-
-Accepted-task finalization uses a local `.git/agent-main.lock`, rebases the task worktree onto the latest base branch available locally or through `origin/<base>`, then merges and pushes when requested.
-
-If a rebase conflict is limited to files allowed by the task contract, the orchestrator writes a bounded conflict-repair prompt, runs one repair worker attempt, reruns verification, and retries finalization once. Unresolved conflicts are escalated with `conflict_repair.yaml` and `finalization.yaml` evidence.
-
-Show recent run summaries:
-
-```bash
-agent-loop status --limit 5
-```
-
-Before running against `rust_rockfall`, update [configs/rust_rockfall.yaml](configs/rust_rockfall.yaml) so `repo_path` and `worktree_root` point to real local paths.
+Agent-specific repository instructions are in [AGENTS.md](AGENTS.md).
