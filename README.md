@@ -97,7 +97,7 @@ Before running tasks, `run-release` classifies overlapping `allowed_files` patte
 tail -f runs/<release-run-id>/release.log
 ```
 
-Before starting, `run-release` requires the configured project `worktree_root` to be empty. This prevents stale debug or unmerged task worktrees from contaminating a new release run. Task worktrees and merged task branches are removed after each task by default. Accepted work that was not finalized, unmerged accepted branches, and failed-finalization branches are preserved to keep work reachable. Use `--debug-keep-artifacts` to preserve all task artifacts for inspection.
+Before starting, `run-release` requires the configured project `worktree_root` to be empty and rejects pre-existing task branches for the release. This prevents stale debug or unmerged task artifacts from contaminating a new release run. Task worktrees and merged task branches are removed after each task by default. Accepted work that was not finalized, unmerged accepted branches, and failed-finalization branches are preserved to keep work reachable. Use `--debug-keep-artifacts` to preserve all task artifacts for inspection.
 
 Create a conservative release contract plan:
 

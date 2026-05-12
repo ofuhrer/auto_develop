@@ -112,7 +112,7 @@ Current implementation supports configurable task execution roles through `model
 
 Merge finalization uses a local lock, rebases the task worktree onto the latest available base branch, then merges into `main`. Contract-contained rebase conflicts get one bounded autonomous repair attempt followed by verification and one finalization retry. Remaining conflicts are surfaced as evidence.
 
-Release runs write a multiplexed `release.log` for live monitoring. The log records orchestration events and live executor stdout/stderr lines with task, phase, attempt, and stream labels, so concurrent workers can share one monitorable log. A release refuses to start when the configured project worktree root already contains worktrees. Release cleanup removes task worktrees plus merged task branches by default. Accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches are preserved so accepted work remains reachable. Debug mode can retain all artifacts when post-mortem inspection is needed.
+Release runs write a multiplexed `release.log` for live monitoring. The log records orchestration events and live executor stdout/stderr lines with task, phase, attempt, and stream labels, so concurrent workers can share one monitorable log. A release refuses to start when the configured project worktree root already contains worktrees or selected task branches already exist. Release cleanup removes task worktrees plus merged task branches by default. Accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches are preserved so accepted work remains reachable. Debug mode can retain all artifacts when post-mortem inspection is needed.
 
 ## Context Controls
 

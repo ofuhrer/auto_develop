@@ -19,7 +19,8 @@ from agentic_devloop.models import (
     ReviewDecision,
     TaskContract,
 )
-from agentic_devloop.orchestrator import ExecutorProtocol, TaskRunResult, run_task
+from agentic_devloop.orchestrator import ExecutorProtocol, TaskRunResult, branch_name, run_task
+from agentic_devloop.process import run_process
 from agentic_devloop.yaml_io import load_yaml_model
 
 
@@ -77,6 +78,7 @@ def run_release(
     if not selected_contracts:
         raise ValueError(f"no contracts found for release {release_id}")
     selected_tasks = [load_yaml_model(path, TaskContract) for path in selected_contracts]
+    _ensure_no_existing_task_branches(config.repo_path, release_id, selected_tasks)
     overlap_report = analyze_contract_overlaps(selected_tasks)
     if overlap_report.has_blocking_findings or (
         execution_mode == "parallel" and overlap_report.has_parallel_blockers
@@ -199,6 +201,37 @@ def _ensure_no_existing_worktrees(worktree_root: Path) -> None:
     raise ValueError(
         "project worktree root is not clean before release start: "
         f"{listed}{suffix}. Inspect or remove stale worktrees before running run-release."
+    )
+
+
+def _ensure_no_existing_task_branches(
+    repo_path: Path,
+    release_id: str,
+    tasks: list[TaskContract],
+) -> None:
+    existing: list[str] = []
+    for task in tasks:
+        branch = branch_name(release_id, task.task_id)
+        result = run_process(
+            ["git", "branch", "--list", branch],
+            cwd=repo_path,
+            timeout_seconds=30,
+        )
+        if result.exit_code != 0:
+            raise ValueError(
+                "could not inspect existing release task branches: "
+                f"{result.stderr.strip() or result.stdout.strip()}"
+            )
+        if result.stdout.strip():
+            existing.append(branch)
+
+    if not existing:
+        return
+    listed = ", ".join(existing[:5])
+    suffix = "" if len(existing) <= 5 else f", ... (+{len(existing) - 5} more)"
+    raise ValueError(
+        "release task branches already exist before release start: "
+        f"{listed}{suffix}. Merge or delete stale branches before running run-release."
     )
 
 

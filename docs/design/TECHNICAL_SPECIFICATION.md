@@ -306,12 +306,13 @@ Finalization conflicts are captured in evidence. Contract-contained rebase confl
 1. Load and validate `ProjectConfig`.
 2. Fail fast unless the configured project `worktree_root` is empty.
 3. Resolve an ordered contract queue from explicit `--contract` arguments or `repo_state/<project>/release_plan.yaml`.
-4. Classify `allowed_files` overlap.
-5. Run each contract through the existing `run-task` state machine.
-6. Stop after the first non-accepted task unless `--continue-on-failure` is set.
-7. Mirror progress and live executor stdout/stderr to `runs/<release-run-id>/release.log`.
-8. Remove task worktrees and merged task branches unless `--debug-keep-artifacts` is set; preserve accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches.
-9. Persist `runs/<release-run-id>/release_summary.json`.
+4. Fail fast if any task branch for the selected release queue already exists.
+5. Classify `allowed_files` overlap.
+6. Run each contract through the existing `run-task` state machine.
+7. Stop after the first non-accepted task unless `--continue-on-failure` is set.
+8. Mirror progress and live executor stdout/stderr to `runs/<release-run-id>/release.log`.
+9. Remove task worktrees and merged task branches unless `--debug-keep-artifacts` is set; preserve accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches.
+10. Persist `runs/<release-run-id>/release_summary.json`.
 
 This command executes already-defined contracts. Objective-level planning and execution are composed by `run-objective`.
 

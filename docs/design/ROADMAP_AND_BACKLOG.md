@@ -95,7 +95,7 @@ Current implementation status:
 - `agent-loop status` reads existing evidence bundles and reports recent run summaries.
 - `agent-loop run-release` executes an ordered set of existing contracts from explicit `--contract` arguments or `repo_state/<project>/release_plan.yaml`.
 - `agent-loop run-release` writes a multiplexed `release.log` with release progress and live executor stdout/stderr for monitoring with `tail -f`.
-- Release runs fail fast when the configured project worktree root contains stale worktrees.
+- Release runs fail fast when the configured project worktree root contains stale worktrees or selected task branches already exist.
 - Release task worktrees and merged branches are cleaned up by default unless debug artifact retention is requested; accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches are preserved.
 - Release queues classify allowed-file overlap; minor overlap is sequential-only, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected.
 - Project configs support `model_roles` and `model_routing` for cheap-worker and stronger-model task execution routing.

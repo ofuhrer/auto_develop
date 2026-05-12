@@ -10,6 +10,7 @@ from agentic_devloop.models import ExecutorResult, ProjectConfig, TaskContract
 from agentic_devloop.models import Decision, Reviewer, ReviewDecision
 from agentic_devloop.orchestrator import TaskRunResult, executor_config_for_task, executor_configs_for_task
 from agentic_devloop.release import (
+    _ensure_no_existing_task_branches,
     _ensure_no_existing_worktrees,
     _should_preserve_task_branch,
     _should_preserve_task_worktree,
@@ -220,6 +221,30 @@ def test_release_preflight_ignores_metadata_files(tmp_path) -> None:
     (worktree_root / ".DS_Store").write_text("ignored", encoding="utf-8")
 
     _ensure_no_existing_worktrees(worktree_root)
+
+
+def test_release_preflight_rejects_existing_task_branches(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+    _git(repo, "branch", "agent/v0.1.0/demo-0001")
+
+    try:
+        _ensure_no_existing_task_branches(
+            repo,
+            "v0.1.0",
+            [_task_contract("demo-0001", allowed_files=["docs/demo-0001.md"])],
+        )
+    except ValueError as error:
+        assert "release task branches already exist" in str(error)
+        assert "agent/v0.1.0/demo-0001" in str(error)
+    else:
+        raise AssertionError("expected stale branch preflight failure")
 
 
 def test_run_release_preserves_accepted_unfinalized_worktree(tmp_path) -> None:
