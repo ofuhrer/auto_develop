@@ -10,7 +10,7 @@ This directory contains user, maintainer, and design documentation for `agentic-
 
 ## Project Summary
 
-`agentic-devloop` is an autonomous-first orchestration layer around coding agents. The current governor path is split into a one-epic `GovernorLoop` service, a typed `StateStore` persistence seam, and a `RepairPolicy` decision seam. Those seams own roadmap/backlog analysis for the current epic, state persistence, and bounded repair decisions. The next architectural priority is a runtime supervisor that observes release events, diagnoses recoverable failures, applies bounded repair actions, and resumes execution without routine human intervention. The broader multi-epic governor loop and fully automated state refresh remain planned. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, and configured Git finalization. Coding agents own implementation inside narrow task contracts.
+`agentic-devloop` is an autonomous-first orchestration layer around coding agents. The current governor path is split into a one-epic `GovernorLoop` service, a typed `StateStore` persistence seam, a `RepairPolicy` decision seam, and implemented runtime-supervisor repair/resume seams for structured release failures. Those seams own roadmap/backlog analysis for the current epic, state persistence, and bounded repair decisions. The broader multi-epic governor loop and fully automated state refresh remain planned. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, and configured Git finalization. Coding agents own implementation inside narrow task contracts.
 
 The project prioritizes:
 
@@ -34,6 +34,9 @@ Implemented capabilities include:
 - one-epic `GovernorLoop` service boundaries for selected-epic execution and follow-up state refresh inputs;
 - typed `StateStore` persistence over repo-state files and run summaries;
 - `RepairPolicy` decision seams for classifying failures into retry or stop decisions;
+- runtime-supervisor inputs for release events, release summaries, evidence bundles, raw logs, budget ledgers, tuning reports, and backlog-state references;
+- bounded repair actions for environment repair, planner-contract normalization, task split or scope narrowing, release resume, long-running-worker inspection, model escalation, and repo-state update proposals;
+- structured stop evidence when a hard gate, unavailable model, invalid release-resume request, or exhausted retry budget blocks repair;
 - deterministic verification command execution;
 - evidence bundle collection;
 - deterministic review and persisted decisions;
@@ -44,6 +47,7 @@ Implemented capabilities include:
 - `run-backlog` for chaining backlog planning into objective and release execution;
 - release-level feature branch integration through `feature/<release>`;
 - dynamic release DAG scheduling from `depends_on` and file-overlap analysis;
+- structured `runtime_supervisor/` evidence during repair/resume runs, including release events, retry budgets, repair evidence, and release-summary references;
 - human-cockpit `release.log`, raw audit `release.raw.log`, `release_metrics.json`, `release_budget.json`, and `release_tuning.md`;
 - default cleanup of merged task worktrees and branches;
 - dry-run-first manual cleanup;
@@ -52,9 +56,8 @@ Implemented capabilities include:
 Important remaining gaps:
 
 - multi-epic governor looping beyond the current one-epic service boundary;
-- runtime supervisor loop that turns planner/schema, environment, budget, overlap, long-running-worker, and needs-revision events into bounded repair actions;
+- always-on state refresh across repeated epic cycles;
 - reduction of deterministic heuristic code once supervisor-backed decisions are available; candidate areas include backlog scoring, contract-normalization heuristics, failure classification, budget-tuning prose, overlap recovery policy, and cockpit-summary filtering;
-- fully automated state refresh across repeated epic cycles;
 - stronger model-based repeated-failure diagnosis backend;
 - richer semantic merge-conflict repair and broader repair strategies;
 - automated pull-request creation;

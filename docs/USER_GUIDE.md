@@ -256,7 +256,7 @@ acceptance_criteria:
 
 Use objectives for planning. Use contracts for execution.
 
-The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the current governor service chooses one epic at a time, produces an objective, and feeds the existing objective/contract/release machinery. The next planned control layer is a runtime supervisor that can diagnose recoverable release failures, apply bounded repairs, and resume without routine human intervention. Multi-epic looping and fully automated state refresh are planned extensions beyond the current one-epic governor boundary.
+The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the current governor service chooses one epic at a time, produces an objective, and feeds the existing objective/contract/release machinery. The runtime supervisor now records structured repair/resume evidence for recoverable release failures, and the broader multi-epic governor loop plus always-on state refresh remain planned beyond the current one-epic governor boundary.
 
 Use backlog planning first:
 
@@ -497,6 +497,8 @@ The filtered log is a human cockpit for live monitoring. It uses color and emoji
 ```text
 runs/<release-run-id>/release.raw.log
 ```
+
+If a release needs repair or resume, also inspect `runs/<release-run-id>/runtime_supervisor/` for structured release events, retry budgets, release-summary references, and repair evidence.
 
 Release outputs normally include:
 

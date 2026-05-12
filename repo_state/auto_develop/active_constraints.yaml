@@ -7,4 +7,5 @@ constraints:
   - Generated run evidence under runs/ is local and ignored by Git.
   - The roadmap governor must update backlog and repo-state memory from run artifacts, metrics, tuning reports, validation output, and new domain learnings.
   - The runtime supervisor may repair contract-contained failures, but must not bypass deterministic contract admission, verification, review, budget, or finalization gates.
+  - The implemented runtime supervisor may normalize planner output, inspect long-running workers, and propose repo-state updates, but it must keep retry budgets, allowed-file boundaries, and hard gates intact.
   - Routine failures such as planner schema drift, stale local environment, long-running-but-active workers, over-broad contract scope, file-overlap admission failures, and needs-revision task sizing should trigger bounded repair/resume before human escalation.

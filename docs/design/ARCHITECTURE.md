@@ -36,7 +36,7 @@ Do not build an unconstrained autonomous agent loop. Use explicit state machines
 
 ## Autonomy Policy
 
-The default posture is autonomous-first and agentic-first. Once a repository goal and safety policy are configured, the governor should read docs and roadmap state, select the next highest-reward epic, decompose it, run bounded workers, verify, review, update state, and continue until the requested epic count, budget, or explicit stopping criteria are reached. The runtime supervisor should observe release events and evidence, classify recoverable failures, apply bounded repair actions, and resume execution. The implemented control plane is narrower than that target: it now has a one-epic `GovernorLoop` service boundary, a typed `StateStore` seam, and a `RepairPolicy` seam for bounded failure decisions. The runtime supervisor, broader N-epic loop, and always-on state refresh are planned extensions on top of those seams.
+The default posture is autonomous-first and agentic-first. Once a repository goal and safety policy are configured, the governor should read docs and roadmap state, select the next highest-reward epic, decompose it, run bounded workers, verify, review, update state, and continue until the requested epic count, budget, or explicit stopping criteria are reached. The runtime supervisor should observe release events and evidence, classify recoverable failures, apply bounded repair actions, and resume execution. The implemented control plane is narrower than that target: it now has a one-epic `GovernorLoop` service boundary, a typed `StateStore` seam, a `RepairPolicy` seam, and implemented runtime-supervisor repair/resume seams for structured release failures. The broader N-epic loop and always-on state refresh are planned extensions on top of those seams.
 
 Human stopping points are exceptions, not workflow milestones:
 
@@ -59,6 +59,17 @@ which model to escalate to, and how to update roadmap memory after a failed run.
 Avoid growing deterministic heuristic code for those choices when a bounded
 agent action plus a hard validator can produce the same safety outcome with less
 maintenance.
+
+### Runtime Supervisor Behavior
+
+The implemented runtime supervisor accepts structured release events, release summaries, evidence bundles, raw logs, budget ledgers, tuning reports, and backlog-state references. It classifies recoverable failures into verification environment drift, planner contract non-normalization, task scope overbroad, release resumable, long-running worker active, model capability mismatch, repo-state stale, missing credentials, contract boundary violation, unsafe policy expansion, and exhausted retry budget.
+
+- Retryable classifications only produce a retry decision while retry budget remains; once the budget is exhausted, the supervisor returns a stop decision with `exhausted_retry_budget`.
+- Stop decisions carry structured stop evidence with the action kind, stop kind, and reason so the release can record why repair stopped.
+- Planner normalization accepts `ContractPlan` values or plain mappings, revalidates them, and stops with hard-gate evidence if the candidate plan or generated contracts fail validation.
+- Release resume requires `action_id`, `retry_budget`, and `stop_reason_fallback`; `retry_budget` must be non-negative, and resume is blocked if the task has already written files outside its allowed scope.
+- Long-running worker inspection records a summary and active flag when the worker appears to still be running; it does not silently widen scope or bypass the retry budget.
+- Repo-state updates are emitted as proposals with a summary and proposed changes; the supervisor does not write repo-state files directly.
 
 ## Execution State Machine
 
@@ -127,7 +138,7 @@ cheap deterministic checks first
 -> frontier model only for planning, review, or failure diagnosis
 ```
 
-Current implementation supports configurable task execution roles through `model_roles` and `model_routing`. Worker roles may define `fallback_models`, and every executor attempt is recorded in evidence. Release queues classify overlapping allowed-file scopes before execution: minor overlap becomes a sequencing dependency, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected. In parallel mode the orchestrator builds a DAG from explicit `depends_on` fields and inferred overlap dependencies, submits ready tasks concurrently, monitors completions, and schedules newly unblocked tasks as outcomes arrive. Release-level planning supports deterministic scaffolding, strong-model budget reservation, explicit planner backend execution with planner stdout/stderr/metadata evidence, and `run-objective` composition from objective to generated contracts to release execution. Generated-contract admission rejects unsafe release IDs, missing diff evidence, weak stop conditions, whole-repo file scope, unknown or inconsistent verification profiles, and allowed-file counts above project budget. The new `RepairPolicy` seam classifies failures for the current one-epic loop, but the runtime supervisor that converts those classifications into contract normalization, environment repair, task splitting, scope narrowing, waiting, retry, or stop actions is still a future control point.
+Current implementation supports configurable task execution roles through `model_roles` and `model_routing`. Worker roles may define `fallback_models`, and every executor attempt is recorded in evidence. Release queues classify overlapping allowed-file scopes before execution: minor overlap becomes a sequencing dependency, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected. In parallel mode the orchestrator builds a DAG from explicit `depends_on` fields and inferred overlap dependencies, submits ready tasks concurrently, monitors completions, and schedules newly unblocked tasks as outcomes arrive. Release-level planning supports deterministic scaffolding, strong-model budget reservation, explicit planner backend execution with planner stdout/stderr/metadata evidence, and `run-objective` composition from objective to generated contracts to release execution. Generated-contract admission rejects unsafe release IDs, missing diff evidence, weak stop conditions, whole-repo file scope, unknown or inconsistent verification profiles, and allowed-file counts above project budget. The `RepairPolicy` seam classifies failures for the current one-epic loop, and the runtime supervisor now turns those classifications into bounded repair proposals, resume intents, inspection summaries, escalation recommendations, and repo-state update proposals while still deferring all hard-gate enforcement to deterministic validators.
 
 Some deterministic subsystems should become thinner after the supervisor exists:
 deterministic backlog scoring becomes fallback scaffolding, failure diagnosis

@@ -7,9 +7,8 @@ current_tasks:
   - runtime-supervisor-resume-loop
   - runtime-supervisor-docs-state
 next_steps:
-  - Define a machine-readable release event stream that mirrors the human cockpit log but is suitable for supervisor decisions.
-  - Connect RepairPolicy categories to typed repair actions with retry budgets and stop reasons.
-  - Implement bounded repair executors for environment repair, contract normalization, contract splitting, scope narrowing, release resume, long-running-worker inspection, model escalation, and repo-state updates.
-  - Identify procedural heuristics that can be retired once supervisor actions exist: deterministic backlog scoring, contract wording checks, log-pattern failure classification, budget-tuning prose, overlap recovery branching, and cockpit-summary filtering.
+  - Keep the structured release event stream, retry budgets, repair evidence, and stop reasons aligned with the shipped runtime-supervisor behavior.
+  - Preserve the implemented repair/resume seam while the broader N-epic governor loop remains planned until it is actually implemented.
+  - Identify procedural heuristics that can be retired once supervisor actions and the broader governor loop exist: deterministic backlog scoring, contract wording checks, log-pattern failure classification, budget-tuning prose, overlap recovery branching, and cockpit-summary filtering.
   - Keep deterministic gates authoritative; the supervisor must repair inputs and rerun gates, not bypass them.
-  - Document the supervisor as planned until implementation and tests land.
+  - Document the shipped runtime supervisor behavior while keeping the multi-epic governor loop planned.
