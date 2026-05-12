@@ -49,6 +49,17 @@ PYTHONPATH=src uv run agent-loop --version
 PYTHONPATH=src uv run agent-loop config --project rust_rockfall
 ```
 
+Planner-backend smoke checks:
+
+```bash
+PYTHONPATH=src uv run agent-loop plan-release --objective objectives/v0.8.0.yaml
+PYTHONPATH=src uv run agent-loop plan-release \
+  --objective objectives/v0.8.0.yaml \
+  --mode strong-model \
+  --project auto_develop
+PYTHONPATH=src uv run agent-loop status --limit 5
+```
+
 Load a project config:
 
 ```bash
@@ -94,6 +105,13 @@ agent-loop plan-release \
   --mode strong-model \
   --project auto_develop
 ```
+
+Reviewing generated planning artifacts is a manual step:
+
+1. Inspect `contract_plan.json` for objective coverage, missing tasks, and scope drift.
+2. If `--mode strong-model` was used, inspect `planner_prompt.md` for the draft inputs that were sent to the planner.
+3. Approve the draft only when the proposed release queue stays within the contract and the follow-up task contracts remain bounded.
+4. Promote the approved plan into explicit task contracts before running `run-release`.
 
 To provide an explicit queue:
 

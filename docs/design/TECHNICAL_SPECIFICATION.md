@@ -319,6 +319,15 @@ This command executes already-defined contracts. It does not yet use a strong mo
 
 This is intentionally not automatic strong-model contract generation yet.
 
+### Generated Contract Review
+
+The planner backend expects humans to review the generated planning artifacts before any new task contracts are admitted into a release queue:
+
+1. Check `contract_plan.json` against the release objective and existing contract set.
+2. If strong-model planning was requested, inspect `planner_prompt.md` for the draft inputs and release scope.
+3. Confirm that any proposed follow-up contracts remain bounded by `allowed_files`, `forbidden_changes`, and the release budget.
+4. Only then write or accept explicit task contracts and pass them to `run-release`.
+
 ### Finalization Locking
 
 Accepted-task finalization:
