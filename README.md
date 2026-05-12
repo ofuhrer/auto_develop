@@ -39,7 +39,7 @@ Run tests:
 
 1. Configure a target repository in `configs/<project>.yaml`.
 2. Run `agent-loop plan-backlog --mode strong-model --execute-planner` so the governor agent selects the next epic from docs, roadmap, artifacts, and the repository goal.
-3. Run `agent-loop run-objective` so the selected epic is decomposed into contracts and executed by worker agents.
+3. Run `agent-loop run-objective` so an existing objective is decomposed into contracts and executed by worker agents. If you want the combined flow, use `agent-loop run-backlog` to chain backlog selection, objective creation or reuse, and release execution in one command.
 4. Run `agent-loop doctor` for preflight diagnostics when launching governed release execution.
 5. Monitor `runs/<release-run-id>/release.log` while the release is running.
 6. Review evidence under `runs/`, including `release_metrics.json`, `release_budget.json`, `release_tuning.md`, `failure_diagnosis.yaml`, and `executor_attempts.json` for failed tasks.

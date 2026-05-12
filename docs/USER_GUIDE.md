@@ -783,6 +783,13 @@ Key options:
 - `--execute-planner`: required; executes planner backend instead of prompt-only output.
 - All relevant `run-release` execution and finalization options.
 
+Relationship to nearby commands:
+
+- `plan-backlog` selects and prioritizes epics. With `--write-objective`, it stops after writing the selected epic as an objective YAML file.
+- `run-backlog` performs backlog planning first, then selects the requested epic, reuses `objectives/<suggested_release_id>.yaml` when it already exists, or writes that objective file when it does not.
+- `run-objective` skips backlog selection and starts from an existing objective file.
+- `run-backlog` forwards the usual release execution and finalization flags, so `--commit-on-accept`, `--merge-on-accept`, `--push-on-accept`, and `--release-finalize` still control task commits and release finalization.
+
 Run-backlog evidence records artifact paths when produced, including:
 - backlog plan (`backlog_plan.json`);
 - generated objective path (when run-backlog creates a new objective file);
