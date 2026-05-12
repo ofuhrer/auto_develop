@@ -31,6 +31,22 @@ from agentic_devloop.models import (
 )
 from agentic_devloop.orchestrator import ExecutorProtocol, TaskRunResult, branch_name, run_task
 from agentic_devloop.process import run_process
+from agentic_devloop.runtime_supervisor import (
+    BacklogStateReference,
+    BudgetLedgerPaths,
+    EvidenceBundlePaths,
+    RawLogPaths,
+    ReleaseEvent,
+    ReleaseEventKind,
+    ReleaseSummaryReference,
+    RepairDecisionClassification,
+    RepairActionKind,
+    RuntimeSupervisor,
+    RuntimeSupervisorDecisionKind,
+    RuntimeSupervisorStopReason,
+    RuntimeSupervisorInput,
+    TuningReportPaths,
+)
 from agentic_devloop.yaml_io import load_yaml_model
 
 
@@ -173,6 +189,10 @@ def run_release(
             config_repo_path=config.repo_path,
             config_dir=config_dir,
             runs_dir=runs_dir,
+            release_run_dir=release_root,
+            release_id=release_id,
+            run_id=run_id,
+            repo_state_path=config.repo_state_path,
             task_base_branch=feature_branch,
             task_inputs=task_inputs,
             executor=executor,
@@ -311,6 +331,10 @@ def _run_release_sequential(
     config_repo_path: Path,
     config_dir: Path,
     runs_dir: Path,
+    release_run_dir: Path,
+    release_id: str,
+    run_id: str,
+    repo_state_path: Path | None,
     task_base_branch: str,
     task_inputs: list[tuple[Path, TaskContract]],
     executor: ExecutorProtocol | None,
@@ -323,6 +347,11 @@ def _run_release_sequential(
     debug_keep_artifacts: bool,
     progress: Callable[[str], None] | None,
 ) -> list[TaskRunResult]:
+    supervisor_dir = release_run_dir / "runtime_supervisor"
+    supervisor_dir.mkdir(parents=True, exist_ok=True)
+    supervisor_log_path = supervisor_dir / "supervisor.log"
+    supervisor = RuntimeSupervisor()
+    supervisor_max_retries = max(0, min(3, load_project_config(project_id, config_dir, validate_repo=True).budget.max_executor_attempts_per_task))
     task_results: list[TaskRunResult] = []
     for index, (contract_path, task) in enumerate(task_inputs, start=1):
         _report(
@@ -349,11 +378,403 @@ def _run_release_sequential(
             debug_keep_artifacts=debug_keep_artifacts,
             progress=progress,
         )
+
+        if result.decision.decision != Decision.ACCEPTED:
+            result = _attempt_runtime_supervisor_repair_and_resume(
+                project_id=project_id,
+                config_repo_path=config_repo_path,
+                config_dir=config_dir,
+                runs_dir=runs_dir,
+                release_run_dir=release_run_dir,
+                release_id=release_id,
+                release_run_id=run_id,
+                repo_state_path=repo_state_path,
+                task_base_branch=task_base_branch,
+                contract_path=contract_path,
+                task=task,
+                initial_result=result,
+                supervisor=supervisor,
+                supervisor_log_path=supervisor_log_path,
+                max_retries=supervisor_max_retries,
+                executor=executor,
+                verification_timeout_seconds=verification_timeout_seconds,
+                allow_dirty=allow_dirty,
+                commit_on_accept=commit_on_accept,
+                merge_on_accept=merge_on_accept,
+                push_on_accept=push_on_accept,
+                debug_keep_artifacts=debug_keep_artifacts,
+                progress=progress,
+            )
         task_results.append(result)
         if stop_on_failure and result.decision.decision != Decision.ACCEPTED:
             _report(progress, f"stopping release after {task.task_id}: {result.decision.decision}")
             break
     return task_results
+
+
+def _attempt_runtime_supervisor_repair_and_resume(
+    *,
+    project_id: str,
+    config_repo_path: Path,
+    config_dir: Path,
+    runs_dir: Path,
+    release_run_dir: Path,
+    release_id: str,
+    release_run_id: str,
+    repo_state_path: Path | None,
+    task_base_branch: str,
+    contract_path: Path,
+    task: TaskContract,
+    initial_result: TaskRunResult,
+    supervisor: RuntimeSupervisor,
+    supervisor_log_path: Path,
+    max_retries: int,
+    executor: ExecutorProtocol | None,
+    verification_timeout_seconds: int,
+    allow_dirty: bool,
+    commit_on_accept: bool,
+    merge_on_accept: bool,
+    push_on_accept: bool,
+    debug_keep_artifacts: bool,
+    progress: Callable[[str], None] | None,
+) -> TaskRunResult:
+    supervisor_dir = release_run_dir / "runtime_supervisor"
+    supervisor_dir.mkdir(parents=True, exist_ok=True)
+    temp_evidence_dir = supervisor_dir / "temp"
+    temp_evidence_dir.mkdir(parents=True, exist_ok=True)
+
+    retry_budget_path = supervisor_dir / "retry_budget_ledger.json"
+    repair_budget_path = supervisor_dir / "repair_budget_ledger.json"
+    model_tuning_path = supervisor_dir / "model_tuning_report.json"
+    verification_tuning_path = supervisor_dir / "verification_tuning_report.json"
+    for path in (retry_budget_path, repair_budget_path, model_tuning_path, verification_tuning_path):
+        if not path.exists():
+            path.write_text("[]\n" if path.name.endswith("ledger.json") else "{}\n", encoding="utf-8")
+
+    backlog_state_reference = _runtime_supervisor_backlog_state_reference(
+        config_repo_path=config_repo_path,
+        repo_state_path=repo_state_path,
+        supervisor_dir=supervisor_dir,
+        active_epic_id=release_id,
+    )
+
+    repair_evidence_path = supervisor_dir / f"repair_{task.task_id}.json"
+    repair_evidence: dict[str, object] = {
+        "release_id": release_id,
+        "release_run_id": release_run_id,
+        "task_id": task.task_id,
+        "contract_path": str(contract_path),
+        "initial_result": _task_result_reference(initial_result),
+        "attempts": [],
+        "final_result": None,
+    }
+
+    current_result = initial_result
+    attempt = 1
+    while attempt <= max_retries:
+        classification, event_kind, failure_category = _runtime_supervisor_classification_for_task_result(
+            result=current_result,
+            task=task,
+        )
+        if classification is None:
+            break
+
+        _report(
+            progress,
+            f"event=repair_attempt_started task={task.task_id} attempt={attempt} classification={classification}",
+        )
+        _append_supervisor_log(
+            supervisor_log_path,
+            f"event=repair_attempt_started task={task.task_id} attempt={attempt} classification={classification}\n",
+        )
+
+        release_event = _runtime_supervisor_write_release_event(
+            supervisor_dir=supervisor_dir,
+            task_id=task.task_id,
+            attempt=attempt,
+            kind=event_kind,
+            message=f"task={task.task_id} decision={current_result.decision.decision} category={failure_category}",
+        )
+        release_summary_ref = _runtime_supervisor_write_release_state_summary(
+            supervisor_dir=supervisor_dir,
+            release_id=release_id,
+            release_run_id=release_run_id,
+            task=task,
+            attempt=attempt,
+            result=current_result,
+        )
+        evidence_paths = _runtime_supervisor_evidence_paths(current_result)
+        raw_log_paths = RawLogPaths(
+            supervisor_log_path=supervisor_log_path,
+            worker_stdout_path=evidence_paths.bundle_path / "executor_stdout.log",
+            worker_stderr_path=evidence_paths.bundle_path / "executor_stderr.log",
+        )
+        budgets = BudgetLedgerPaths(
+            repair_budget_ledger_path=repair_budget_path,
+            retry_budget_ledger_path=retry_budget_path,
+        )
+        tuning = TuningReportPaths(
+            model_tuning_report_path=model_tuning_path,
+            verification_tuning_report_path=verification_tuning_path,
+        )
+        supervisor_input = RuntimeSupervisorInput(
+            classification=classification,
+            attempt=attempt,
+            max_retries=max_retries,
+            release_event=release_event,
+            release_summary=release_summary_ref,
+            evidence_bundle_paths=EvidenceBundlePaths(
+                bundle_path=evidence_paths.bundle_path,
+                changed_files_path=evidence_paths.changed_files_path,
+                verification_log_path=evidence_paths.verification_log_path,
+            ),
+            raw_log_paths=raw_log_paths,
+            budget_ledger_paths=budgets,
+            tuning_report_paths=tuning,
+            backlog_state_reference=backlog_state_reference,
+        )
+        decision = supervisor.decide(supervisor_input)
+        _report(
+            progress,
+            f"event=repair_decision task={task.task_id} attempt={attempt} decision={decision.decision} action={decision.action.action_kind if decision.action else None}",
+        )
+        repair_attempt_record: dict[str, object] = {
+            "attempt": attempt,
+            "classification": str(decision.classification),
+            "decision": str(decision.decision),
+            "retryable": bool(decision.retryable),
+            "reason": decision.reason,
+            "remaining_retries": decision.remaining_retries,
+            "action_kind": str(decision.action.action_kind) if decision.action else None,
+            "result": _task_result_reference(current_result),
+        }
+
+        if decision.decision != RuntimeSupervisorDecisionKind.RETRY or decision.action is None:
+            repair_attempt_record["stop_reason"] = str(decision.stop_reason) if decision.stop_reason else None
+            repair_evidence["attempts"].append(repair_attempt_record)
+            _runtime_supervisor_write_repair_evidence(repair_evidence_path, repair_evidence)
+            _report(progress, f"event=repair_stopped task={task.task_id} reason={json.dumps(decision.reason)}")
+            return current_result
+
+        if decision.action.action_kind != RepairActionKind.RELEASE_RESUME:
+            repair_attempt_record["unsupported_action"] = str(decision.action.action_kind)
+            repair_evidence["attempts"].append(repair_attempt_record)
+            _runtime_supervisor_write_repair_evidence(repair_evidence_path, repair_evidence)
+            _report(
+                progress,
+                f"event=repair_unsupported task={task.task_id} action={decision.action.action_kind}",
+            )
+            return current_result
+
+        # Validate release resume intent via supervisor applier.
+        resume_action_id = f"release_resume/{task.task_id}/attempt-{attempt}"
+        resume_budget = max(0, max_retries - attempt)
+        applier_result = supervisor.apply_release_resume_intent(
+            source_evidence_paths=decision.action.source_evidence_paths,
+            action_id=resume_action_id,
+            retry_budget=resume_budget,
+            stop_reason_fallback=RuntimeSupervisorStopReason.EXHAUSTED_RETRY_BUDGET,
+        )
+        repair_attempt_record["applier_applied"] = bool(applier_result.applied)
+        repair_attempt_record["applier_stop_evidence"] = (
+            {
+                "action_kind": str(applier_result.stop_evidence.action_kind),
+                "kind": str(applier_result.stop_evidence.kind),
+                "reason": applier_result.stop_evidence.reason,
+            }
+            if applier_result.stop_evidence
+            else None
+        )
+        if not applier_result.applied or applier_result.proposal is None:
+            repair_evidence["attempts"].append(repair_attempt_record)
+            _runtime_supervisor_write_repair_evidence(repair_evidence_path, repair_evidence)
+            _report(progress, f"event=repair_resume_blocked task={task.task_id}")
+            return current_result
+
+        # Stop if the task already violated its allowed_files scope.
+        changed_files = _runtime_supervisor_read_changed_files(evidence_paths.changed_files_path)
+        if any(not _path_allowed(path, task.allowed_files) for path in changed_files):
+            repair_attempt_record["blocked_reason"] = "contract_boundary_violation"
+            repair_attempt_record["changed_files"] = changed_files
+            repair_evidence["attempts"].append(repair_attempt_record)
+            repair_evidence["final_result"] = _task_result_reference(current_result)
+            _runtime_supervisor_write_repair_evidence(repair_evidence_path, repair_evidence)
+            _report(progress, f"event=repair_boundary_violation task={task.task_id}")
+            return current_result
+
+        repair_evidence["attempts"].append(repair_attempt_record)
+        _runtime_supervisor_write_repair_evidence(repair_evidence_path, repair_evidence)
+        _report(progress, f"event=task_resumed task={task.task_id} attempt={attempt}")
+
+        # Resume by rerunning the same task contract with full verification/review.
+        current_result = _run_one_release_task(
+            project_id=project_id,
+            config_repo_path=config_repo_path,
+            config_dir=config_dir,
+            runs_dir=runs_dir,
+            task_base_branch=task_base_branch,
+            contract_path=contract_path,
+            task=task,
+            executor=executor,
+            verification_timeout_seconds=verification_timeout_seconds,
+            allow_dirty=allow_dirty,
+            commit_on_accept=commit_on_accept,
+            merge_on_accept=merge_on_accept,
+            push_on_accept=push_on_accept,
+            debug_keep_artifacts=debug_keep_artifacts,
+            progress=progress,
+        )
+        if current_result.decision.decision == Decision.ACCEPTED:
+            repair_evidence["final_result"] = _task_result_reference(current_result)
+            _runtime_supervisor_write_repair_evidence(repair_evidence_path, repair_evidence)
+            _report(progress, f"event=repair_succeeded task={task.task_id} attempt={attempt}")
+            return current_result
+
+        attempt += 1
+
+    # Retry budget exhausted or unsupported.
+    repair_evidence["final_result"] = _task_result_reference(current_result)
+    _runtime_supervisor_write_repair_evidence(repair_evidence_path, repair_evidence)
+    _report(progress, f"event=repair_exhausted task={task.task_id} attempts={max_retries}")
+    return current_result
+
+
+def _append_supervisor_log(path: Path, line: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(line)
+
+
+def _runtime_supervisor_write_repair_evidence(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _task_result_reference(result: TaskRunResult) -> dict[str, object]:
+    return {
+        "run_id": result.run_id,
+        "bundle_path": str(result.bundle_path),
+        "decision": str(result.decision.decision),
+        "rationale": result.decision.rationale,
+    }
+
+
+def _runtime_supervisor_evidence_paths(result: TaskRunResult) -> EvidenceBundlePaths:
+    bundle_path = result.bundle_path
+    return EvidenceBundlePaths(
+        bundle_path=bundle_path,
+        changed_files_path=bundle_path / "changed_files.txt",
+        verification_log_path=bundle_path / "verification.log",
+    )
+
+
+def _runtime_supervisor_read_changed_files(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _runtime_supervisor_backlog_state_reference(
+    *,
+    config_repo_path: Path,
+    repo_state_path: Path | None,
+    supervisor_dir: Path,
+    active_epic_id: str,
+) -> BacklogStateReference:
+    if repo_state_path is None:
+        placeholder = supervisor_dir / "backlog_state_missing.txt"
+        placeholder.write_text("repo_state_path is not configured for this project.\n", encoding="utf-8")
+        return BacklogStateReference(backlog_state_path=placeholder, active_epic_id=active_epic_id)
+    root = repo_state_path if repo_state_path.is_absolute() else config_repo_path / repo_state_path
+    backlog_path = root / "backlog_state.yaml"
+    if backlog_path.exists():
+        return BacklogStateReference(backlog_state_path=backlog_path, active_epic_id=active_epic_id)
+    placeholder = supervisor_dir / "backlog_state_missing.txt"
+    placeholder.write_text(f"Missing backlog_state.yaml at {backlog_path}.\n", encoding="utf-8")
+    return BacklogStateReference(backlog_state_path=placeholder, active_epic_id=active_epic_id)
+
+
+def _runtime_supervisor_write_release_event(
+    *,
+    supervisor_dir: Path,
+    task_id: str,
+    attempt: int,
+    kind: ReleaseEventKind,
+    message: str,
+) -> ReleaseEvent:
+    event_dir = supervisor_dir / "events"
+    event_dir.mkdir(parents=True, exist_ok=True)
+    event_path = event_dir / f"{task_id}_attempt_{attempt}.json"
+    event_payload = {
+        "kind": str(kind),
+        "task_id": task_id,
+        "attempt": attempt,
+        "message": message,
+    }
+    event_path.write_text(json.dumps(event_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return ReleaseEvent(kind=kind, message=message, event_path=event_path)
+
+
+def _runtime_supervisor_write_release_state_summary(
+    *,
+    supervisor_dir: Path,
+    release_id: str,
+    release_run_id: str,
+    task: TaskContract,
+    attempt: int,
+    result: TaskRunResult,
+) -> ReleaseSummaryReference:
+    summary_path = supervisor_dir / "release_state.json"
+    payload = {
+        "release_id": release_id,
+        "release_run_id": release_run_id,
+        "task_id": task.task_id,
+        "attempt": attempt,
+        "decision": str(result.decision.decision),
+        "bundle_path": str(result.bundle_path),
+    }
+    summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return ReleaseSummaryReference(release_id=release_id, summary_path=summary_path)
+
+
+def _runtime_supervisor_classification_for_task_result(
+    *,
+    result: TaskRunResult,
+    task: TaskContract,
+) -> tuple[RepairDecisionClassification | None, ReleaseEventKind, str]:
+    category = "unknown"
+    diagnosis_path = result.bundle_path / "failure_diagnosis.yaml"
+    if diagnosis_path.exists():
+        try:
+            import yaml
+
+            diagnosis = yaml.safe_load(diagnosis_path.read_text(encoding="utf-8")) or {}
+            category = str(diagnosis.get("category") or category)
+        except Exception:
+            category = "unknown"
+
+    if result.decision.decision == Decision.ESCALATED:
+        return (RepairDecisionClassification.UNSAFE_POLICY_EXPANSION, ReleaseEventKind.RELEASE_BLOCKED, category)
+    if category == "contract_mismatch":
+        return (RepairDecisionClassification.CONTRACT_BOUNDARY_VIOLATION, ReleaseEventKind.RELEASE_BLOCKED, category)
+    if category == "verification_failure":
+        return (RepairDecisionClassification.RELEASE_RESUMABLE, ReleaseEventKind.VERIFICATION_FAILED, category)
+    if category == "timeout":
+        return (RepairDecisionClassification.TASK_SCOPE_OVERBROAD, ReleaseEventKind.TASK_FAILED, category)
+    if category == "model_quota":
+        return (RepairDecisionClassification.MISSING_CREDENTIALS, ReleaseEventKind.RELEASE_BLOCKED, category)
+    if category == "executor_error":
+        return (RepairDecisionClassification.RELEASE_RESUMABLE, ReleaseEventKind.TASK_FAILED, category)
+
+    # Fallback: retry only for needs_revision/failed, otherwise stop.
+    if result.decision.decision in {Decision.NEEDS_REVISION, Decision.FAILED}:
+        return (RepairDecisionClassification.RELEASE_RESUMABLE, ReleaseEventKind.TASK_FAILED, category)
+    return (None, ReleaseEventKind.TASK_FAILED, category)
+
+
+def _path_allowed(path: str, allowed_patterns: list[str]) -> bool:
+    normalized = path.lstrip("./")
+    return any(fnmatch(normalized, pattern) for pattern in allowed_patterns)
 
 
 def _run_release_parallel(
