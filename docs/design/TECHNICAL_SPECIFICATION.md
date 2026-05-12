@@ -158,7 +158,7 @@ acceptance_criteria:
   - All default verification checks pass.
   - Scientific assumptions are documented.
   - Evidence bundle exists for each accepted task.
-  - Human approval before merge unless autonomous finalization is explicitly enabled.
+  - Autonomous finalization follows configured repository policy.
 ```
 
 ### TaskContract
@@ -308,6 +308,13 @@ agent-loop run-objective \
   --mode strong-model \
   --execute-planner
 
+agent-loop plan-backlog \
+  --project auto_develop \
+  --goal "Move toward fully autonomous roadmap-driven development" \
+  --mode strong-model \
+  --execute-planner \
+  --write-objective
+
 agent-loop status
 
 agent-loop status --limit 5
@@ -399,7 +406,7 @@ Generated contracts must match the release ID, require diff evidence, include a 
 
 ### Generated Contract Review
 
-The planner backend expects humans to review the generated planning artifacts before any new task contracts are admitted into a release queue:
+The planner backend expects the governor to validate generated planning artifacts before any new task contracts are admitted into a release queue. Human review is optional and should be reserved for repository policy exceptions:
 
 1. Check `contract_plan.json` against the release objective and existing contract set.
 2. If strong-model planning was requested, inspect `planner_prompt.md` for the draft inputs and release scope.
@@ -454,6 +461,21 @@ Before retrying or escalating a failed task, inspect:
 - `git_diff.patch`.
 
 Use `guidance.retryable` and `guidance.escalate` as the primary control points for deciding whether to rerun the task, narrow scope, or hand the failure to stronger review.
+
+### `plan-backlog` Flow
+
+`agent-loop plan-backlog` is the first roadmap-governor entry point:
+
+1. Load and validate `ProjectConfig`.
+2. Read the configured roadmap Markdown file.
+3. In strong-model mode, write a bounded roadmap-governor prompt containing repository documentation, roadmap context, and the explicit repository goal.
+4. Execute the configured planner agent when `--execute-planner` is provided.
+5. Parse and validate the agent-emitted `BacklogPlan` schema, including selected epic, `roadmap_updates`, and `repo_state_updates`.
+6. In deterministic mode only, extract actionable roadmap candidates and score them against the supplied repository goal.
+7. Persist `runs/<backlog-plan-id>/backlog_plan.json`.
+8. Optionally write the selected epic as a `ReleaseObjective` YAML.
+
+The output objective is intended to feed `run-objective`. This keeps the high-level roadmap-governor agent separate from contract generation and execution while preserving an auditable handoff through `backlog_planner_prompt.md`, planner stdout/stderr/metadata, and `backlog_plan.json`. The highest-level loop should later apply the governor's roadmap and repo-state updates after each epic so new validation findings, benchmark evidence, and implementation learnings feed the next planning cycle.
 
 ### Domain Validation Evidence
 
@@ -511,7 +533,7 @@ class Reviewer:
         ...
 ```
 
-Review may be deterministic, model-based, human, strong-model-assisted, or hybrid. v1 should start with deterministic pre-review and human final review.
+Review may be deterministic, model-based, strong-model-assisted, hybrid, or human-escalated. The default path should be autonomous deterministic/model review, with human review reserved for configured policy boundaries.
 
 ## Security and Auth
 
@@ -622,4 +644,4 @@ Mitigation: never compress equations, validation rules, numerical tolerances, or
 
 Strong models can still approve invalid domain changes.
 
-Mitigation: require deterministic evidence, explicit assumptions, and human approval for risky changes.
+Mitigation: require deterministic evidence, explicit assumptions, stronger-model review for risky changes, and human escalation only when configured policy requires it or autonomous diagnosis is exhausted.

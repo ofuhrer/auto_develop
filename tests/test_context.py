@@ -14,6 +14,7 @@ def test_load_context_bundle_reads_repo_state_and_filters_known_failures(tmp_pat
     state.mkdir(parents=True)
     (state / "architecture_summary.md").write_text("Architecture summary.\n", encoding="utf-8")
     (state / "active_constraints.yaml").write_text("constraints: []\n", encoding="utf-8")
+    (state / "backlog_state.yaml").write_text("active_goal: autonomous governor\n", encoding="utf-8")
     (state / "known_failures.md").write_text("unrelated failure\n", encoding="utf-8")
 
     config = _project_config(repo)
@@ -24,6 +25,7 @@ def test_load_context_bundle_reads_repo_state_and_filters_known_failures(tmp_pat
     assert [section.name for section in context.sections] == [
         "architecture_summary",
         "active_constraints",
+        "backlog_state",
     ]
 
 

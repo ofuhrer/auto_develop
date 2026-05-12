@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from agentic_devloop import __version__
+from agentic_devloop.backlog import CodexBacklogPlannerBackend, plan_backlog
 from agentic_devloop.cleanup import cleanup_release_artifacts
 from agentic_devloop.config import ProjectConfigError, load_project_config
 from agentic_devloop.doctor import run_doctor
@@ -111,6 +112,32 @@ def build_parser() -> argparse.ArgumentParser:
     _add_planning_mode_arguments(run_objective_parser)
     _add_execute_planner_argument(run_objective_parser, help_text="Execute the configured planner backend when using strong-model mode.")
     _add_release_execution_arguments(run_objective_parser)
+
+    plan_backlog_parser = subparsers.add_parser(
+        "plan-backlog",
+        help="Analyze roadmap and repo state into prioritized development epics.",
+    )
+    plan_backlog_parser.add_argument("--project", required=True, help="Project identifier.")
+    plan_backlog_parser.add_argument("--goal", required=True, help="Repository goal used to prioritize epics.")
+    plan_backlog_parser.add_argument(
+        "--roadmap",
+        default="docs/design/ROADMAP_AND_BACKLOG.md",
+        help="Roadmap Markdown file to analyze.",
+    )
+    _add_config_dir_argument(plan_backlog_parser)
+    _add_runs_dir_argument(plan_backlog_parser, purpose="backlog planning output")
+    _add_planning_mode_arguments(plan_backlog_parser)
+    _add_execute_planner_argument(plan_backlog_parser, help_text="Execute the configured planner agent instead of only writing the backlog governor prompt.")
+    plan_backlog_parser.add_argument(
+        "--objectives-dir",
+        default="objectives",
+        help="Directory where selected objective YAML should be written.",
+    )
+    plan_backlog_parser.add_argument(
+        "--write-objective",
+        action="store_true",
+        help="Write an objective YAML for the highest-priority epic.",
+    )
 
     status_parser = subparsers.add_parser("status", help="Show orchestrator status.")
     status_parser.add_argument(
@@ -423,6 +450,31 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(_objective_run_result(result), indent=2))
         return 0
 
+    if args.command == "plan-backlog":
+        try:
+            if args.execute_planner and args.mode != "strong-model":
+                raise ValueError("--execute-planner requires --mode strong-model")
+            planner_backend = _codex_backlog_planner_backend(
+                project_id=args.project,
+                config_dir=Path(args.config_dir),
+            ) if args.execute_planner else None
+            result = plan_backlog(
+                project_id=args.project,
+                goal=args.goal,
+                roadmap_path=Path(args.roadmap),
+                config_dir=Path(args.config_dir),
+                runs_dir=Path(args.runs_dir),
+                objectives_dir=Path(args.objectives_dir),
+                write_objective=args.write_objective,
+                mode=args.mode,
+                planner_backend=planner_backend,
+            )
+        except Exception as error:
+            parser.exit(2, f"error: {error}\n")
+
+        print(json.dumps(_backlog_plan_result(result), indent=2))
+        return 0
+
     if args.command == "status":
         summaries = load_run_summaries(Path(args.runs_dir), limit=args.limit)
         if not summaries:
@@ -513,6 +565,29 @@ def _objective_run_result(result) -> dict[str, object]:
     }
 
 
+def _backlog_plan_result(result) -> dict[str, object]:
+    selected = next(
+        (epic for epic in result.plan.epics if epic.epic_id == result.plan.selected_epic_id),
+        None,
+    )
+    return {
+        "plan_path": str(result.plan_path),
+        "objective_path": str(result.objective_path) if result.objective_path else None,
+        "selected_epic_id": result.plan.selected_epic_id,
+        "selected_title": selected.title if selected else None,
+        "epics": [
+            {
+                "epic_id": epic.epic_id,
+                "priority": epic.priority,
+                "title": epic.title,
+                "suggested_release_id": epic.suggested_release_id,
+            }
+            for epic in result.plan.epics
+        ],
+        "warnings": result.plan.warnings,
+    }
+
+
 def _cleanup_result(result) -> dict[str, object]:
     return {
         "project_id": result.project_id,
@@ -533,6 +608,15 @@ def _codex_planner_backend(*, project_id: str | None, config_dir: Path, runs_dir
     config = load_project_config(project_id, config_dir, validate_repo=True)
     planner = config.model_roles.get("planner", config.executor)
     return CodexPlannerBackend(
+        config=planner,
+        repo_path=config.repo_path,
+    )
+
+
+def _codex_backlog_planner_backend(*, project_id: str, config_dir: Path) -> CodexBacklogPlannerBackend:
+    config = load_project_config(project_id, config_dir, validate_repo=True)
+    planner = config.model_roles.get("planner", config.executor)
+    return CodexBacklogPlannerBackend(
         config=planner,
         repo_path=config.repo_path,
     )

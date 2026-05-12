@@ -1,6 +1,6 @@
 # Agentic Devloop
 
-`agentic-devloop` is a local CLI orchestrator for bounded autonomous development tasks. It creates isolated Git worktrees, runs coding agents inside explicit task contracts, verifies results deterministically, collects evidence, and optionally finalizes accepted work through Git.
+`agentic-devloop` is an autonomous-first local CLI orchestrator for agentic software development. A governor agent reads repository documentation, roadmap, artifacts, and goals to choose the next high-reward epic; worker agents implement bounded contracts in isolated worktrees; deterministic tools verify results; and the orchestrator records evidence, updates state, and finalizes accepted work according to configured policy.
 
 The CLI entry point is:
 
@@ -38,13 +38,13 @@ Run tests:
 ## Typical Workflow
 
 1. Configure a target repository in `configs/<project>.yaml`.
-2. Write or generate an objective in `objectives/<release>.yaml`.
-3. Write or generate bounded task contracts in `contracts/`.
-4. Run `agent-loop doctor` for preflight diagnostics, then run one contract with `agent-loop run-task` or a release queue with `agent-loop run-release`.
+2. Run `agent-loop plan-backlog --mode strong-model --execute-planner` so the governor agent selects the next epic from docs, roadmap, artifacts, and the repository goal.
+3. Run `agent-loop run-objective` so the selected epic is decomposed into contracts and executed by worker agents.
+4. Run `agent-loop doctor` for preflight diagnostics when launching governed release execution.
 5. Monitor `runs/<release-run-id>/release.log` while the release is running.
 6. Review evidence under `runs/`, including `release_metrics.json`, `release_budget.json`, `release_tuning.md`, `failure_diagnosis.yaml`, and `executor_attempts.json` for failed tasks.
-7. Use the budget ledger and tuning report to adjust `model_routing` or task size before the next run.
-8. Push the feature branch or merge to `main` only when the project policy allows it.
+7. Let the governor use budget, tuning, validation, and artifact evidence to update roadmap/backlog state before the next run.
+8. Push the feature branch or merge to `main` when the configured project policy allows autonomous finalization.
 
 Example:
 

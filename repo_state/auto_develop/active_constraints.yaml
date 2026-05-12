@@ -2,5 +2,7 @@ constraints:
   - Task contracts define allowed files and forbidden changes.
   - Verification must run before deterministic acceptance.
   - Evidence bundles are authoritative; executor summaries are supporting context only.
-  - Commit, merge, and push require explicit accepted-task finalization flags.
+  - The default workflow is autonomous-first: humans provide goals, credentials, and hard policy boundaries, not routine approval gates.
+  - Commit, merge, and push follow configured autonomous finalization policy and must remain auditable.
   - Generated run evidence under runs/ is local and ignored by Git.
+  - The roadmap governor must update backlog and repo-state memory from run artifacts, metrics, tuning reports, validation output, and new domain learnings.

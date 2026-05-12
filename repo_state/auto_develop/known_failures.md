@@ -9,13 +9,15 @@
 
 - The first full release run showed that `gpt-5.3-codex-spark` is not
   supported for the current Codex ChatGPT account.
-- Project configs now default workers to `gpt-5.4-mini`, but doctor/preflight
-  diagnostics should keep flagging unsupported or wasteful model routing before
-  a release starts.
+- Project configs now express the recommended model hierarchy with safe
+  fallbacks and `model_catalog` availability diagnostics. `gpt-5.3-codex-spark`
+  remains a repair-role candidate with fallback to `gpt-5.4-mini`.
 
-## Current Gap: budget-aware release governance
+## Current Gap: autonomous roadmap governor
 
-- Release metrics exist, but they are not yet converted into explicit budget
-  ledgers, budget enforcement, or tuning recommendations.
-- The next planned release, `release-governor-1`, addresses this Phase 2 gap
-  without provider-specific pricing tables or external services.
+- `plan-backlog --mode strong-model --execute-planner` can invoke a governor
+  agent that reads docs, roadmap, repo-state memory, and goals, then emits a
+  validated `BacklogPlan`.
+- The next gap is chaining this into a persistent autonomous loop: backlog
+  state, objective/contract generation, release execution, and repo-state
+  updates after each epic.

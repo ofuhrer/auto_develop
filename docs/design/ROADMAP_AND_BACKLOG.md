@@ -10,7 +10,7 @@ Build the smallest useful autonomous loop first:
 4. Collect immutable evidence.
 5. Produce a deterministic accept, reject, or escalate decision.
 
-Defer databases, web UI, distributed execution, open-model serving, and implicit automatic merging until the local loop is reliable.
+Defer databases, web UI, distributed execution, and open-model serving until the local loop is reliable. Avoid human-in-the-loop gates unless they are explicit repository policy or safety boundaries.
 
 ## Phase 1: MVP Bounded Autonomous Execution Loop
 
@@ -41,7 +41,7 @@ Required capabilities:
 7. Run deterministic verification commands.
 8. Collect evidence bundle.
 9. Produce accept, reject, or escalate recommendation.
-10. Require human approval before merge unless autonomous finalization was explicitly requested.
+10. Support autonomous finalization when explicitly configured by repository policy.
 
 Success criterion:
 
@@ -109,6 +109,7 @@ Current implementation status:
 - Repeated-failure diagnosis writes `executor_attempts.json` and `failure_diagnosis.yaml` after bounded executor or verification failures; the default backend is deterministic and the diagnosis step is exposed through a replaceable seam for stronger review.
 - `agent-loop plan-release` writes deterministic contract planning scaffolds from release objectives and can execute a configured planner backend with `--execute-planner`, preserving planner stdout/stderr/metadata paths in the contract plan.
 - `agent-loop run-objective` plans from an objective, writes validated generated contracts, and runs those contracts as a release queue.
+- `agent-loop plan-backlog` analyzes the roadmap against a repository goal, emits prioritized epics, and can write the highest-priority epic as a release objective for `run-objective`.
 - Generated-contract admission rejects release mismatch, missing diff evidence, weak stop conditions, whole-repo scope, unknown verification profiles, inconsistent verification profiles, and allowed-file counts above project budget.
 - Accepted-task finalization uses a local merge lock and rebases the worktree onto latest base before merging.
 - Contract-contained rebase conflicts get one bounded autonomous repair attempt before escalation.
@@ -161,6 +162,38 @@ Remaining Phase 3 work is now small:
 1. Rename or alias domain-specific public terms such as `scientific_validation`, `scientific_assumptions`, and `scientific_review.yaml` to generic validation terminology while preserving backward compatibility.
 2. Make repository instruction ingestion more explicit so target repos can declare when benchmarks, domain validation, remote commands, or PR policies are required.
 3. Add optional PR creation or PR-preparation automation for the final feature branch.
+
+## Phase 4: Autonomous Roadmap Governor
+
+Goal:
+
+Let the governor agent own the upstream development loop: read the roadmap, documentation, repository state, run artifacts, and repository goal; infer the next backlog epics; prioritize them by expected reward; select one epic; decompose it into objectives, contracts, and worker tasks; run the work; review the result; update roadmap/backlog state; and repeat.
+
+Required capabilities:
+
+1. Read roadmap, repo-state memory, recent run summaries, and tuning artifacts.
+2. Identify actionable epics and reject duplicate or already-completed work.
+3. Prioritize epics against an explicit repository goal.
+4. Write a selected epic as a bounded release objective.
+5. Generate contracts for that objective through `plan-release`.
+6. Run the resulting release through `run-objective` or `run-release`.
+7. Update repo-state memory and backlog state after each accepted or failed epic.
+8. Continue until budget, explicit stopping criteria, or no actionable epics remain.
+9. For validation-heavy or simulation repositories, promote new findings from benchmarks, failed validations, generated artifacts, and changed assumptions into future roadmap/backlog decisions.
+
+Current implementation status:
+
+- `agent-loop plan-backlog --mode strong-model --execute-planner` lets the configured planner agent read bounded documentation, roadmap context, and the repository goal, then emit a validated `BacklogPlan` with prioritized epics and one selected next epic.
+- `BacklogPlan` now carries `roadmap_updates` and `repo_state_updates` so the governor can surface learned roadmap/backlog changes from docs, artifacts, metrics, and validation evidence.
+- Deterministic `plan-backlog` remains available as fallback/test scaffolding, not as the target autonomous governor behavior.
+- Objective-to-contract and contract-to-release execution already exist through `plan-release`, `run-objective`, and `run-release`.
+
+Remaining Phase 4 work:
+
+1. Add a persistent backlog state file so completed, skipped, blocked, and active epics are tracked across runs.
+2. Add a higher-level `run-backlog` command that chains `plan-backlog` -> `run-objective` for one selected epic.
+3. Teach the governor to generate sub-task contracts directly from the selected epic and decide which workers can run in parallel.
+4. Teach the governor to apply or commit policy-compliant roadmap/backlog/repo-state updates after each epic with outcome, metrics, and next recommendations.
 
 ## Critical Path
 
@@ -260,7 +293,7 @@ Mitigation:
 
 - Limit executor attempts.
 - Classify failures.
-- Escalate to strong model or human after bounded retries.
+- Escalate to stronger-model diagnosis first; use human escalation only at configured policy boundaries or after autonomous repair is exhausted.
 
 ### Strong Model Rate Limits
 

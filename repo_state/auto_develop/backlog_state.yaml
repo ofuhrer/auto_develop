@@ -1,0 +1,22 @@
+active_goal: Move toward fully autonomous roadmap-driven development.
+governor_mode: autonomous_first
+current_focus: roadmap-governor
+active_epic: null
+completed_epics:
+  - release-governor-1
+  - adaptive-model-hierarchy
+blocked_epics: []
+candidate_epics:
+  - id: run-backlog
+    title: Chain governor planning into objective execution.
+    rationale: Enables the highest-level loop to select an epic and execute it without a manually supplied objective.
+  - id: persistent-backlog-state
+    title: Track completed, skipped, blocked, and active epics across runs.
+    rationale: Prevents duplicate work and lets the governor reason over long-running development history.
+  - id: governor-state-refresh
+    title: Apply roadmap and repo-state updates after each epic.
+    rationale: Ensures new learnings from artifacts, validation, metrics, and documentation feed the next planning cycle.
+last_reviewed: 2026-05-12
+notes:
+  - Human review is an escalation boundary, not a routine planning gate.
+  - The governor should read release artifacts, metrics, budget ledgers, tuning reports, and validation outputs before choosing the next epic.

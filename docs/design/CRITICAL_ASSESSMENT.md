@@ -4,7 +4,7 @@
 
 The design direction is sound: a thin external orchestrator, bounded task contracts, isolated worktrees, deterministic verification, and evidence bundles are the right primitives for pragmatic agentic development in validation-heavy repositories.
 
-The main risk is scope creep. The system can become a platform before the first autonomous task loop works. Phase 1 must stay narrow: one local CLI, one executor, one repository config, one task at a time, and autonomous finalization only when explicitly requested.
+The main risk is unbounded autonomy, not autonomy itself. The system should be autonomous-first, but every autonomous step must have explicit state, evidence, budgets, rollback paths, and stopping criteria.
 
 ## Strengths
 
@@ -31,7 +31,7 @@ The main risk is scope creep. The system can become a platform before the first 
 - Use Python dataclasses or Pydantic models, but avoid building a plugin framework until a second adapter exists.
 - Store state in predictable directories and plain files.
 - Implement deterministic review before model review.
-- Treat model review as optional diagnosis, not a required path for every task.
+- Treat stronger-model review as the first escalation path before human interruption.
 - Keep project-specific remote execution out of the control plane unless the target repository's own documentation requires it.
 - Do not build automatic PR creation until evidence collection and deterministic review are stable.
 
@@ -48,9 +48,9 @@ The main risk is scope creep. The system can become a platform before the first 
 
 ## Non-Negotiables
 
-- No task merges or pushes itself unless explicit accepted-task finalization was requested.
+- No task merges or pushes itself outside configured autonomous finalization policy.
 - No task skips verification.
 - No domain fixture or tolerance changes without explicit permission.
-- No release tagging without human approval.
+- No release tagging unless configured release policy permits it.
 - No secrets in logs or evidence bundles.
 - No unbounded retry loops.

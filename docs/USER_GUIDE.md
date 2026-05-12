@@ -256,6 +256,23 @@ acceptance_criteria:
 
 Use objectives for planning. Use contracts for execution.
 
+The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the governor agent should choose the next epic, produce an objective, and feed the existing objective/contract/release machinery.
+
+Use backlog planning first:
+
+```bash
+agent-loop plan-backlog \
+  --project my_project \
+  --goal "Move toward fully autonomous roadmap-driven development" \
+  --mode strong-model \
+  --execute-planner \
+  --write-objective
+```
+
+This writes `runs/<timestamp>_<project>_backlog/backlog_plan.json` and, when `--write-objective` is set, an objective YAML for the highest-priority epic. The backlog plan can also include `roadmap_updates` and `repo_state_updates` that the governor should use to refresh project memory after runs.
+
+For self-development, `auto_develop` keeps this memory under `repo_state/auto_develop/`, including `architecture_summary.md`, `active_constraints.yaml`, `known_failures.md`, `release_plan.yaml`, and `backlog_state.yaml`.
+
 ## Step 6: Create Or Generate Task Contracts
 
 A task contract is the unit of worker execution. It must be narrow enough that an agent can complete it autonomously.
@@ -522,7 +539,7 @@ Typical evidence files include:
 - finalization metadata;
 - conflict-repair evidence when applicable.
 
-Do not treat an accepted decision as a substitute for human review on important projects. It means the task passed deterministic gates and stayed within the contract.
+Do not treat an accepted decision as a proof of semantic correctness. It means the task passed configured deterministic/model gates and stayed within the contract. If the repository policy allows autonomous finalization, the system should proceed; otherwise escalate only at the configured policy boundary.
 
 When a task fails, inspect `failure_diagnosis.yaml` first. It records the failure category, confidence, recommendation, and retry or escalation guidance derived from the same evidence bundle.
 
@@ -628,6 +645,30 @@ Creates a contract plan from an objective.
 ```bash
 agent-loop plan-release --objective objectives/my-feature-1.yaml
 ```
+
+### `agent-loop plan-backlog`
+
+Runs the roadmap-governor agent over repository documentation, roadmap context, and an explicit repository goal, then emits prioritized epics. With `--write-objective`, it writes the highest-priority epic as a release objective that can be passed to `run-objective`.
+
+```bash
+agent-loop plan-backlog \
+  --project my_project \
+  --goal "Move toward fully autonomous roadmap-driven development" \
+  --roadmap docs/design/ROADMAP_AND_BACKLOG.md \
+  --mode strong-model \
+  --execute-planner \
+  --write-objective
+```
+
+Key options:
+
+- `--project`: project config to use.
+- `--goal`: prioritization goal for the backlog planner.
+- `--roadmap`: roadmap Markdown file to analyze.
+- `--mode strong-model --execute-planner`: have the configured planner agent choose and prioritize epics from the documentation, roadmap, and goal.
+- `--write-objective`: write the selected epic into `objectives/`.
+
+Use this command before `plan-release` or `run-objective` when the next development epic should be selected by the roadmap-governor agent instead of manually supplied. Deterministic mode is only a fallback and test scaffold. The governor should also use run artifacts, validation findings, metrics, and tuning reports to update roadmap/backlog state between cycles.
 
 Key options:
 
@@ -923,7 +964,7 @@ Use the diagnosis guidance to decide the next step:
 - `model_quota`: retry with a fallback model or after the quota resets.
 - `executor_error`: inspect the executor logs before deciding whether to retry.
 
-If `guidance.escalate` is true, stop looping and hand the task to human review or stronger-model review instead of retrying blindly.
+If `guidance.escalate` is true, stop blind retries and hand the task to stronger-model review or a configured human-escalation boundary.
 
 ### Merge Or Rebase Conflicts
 
@@ -937,7 +978,7 @@ Then decide whether to repair manually, narrow the contract, or rerun from a cle
 
 ## Current Limits
 
-`auto_develop` is useful for bounded autonomous development today, but it is not yet a complete autonomous project manager.
+`auto_develop` is useful for bounded autonomous development today. The active direction is a complete autonomous project governor: it should choose epics from docs/roadmap/state, decompose them, run workers, verify, update memory, and continue until configured stopping criteria are reached.
 
 Current important limits:
 

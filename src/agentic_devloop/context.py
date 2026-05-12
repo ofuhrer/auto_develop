@@ -11,6 +11,7 @@ STATE_FILES = [
     ("benchmark_status", "benchmark_status.json"),
     ("known_failures", "known_failures.md"),
     ("release_plan", "release_plan.yaml"),
+    ("backlog_state", "backlog_state.yaml"),
 ]
 
 

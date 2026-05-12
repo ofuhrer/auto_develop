@@ -155,6 +155,73 @@ def test_run_objective_command_is_registered(capsys) -> None:
     assert "--merge-on-accept" in captured.out
 
 
+def test_plan_backlog_command_is_registered(capsys) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["plan-backlog", "--help"])
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 0
+    assert "--goal" in captured.out
+    assert "--roadmap" in captured.out
+    assert "--write-objective" in captured.out
+    assert "--execute-planner" in captured.out
+
+
+def test_plan_backlog_command_outputs_selected_epic(monkeypatch, capsys, tmp_path) -> None:
+    from agentic_devloop.models import BacklogEpic, BacklogPlan
+
+    plan = BacklogPlan(
+        project_id="demo",
+        goal="Ship autonomous roadmap governance.",
+        roadmap_path=tmp_path / "ROADMAP.md",
+        selected_epic_id="epic-0001",
+        objective_path=tmp_path / "objectives" / "demo.yaml",
+        epics=[
+            BacklogEpic(
+                epic_id="epic-0001",
+                title="Add backlog planner",
+                objective="Add backlog planner.",
+                rationale="Advances the goal.",
+                priority=1,
+                source_refs=["roadmap:1"],
+                acceptance_criteria=["Objective exists."],
+                suggested_release_id="demo-20260512-add-backlog-planner",
+            )
+        ],
+    )
+    result = SimpleNamespace(
+        plan_path=tmp_path / "runs" / "backlog_plan.json",
+        objective_path=tmp_path / "objectives" / "demo.yaml",
+        plan=plan,
+    )
+
+    def fake_plan_backlog(**kwargs):
+        assert kwargs["mode"] == "strong-model"
+        assert kwargs["planner_backend"] is not None
+        return result
+
+    monkeypatch.setattr(cli_module, "plan_backlog", fake_plan_backlog)
+    monkeypatch.setattr(cli_module, "_codex_backlog_planner_backend", lambda **kwargs: object())
+
+    exit_code = main([
+        "plan-backlog",
+        "--project",
+        "demo",
+        "--goal",
+        "Ship autonomous roadmap governance.",
+        "--mode",
+        "strong-model",
+        "--execute-planner",
+    ])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert '"selected_epic_id": "epic-0001"' in captured.out
+    assert "demo-20260512-add-backlog-planner" in captured.out
+
+
 def test_cleanup_command_is_registered(capsys) -> None:
     with pytest.raises(SystemExit) as error:
         main(["cleanup", "--help"])

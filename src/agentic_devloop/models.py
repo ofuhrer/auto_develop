@@ -114,6 +114,41 @@ class ReleaseObjective(StrictModel):
     acceptance_criteria: list[str] = Field(min_length=1)
 
 
+class BacklogEpic(StrictModel):
+    epic_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    objective: str = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+    priority: int = Field(ge=1)
+    source_refs: list[str] = Field(default_factory=list)
+    acceptance_criteria: list[str] = Field(min_length=1)
+    suggested_release_id: str = Field(min_length=1)
+
+    @field_validator("source_refs", "acceptance_criteria")
+    @classmethod
+    def backlog_items_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("backlog list items must not be empty")
+        return values
+
+
+class BacklogPlan(StrictModel):
+    project_id: str = Field(min_length=1)
+    goal: str = Field(min_length=1)
+    roadmap_path: Path
+    planner: str = Field(default="deterministic")
+    epics: list[BacklogEpic] = Field(default_factory=list)
+    selected_epic_id: str | None = None
+    objective_path: Path | None = None
+    warnings: list[str] = Field(default_factory=list)
+    roadmap_updates: list[str] = Field(default_factory=list)
+    repo_state_updates: list[str] = Field(default_factory=list)
+    planner_prompt_path: Path | None = None
+    planner_stdout_path: Path | None = None
+    planner_stderr_path: Path | None = None
+    planner_metadata_path: Path | None = None
+
+
 class ReleasePlan(StrictModel):
     release_id: str = Field(min_length=1)
     active_objective: str = Field(min_length=1)

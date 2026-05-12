@@ -2,7 +2,7 @@
 
 ## Core Objective
 
-Build an external control layer around existing coding agents. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, and explicitly requested finalization. Coding agents own implementation inside narrow contracts. Deterministic tools own acceptance evidence. Humans or strong review models own release decisions and any merge or push that was not explicitly delegated to the orchestrator.
+Build an autonomous-first external control layer around existing coding agents. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, roadmap governance, and explicitly configured finalization. Coding agents own implementation inside narrow contracts. Deterministic tools own acceptance evidence. Humans define goals, credentials, and hard safety constraints; they should not be routine approval gates inside the development loop.
 
 ## Target Use Case
 
@@ -24,20 +24,20 @@ The v1 architecture is intentionally small:
 - Deterministic verification pipeline.
 - Optional integration with existing worktree or session managers.
 
-Do not build an unconstrained autonomous agent loop for v1. Use a state machine for task execution and DAGs only for release planning or validation dependencies.
+Do not build an unconstrained autonomous agent loop. Use explicit state machines and DAGs so autonomy is inspectable, restartable, and bounded.
 
 ## Autonomy Policy
 
-The system should be fully autonomous within a bounded task phase. Once a task contract is accepted, the orchestrator should proceed through worktree creation, execution, verification, evidence collection, deterministic review, and retry handling without asking for minor decisions.
+The default posture is autonomous-first and agentic-first. Once a repository goal and safety policy are configured, the governor should read docs and roadmap state, select the next highest-reward epic, decompose it, run bounded workers, verify, review, update state, and continue until budget or explicit stopping criteria are reached.
 
-Human stopping points should be rare and meaningful:
+Human stopping points are exceptions, not workflow milestones:
 
-- Approving release objectives and task contracts.
-- Resolving scope changes that exceed the contract.
-- Resolving domain or validation changes that exceed documented repo policy.
-- Reviewing repeated failures after bounded retries.
-- Approving release operations.
-- Approving merge or push operations unless the run was started with explicit autonomous finalization flags.
+- Supplying or changing the repository goal.
+- Supplying credentials, secrets, or external permissions.
+- Resolving scope changes that exceed configured policy.
+- Resolving domain or validation changes that the target repo explicitly marks as non-autonomous.
+- Reviewing repeated failures only after bounded strong-model diagnosis and repair attempts are exhausted.
+- Approving destructive or irreversible operations that were not explicitly delegated.
 
 Agents must not stop for routine implementation choices, formatting fixes, local verification, log collection, or evidence packaging.
 
@@ -61,7 +61,7 @@ Rules:
 - No task may self-expand scope.
 - No task may merge or push itself unless the run explicitly enabled accepted-task finalization.
 - Failed verification may trigger bounded retries.
-- Repeated failure escalates to strong-model or human diagnosis.
+- Repeated failure escalates first to stronger-model diagnosis or repair; human escalation is the last resort.
 
 ## Agent Drift Controls
 
@@ -144,10 +144,12 @@ Project state must be externalized. Do not keep long-lived state primarily insid
 
 Autonomous systems fail quickly when context grows without discipline. Keep memory layered:
 
-- Immutable project memory: human-curated architecture, API contracts, domain rules, and operational constraints.
+- Immutable project memory: authoritative architecture, API contracts, domain rules, and operational constraints.
 - Dynamic episodic memory: compressed summaries of recent runs, unresolved failures, branch state, and open TODOs.
 - Retrieval memory: searchable prior commits, logs, failures, and discussions, retrieved only when relevant.
 - Working memory: the current task contract plus the smallest necessary context slice.
+
+The roadmap governor is responsible for keeping dynamic memory, roadmap, and backlog state current. After each epic or failed attempt it should inspect evidence artifacts, release metrics, tuning reports, validation outputs, and changed documentation, then propose or apply bounded roadmap/backlog updates according to configured policy. For simulation software, new scientific or domain findings are not side notes; they are first-class inputs to the next planning cycle.
 
 Required state files:
 
@@ -158,6 +160,7 @@ repo_state/
   benchmark_status.json
   known_failures.md
   release_plan.yaml
+  backlog_state.yaml
 ```
 
 Only relevant slices may be injected into task prompts. Compression is allowed for logs and history, but not for equations, validation rules, numerical tolerances, benchmark definitions, or task acceptance criteria.

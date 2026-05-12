@@ -10,16 +10,17 @@ This directory contains user, maintainer, and design documentation for `agentic-
 
 ## Project Summary
 
-`agentic-devloop` is an external orchestration layer around coding agents. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, and explicitly requested Git finalization. Coding agents own implementation inside narrow task contracts.
+`agentic-devloop` is an autonomous-first orchestration layer around coding agents. A governor agent owns roadmap/backlog analysis, epic selection, and state refresh. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, and configured Git finalization. Coding agents own implementation inside narrow task contracts.
 
 The project prioritizes:
 
 1. Fast, bounded, pragmatic development loops.
-2. Autonomous execution inside explicit contracts.
+2. Autonomous-first planning and execution inside explicit contracts.
 3. Deterministic verification before trust.
 4. Auditable evidence for every accepted change.
 5. Safe Git integration through isolated worktrees and feature branches.
-6. Domain conservatism for validation, benchmarks, fixtures, and tolerances.
+6. Continuous roadmap/backlog refresh from artifacts, validation evidence, metrics, and domain learnings.
+7. Domain conservatism for validation, benchmarks, fixtures, and tolerances.
 
 ## Current Implementation
 
@@ -35,7 +36,7 @@ Implemented capabilities include:
 - repeated-failure diagnosis evidence (`executor_attempts.json` and `failure_diagnosis.yaml`) with deterministic classification by default and a replaceable backend seam for stronger review;
 - role-based model routing;
 - repo-state context injection;
-- `run-task`, `run-release`, `plan-release`, `run-objective`, `status`, and `cleanup` commands;
+- `run-task`, `run-release`, `plan-backlog`, `plan-release`, `run-objective`, `status`, and `cleanup` commands;
 - release-level feature branch integration through `feature/<release>`;
 - dynamic release DAG scheduling from `depends_on` and file-overlap analysis;
 - human-cockpit `release.log`, raw audit `release.raw.log`, `release_metrics.json`, `release_budget.json`, and `release_tuning.md`;
