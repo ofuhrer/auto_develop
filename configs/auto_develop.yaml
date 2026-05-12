@@ -13,6 +13,21 @@ verification_profiles:
   default:
     commands:
       - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+  documentation:
+    commands:
+      - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+  code_only:
+    commands:
+      - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+  benchmark:
+    commands:
+      - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+  scientific_validation:
+    commands:
+      - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+  release_preparation:
+    commands:
+      - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
 
 budget:
   max_executor_attempts_per_task: 2

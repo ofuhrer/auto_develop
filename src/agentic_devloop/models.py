@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class StrictModel(BaseModel):
@@ -56,7 +56,8 @@ class ReleaseObjective(StrictModel):
 
 
 class VerificationSpec(StrictModel):
-    commands: list[str] = Field(min_length=1)
+    commands: list[str] = Field(default_factory=list)
+    profile: str | None = None
 
     @field_validator("commands")
     @classmethod
@@ -65,11 +66,32 @@ class VerificationSpec(StrictModel):
             raise ValueError("verification commands must not be empty")
         return commands
 
+    @model_validator(mode="after")
+    def must_define_commands_or_profile(self) -> "VerificationSpec":
+        if not self.commands and not self.profile:
+            raise ValueError("verification must define commands or profile")
+        return self
+
+
+class TaskType(StrEnum):
+    CODE_ONLY = "code_only"
+    DOCUMENTATION = "documentation"
+    BENCHMARK = "benchmark"
+    SCIENTIFIC_VALIDATION = "scientific_validation"
+    RELEASE_PREPARATION = "release_preparation"
+
+
+class RemoteDispatch(StrictModel):
+    target: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+    required_artifacts: list[str] = Field(default_factory=list)
+
 
 class TaskContract(StrictModel):
     task_id: str = Field(min_length=1)
     release_id: str = Field(min_length=1)
     title: str = Field(min_length=1)
+    task_type: TaskType = TaskType.CODE_ONLY
     budget_class: str = Field(min_length=1)
     objective: str = Field(min_length=1)
     allowed_files: list[str] = Field(min_length=1)
@@ -79,6 +101,10 @@ class TaskContract(StrictModel):
     stop_conditions: list[str] = Field(min_length=1)
     non_goals: list[str] = Field(default_factory=list)
     scientific_assumptions: list[str] = Field(default_factory=list)
+    fixture_changes_allowed: bool = False
+    tolerance_changes_allowed: bool = False
+    benchmark_delta_required: bool = False
+    remote_dispatch: RemoteDispatch | None = None
 
     @field_validator("allowed_files", "required_evidence", "stop_conditions")
     @classmethod
@@ -86,6 +112,13 @@ class TaskContract(StrictModel):
         if any(not value.strip() for value in values):
             raise ValueError("list items must not be empty")
         return values
+
+    @model_validator(mode="after")
+    def scientific_tasks_require_assumptions(self) -> "TaskContract":
+        if self.task_type in {TaskType.BENCHMARK, TaskType.SCIENTIFIC_VALIDATION}:
+            if not self.scientific_assumptions:
+                raise ValueError("benchmark and scientific validation tasks require assumptions")
+        return self
 
 
 class TaskState(StrEnum):
@@ -164,6 +197,9 @@ class EvidenceBundle(StrictModel):
     changed_files_path: Path
     verification_log_path: Path
     model_call_metadata_path: Path | None = None
+    scientific_review_path: Path | None = None
+    benchmark_delta_path: Path | None = None
+    remote_dispatch_path: Path | None = None
     review_path: Path | None = None
     decision_path: Path | None = None
     finalization_path: Path | None = None

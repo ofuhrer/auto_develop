@@ -11,6 +11,7 @@ from agentic_devloop.evidence import (
     EvidenceCollector,
     write_finalization_result,
     write_review_decision,
+    write_scientific_outputs,
 )
 from agentic_devloop.executor import CodexExecutor
 from agentic_devloop.git_finalize import FinalizeResult, finalize_accepted_task
@@ -28,6 +29,7 @@ from agentic_devloop.models import (
 )
 from agentic_devloop.prompt import write_executor_prompt
 from agentic_devloop.review import deterministic_review
+from agentic_devloop.scientific import analyze_scientific_changes
 from agentic_devloop.verification import VerificationRunner
 from agentic_devloop.worktree import create_worktree
 from agentic_devloop.yaml_io import load_yaml_model
@@ -163,9 +165,10 @@ def run_task(
             decision=decision,
         )
 
-    _report(progress, f"running verification: {len(task.verification.commands)} command(s)")
+    verification_commands = _verification_commands(config, task)
+    _report(progress, f"running verification: {len(verification_commands)} command(s)")
     verification_results = VerificationRunner(timeout_seconds=verification_timeout_seconds).run(
-        commands=task.verification.commands,
+        commands=verification_commands,
         worktree_path=worktree_path,
         output_dir=scratch_dir,
     )
@@ -178,6 +181,11 @@ def run_task(
     _report(progress, "collecting evidence")
     current_diff = diff_patch(worktree_path)
     current_changed_files = git_changed_files(worktree_path)
+    scientific_review = analyze_scientific_changes(
+        task=task,
+        changed_files=current_changed_files,
+        diff_text=current_diff,
+    )
     task_run = task_run.model_copy(
         update={
             "state": TaskState.REVIEWING,
@@ -205,7 +213,9 @@ def run_task(
         changed_files=current_changed_files,
         diff_text=current_diff,
         verification_exit_codes=[result.exit_code for result in verification_results],
+        scientific_review=scientific_review,
     )
+    bundle = write_scientific_outputs(bundle, task, scientific_review)
     write_review_decision(bundle, decision)
     _report(progress, f"decision={decision.decision}")
     finalize_result = None
@@ -246,6 +256,16 @@ def _executor_for_config(config: ProjectConfig) -> ExecutorProtocol:
     if config.executor.type != "codex_cli":
         raise ValueError(f"unsupported executor type: {config.executor.type}")
     return CodexExecutor(config.executor)
+
+
+def _verification_commands(config: ProjectConfig, task: TaskContract) -> list[str]:
+    if task.verification.commands:
+        return task.verification.commands
+    assert task.verification.profile is not None
+    try:
+        return config.verification_profiles[task.verification.profile].commands
+    except KeyError as error:
+        raise ValueError(f"verification profile not found: {task.verification.profile}") from error
 
 
 def _review_line_count(diff: str) -> int:

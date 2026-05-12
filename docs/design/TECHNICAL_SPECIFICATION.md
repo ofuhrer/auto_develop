@@ -99,6 +99,7 @@ A bounded unit of execution.
 task_id: rr-0001
 release_id: v0.8.0
 title: Add regression test for selected validation gate report mismatch
+task_type: scientific_validation
 budget_class: M
 
 objective: >
@@ -122,15 +123,19 @@ required_evidence:
   - verifier summary
 
 verification:
-  commands:
-    - cargo test --all-targets
-    - python scripts/validate_public_real_site_conditional_pilot_run.py --check
+  profile: scientific_validation
 
 stop_conditions:
   - More than 8 files changed.
   - More than 600 diff lines.
   - Verification fails twice.
   - Agent proposes changing forbidden files.
+
+scientific_assumptions:
+  - No scientific behavior changes are expected.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
 ```
 
 ### TaskRun
@@ -169,6 +174,9 @@ runs/
       git_diff.patch
       changed_files.txt
       verification.log
+      scientific_review.yaml
+      benchmark_delta.json
+      remote_dispatch.yaml
       review.md
       decision.yaml
 ```
@@ -246,6 +254,17 @@ By default, the command does not merge changes or create a pull request. Autonom
 Merge conflicts currently stop the command and leave the base repository in Git's conflict state for follow-up resolution.
 
 `agent-loop status` reads existing evidence bundles and prints recent run summaries with run ID, task ID, decision, and bundle path.
+
+### Scientific Evidence
+
+For benchmark and scientific validation tasks, deterministic review records:
+
+- Fixture-like file changes.
+- Tolerance-like diff lines.
+- Benchmark-like file changes.
+- Policy violations caused by missing explicit permissions.
+
+`remote_dispatch.yaml` records declared remote dispatch requirements. v1 records the request but does not execute remote jobs.
 
 ## Project Adapter Interface
 

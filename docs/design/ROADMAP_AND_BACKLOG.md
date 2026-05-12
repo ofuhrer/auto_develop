@@ -133,6 +133,17 @@ Success criterion:
 
 The system can support a release-sized objective such as `v0.7.0` to `v0.8.0` by decomposing it into bounded tasks and maintaining auditable evidence for each accepted change.
 
+Current implementation status:
+
+- Task contracts support task types: code-only, documentation, benchmark, scientific validation, and release preparation.
+- Verification may reference a named project verification profile instead of repeating commands in each contract.
+- Scientific validation and benchmark tasks require explicit scientific assumptions.
+- Deterministic review detects unapproved fixture-like and tolerance-like changes.
+- Evidence bundles persist `scientific_review.yaml`.
+- Benchmark tasks or benchmark-like file changes persist `benchmark_delta.json`.
+- Remote dispatch requests persist `remote_dispatch.yaml` with `declared_not_executed` status.
+- Balfrin execution, remote artifact collection, local/open model roles, and PR automation are not yet implemented.
+
 ## Critical Path
 
 ### 1. Task Contract Schema

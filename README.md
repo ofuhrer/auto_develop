@@ -78,6 +78,8 @@ agent-loop run-task \
 
 Repo-specific context can be stored under `repo_state/<project>/` and referenced with `repo_state_path` in the project config. `run-task` injects selected state into executor prompts and writes `model_call_metadata.json` into the evidence bundle.
 
+Scientific and benchmark contracts can set `task_type`, use named verification profiles, and declare fixture/tolerance permissions. Phase 3 evidence includes `scientific_review.yaml`, optional `benchmark_delta.json`, and optional `remote_dispatch.yaml`.
+
 Show recent run summaries:
 
 ```bash

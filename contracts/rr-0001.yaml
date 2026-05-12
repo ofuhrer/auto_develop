@@ -1,6 +1,7 @@
 task_id: rr-0001
 release_id: v0.8.0
 title: Add regression test for selected validation gate report mismatch
+task_type: scientific_validation
 budget_class: M
 
 objective: >

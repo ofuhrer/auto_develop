@@ -33,6 +33,29 @@ class FakeExecutor:
         )
 
 
+class BenchmarkExecutor:
+    def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = worktree_path / "benches" / "result.txt"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text("benchmark delta placeholder\n", encoding="utf-8")
+
+        stdout_path = output_dir / "executor_stdout.log"
+        stderr_path = output_dir / "executor_stderr.log"
+        stdout_path.write_text("benchmark executor\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+
+        return ExecutorResult(
+            command=["benchmark-executor"],
+            exit_code=0,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            duration_seconds=0.01,
+            backend="fake",
+            model=None,
+        )
+
+
 class FailingExecutor:
     def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -122,6 +145,81 @@ def test_run_task_wires_executor_verification_evidence_and_review(tmp_path) -> N
     assert (result.bundle_path / "review.md").exists()
     assert (result.bundle_path / "changed_files.txt").read_text(encoding="utf-8") == "docs/result.md\n"
     assert "+Implemented by fake executor." in (result.bundle_path / "git_diff.patch").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_run_task_uses_verification_profile_and_writes_phase3_evidence(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "verification_profiles": {"benchmark": {"commands": ["test -f benches/result.txt"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contract_path = tmp_path / "contract.yaml"
+    _write_yaml(
+        contract_path,
+        {
+            "task_id": "bench-0001",
+            "release_id": "v0.1.0",
+            "title": "Record benchmark delta",
+            "task_type": "benchmark",
+            "budget_class": "S",
+            "objective": "Record benchmark placeholder output.",
+            "allowed_files": ["benches/**"],
+            "required_evidence": ["git diff", "benchmark delta"],
+            "verification": {"profile": "benchmark"},
+            "stop_conditions": ["Verification fails twice."],
+            "scientific_assumptions": ["No physical model changes."],
+            "benchmark_delta_required": True,
+            "remote_dispatch": {
+                "target": "balfrin",
+                "reason": "Heavy benchmark placeholder.",
+                "required_artifacts": ["benchmark.log"],
+            },
+        },
+    )
+
+    result = run_task(
+        project_id="demo",
+        contract_path=contract_path,
+        config_dir=config_dir,
+        runs_dir=tmp_path / "runs",
+        executor=BenchmarkExecutor(),
+        now=datetime(2026, 5, 12, 12, 4, tzinfo=UTC),
+    )
+
+    assert result.decision.decision == "accepted"
+    assert (result.bundle_path / "scientific_review.yaml").exists()
+    assert (result.bundle_path / "benchmark_delta.json").exists()
+    assert (result.bundle_path / "remote_dispatch.yaml").exists()
+    assert "test -f benches/result.txt" in (result.bundle_path / "verification.log").read_text(
         encoding="utf-8"
     )
 

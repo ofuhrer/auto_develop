@@ -1,6 +1,7 @@
 task_id: ad-0001
 release_id: sprint-0
 title: Add CLI smoke-test documentation
+task_type: documentation
 budget_class: S
 
 objective: >
@@ -22,8 +23,7 @@ required_evidence:
   - verifier summary
 
 verification:
-  commands:
-    - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+  profile: documentation
 
 stop_conditions:
   - More than 1 file changed.

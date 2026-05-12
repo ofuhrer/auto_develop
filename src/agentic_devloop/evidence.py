@@ -7,6 +7,7 @@ from pathlib import Path
 from agentic_devloop.git_finalize import FinalizeResult
 from agentic_devloop.git_state import changed_files, diff_patch
 from agentic_devloop.models import EvidenceBundle, ExecutorResult, ReviewDecision, TaskContract, TaskRun
+from agentic_devloop.scientific import ScientificReview, benchmark_delta
 
 
 class EvidenceCollector:
@@ -130,6 +131,39 @@ def write_finalization_result(bundle: EvidenceBundle, result: FinalizeResult) ->
         encoding="utf-8",
     )
     return bundle.model_copy(update={"finalization_path": finalization_path})
+
+
+def write_scientific_outputs(
+    bundle: EvidenceBundle,
+    task: TaskContract,
+    review: ScientificReview,
+) -> EvidenceBundle:
+    from agentic_devloop.scientific import write_scientific_review
+
+    scientific_review_path = write_scientific_review(bundle.bundle_path / "scientific_review.yaml", review)
+    updates = {"scientific_review_path": scientific_review_path}
+    delta = benchmark_delta(task, review)
+    if delta["required"] or delta["benchmark_changes"]:
+        benchmark_delta_path = bundle.bundle_path / "benchmark_delta.json"
+        import json
+
+        benchmark_delta_path.write_text(json.dumps(delta, indent=2) + "\n", encoding="utf-8")
+        updates["benchmark_delta_path"] = benchmark_delta_path
+    if task.remote_dispatch is not None:
+        remote_dispatch_path = bundle.bundle_path / "remote_dispatch.yaml"
+        remote_dispatch_path.write_text(
+            _yaml(
+                {
+                    **task.remote_dispatch.model_dump(mode="json"),
+                    "status": "declared_not_executed",
+                    "note": "Remote dispatch metadata is recorded; execution backend is not implemented.",
+                }
+            ),
+            encoding="utf-8",
+        )
+        updates["remote_dispatch_path"] = remote_dispatch_path
+
+    return bundle.model_copy(update=updates)
 
 
 def _decision_yaml(decision: ReviewDecision) -> str:

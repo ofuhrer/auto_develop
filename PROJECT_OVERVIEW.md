@@ -73,12 +73,16 @@ Implemented:
 - Repo-state context loading from `repo_state/<project>/`.
 - Context-aware executor prompts with character budget enforcement.
 - Model-call metadata capture for prompt/output size tracking.
+- Task-type verification profiles for documentation, code, benchmark, scientific validation, and release preparation.
+- Scientific guardrails for fixture and tolerance changes.
+- Benchmark and remote-dispatch evidence metadata.
 
 Not yet completed:
 
 - Automated merge-conflict repair.
 - Strong-model call accounting.
 - Repeated-failure diagnosis beyond deterministic escalation.
+- Actual Balfrin remote execution and artifact collection.
 - A real synthetic run against `rust_rockfall`.
 - Sprint 0 review based on actual executor evidence.
 - Pull-request automation.

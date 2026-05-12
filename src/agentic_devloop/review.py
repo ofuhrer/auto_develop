@@ -3,6 +3,7 @@ from __future__ import annotations
 from fnmatch import fnmatch
 
 from agentic_devloop.models import Budget, Decision, ReviewDecision, Reviewer, TaskContract
+from agentic_devloop.scientific import ScientificReview
 
 
 def _diff_line_count(diff_text: str) -> int:
@@ -20,6 +21,7 @@ def deterministic_review(
     changed_files: list[str],
     diff_text: str,
     verification_exit_codes: list[int],
+    scientific_review: ScientificReview | None = None,
 ) -> ReviewDecision:
     risks: list[str] = []
 
@@ -40,6 +42,14 @@ def deterministic_review(
             decision=Decision.NEEDS_REVISION,
             reviewer=Reviewer.DETERMINISTIC,
             rationale=f"Changed files outside allowed paths: {', '.join(disallowed_files)}.",
+        )
+
+    if scientific_review is not None and scientific_review.violations:
+        return ReviewDecision(
+            task_id=task.task_id,
+            decision=Decision.NEEDS_REVISION,
+            reviewer=Reviewer.DETERMINISTIC,
+            rationale="Scientific review violations: " + "; ".join(scientific_review.violations),
         )
 
     if len(changed_files) > budget.max_changed_files_per_task:

@@ -14,6 +14,29 @@ verification_profiles:
       - cargo fmt --check
       - cargo clippy --all-targets --all-features -- -D warnings
       - cargo test --all-targets --all-features
+  code_only:
+    commands:
+      - cargo fmt --check
+      - cargo clippy --all-targets --all-features -- -D warnings
+      - cargo test --all-targets --all-features
+  documentation:
+    commands:
+      - cargo test --all-targets --all-features
+  benchmark:
+    commands:
+      - cargo fmt --check
+      - cargo test --all-targets --all-features
+  scientific_validation:
+    commands:
+      - cargo fmt --check
+      - cargo clippy --all-targets --all-features -- -D warnings
+      - cargo test --all-targets --all-features
+      - python scripts/validate_public_real_site_conditional_pilot_run.py --check
+  release_preparation:
+    commands:
+      - cargo fmt --check
+      - cargo clippy --all-targets --all-features -- -D warnings
+      - cargo test --all-targets --all-features
 
 budget:
   max_executor_attempts_per_task: 2

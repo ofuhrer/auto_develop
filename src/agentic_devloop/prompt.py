@@ -21,6 +21,8 @@ You are executing one bounded task inside an isolated Git worktree.
 - Do not edit files outside `allowed_files`.
 - Do not make any forbidden change.
 - Do not weaken verification, assertions, fixtures, tolerances, or scientific constraints.
+- Do not change fixture, benchmark, or tolerance semantics unless the task contract explicitly allows it.
+- If remote dispatch is declared, do not fake remote execution; report missing remote execution honestly.
 - Run only commands needed for implementation and verification.
 - Stop only if the task cannot be completed without violating the contract.
 
