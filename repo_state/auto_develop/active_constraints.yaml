@@ -1,0 +1,6 @@
+constraints:
+  - Task contracts define allowed files and forbidden changes.
+  - Verification must run before deterministic acceptance.
+  - Evidence bundles are authoritative; executor summaries are supporting context only.
+  - Commit, merge, and push require explicit accepted-task finalization flags.
+  - Generated run evidence under runs/ is local and ignored by Git.

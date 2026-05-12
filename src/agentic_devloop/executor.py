@@ -44,4 +44,7 @@ class CodexExecutor:
             timed_out=result.timed_out,
             backend=self.config.type,
             model=self.config.model,
+            prompt_chars=len(prompt_text),
+            stdout_chars=len(result.stdout),
+            stderr_chars=len(result.stderr),
         )

@@ -67,6 +67,9 @@ budget:
   max_strong_model_calls_per_release: 10
   max_changed_files_per_task: 8
   max_diff_lines_per_task: 600
+  max_context_chars_per_task: 30000
+
+repo_state_path: repo_state/rust_rockfall
 ```
 
 ### ReleaseObjective
@@ -85,7 +88,7 @@ acceptance_criteria:
   - All default verification checks pass.
   - Scientific assumptions are documented.
   - Evidence bundle exists for each accepted task.
-  - Human approval before merge.
+  - Human approval before merge unless autonomous finalization is explicitly enabled.
 ```
 
 ### TaskContract
@@ -162,6 +165,7 @@ runs/
       executor_prompt.md
       executor_stdout.log
       executor_stderr.log
+      model_call_metadata.json
       git_diff.patch
       changed_files.txt
       verification.log
@@ -207,6 +211,8 @@ agent-loop run-task \
   --push-on-accept
 
 agent-loop status
+
+agent-loop status --limit 5
 ```
 
 Planned later commands:
@@ -238,6 +244,8 @@ By default, the command does not merge changes or create a pull request. Autonom
 - `--push-on-accept`: commit, merge, and push the base branch to `origin`.
 
 Merge conflicts currently stop the command and leave the base repository in Git's conflict state for follow-up resolution.
+
+`agent-loop status` reads existing evidence bundles and prints recent run summaries with run ID, task ID, decision, and bundle path.
 
 ## Project Adapter Interface
 

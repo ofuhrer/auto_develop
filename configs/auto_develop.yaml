@@ -2,6 +2,7 @@ project_id: auto_develop
 repo_path: /Users/fuhrer/Desktop/auto_develop/main
 default_base_branch: main
 worktree_root: /Users/fuhrer/Desktop/auto_develop/worktrees
+repo_state_path: repo_state/auto_develop
 
 executor:
   type: codex_cli

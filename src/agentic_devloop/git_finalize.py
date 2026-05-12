@@ -50,6 +50,7 @@ def finalize_accepted_task(
     merged = False
     pushed = False
     if merge:
+        _ensure_base_branch(repo_path, base_branch)
         merge_branch(repo_path, task_branch)
         merged = True
 
@@ -67,6 +68,13 @@ def _has_changes(repo_path: Path) -> bool:
 def _ensure_clean(repo_path: Path) -> None:
     if _has_changes(repo_path):
         raise GitFinalizeError(f"repository has uncommitted changes: {repo_path}")
+
+
+def _ensure_base_branch(repo_path: Path, base_branch: str) -> None:
+    _ensure_clean(repo_path)
+    current_branch = _git(repo_path, ["branch", "--show-current"]).strip()
+    if current_branch != base_branch:
+        _git(repo_path, ["switch", base_branch])
 
 
 def _git(repo_path: Path, args: list[str]) -> str:

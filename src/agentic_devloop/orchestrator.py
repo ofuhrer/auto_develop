@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from agentic_devloop.config import load_project_config
-from agentic_devloop.evidence import EvidenceCollector, write_review_decision
+from agentic_devloop.context import enforce_context_budget, load_context_bundle
+from agentic_devloop.evidence import (
+    EvidenceCollector,
+    write_finalization_result,
+    write_review_decision,
+)
 from agentic_devloop.executor import CodexExecutor
 from agentic_devloop.git_finalize import FinalizeResult, finalize_accepted_task
 from agentic_devloop.git_state import changed_files as git_changed_files
@@ -88,7 +93,10 @@ def run_task(
     )
 
     _report(progress, "writing executor prompt")
-    prompt_path = write_executor_prompt(task, scratch_dir / "executor_prompt.md")
+    context = load_context_bundle(config, task)
+    enforce_context_budget(context, config.budget.max_context_chars_per_task)
+    _report(progress, f"context sections={len(context.sections)} chars={context.total_chars}")
+    prompt_path = write_executor_prompt(task, scratch_dir / "executor_prompt.md", context)
     task_run = TaskRun(
         task_id=task.task_id,
         state=TaskState.EXECUTING,
@@ -109,6 +117,7 @@ def run_task(
         worktree_path=worktree_path,
         output_dir=scratch_dir,
     )
+    executor_result = _normalize_executor_metadata(executor_result, prompt_path)
     _report(progress, f"executor exit_code={executor_result.exit_code}")
     if executor_result.exit_code != 0:
         verification_log_path = scratch_dir / "verification.log"
@@ -222,6 +231,7 @@ def run_task(
             _report(progress, f"merged_into={config.default_base_branch}")
         if finalize_result.pushed:
             _report(progress, f"pushed=origin/{config.default_base_branch}")
+        write_finalization_result(bundle, finalize_result)
 
     return TaskRunResult(
         run_id=run_id,
@@ -245,3 +255,16 @@ def _review_line_count(diff: str) -> int:
 def _report(progress: Callable[[str], None] | None, message: str) -> None:
     if progress is not None:
         progress(message)
+
+
+def _normalize_executor_metadata(result: ExecutorResult, prompt_path: Path) -> ExecutorResult:
+    updates = {}
+    if result.prompt_chars == 0 and prompt_path.exists():
+        updates["prompt_chars"] = len(prompt_path.read_text(encoding="utf-8"))
+    if result.stdout_chars == 0 and result.stdout_path.exists():
+        updates["stdout_chars"] = len(result.stdout_path.read_text(encoding="utf-8"))
+    if result.stderr_chars == 0 and result.stderr_path.exists():
+        updates["stderr_chars"] = len(result.stderr_path.read_text(encoding="utf-8"))
+    if not updates:
+        return result
+    return result.model_copy(update=updates)

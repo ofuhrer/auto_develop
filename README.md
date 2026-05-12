@@ -76,4 +76,12 @@ agent-loop run-task \
 
 `--push-on-accept` commits accepted changes in the task worktree, merges the task branch into the configured base branch, and pushes the base branch to `origin`. Use `--merge-on-accept` to commit and merge without pushing, or `--commit-on-accept` to only commit in the task worktree.
 
+Repo-specific context can be stored under `repo_state/<project>/` and referenced with `repo_state_path` in the project config. `run-task` injects selected state into executor prompts and writes `model_call_metadata.json` into the evidence bundle.
+
+Show recent run summaries:
+
+```bash
+agent-loop status --limit 5
+```
+
 Before running against `rust_rockfall`, update [configs/rust_rockfall.yaml](configs/rust_rockfall.yaml) so `repo_path` and `worktree_root` point to real local paths.

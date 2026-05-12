@@ -4,11 +4,12 @@ from pathlib import Path
 
 import yaml
 
-from agentic_devloop.models import TaskContract
+from agentic_devloop.models import ContextBundle, TaskContract
 
 
-def build_executor_prompt(task: TaskContract) -> str:
+def build_executor_prompt(task: TaskContract, context: ContextBundle | None = None) -> str:
     contract_yaml = yaml.safe_dump(task.model_dump(mode="json"), sort_keys=False)
+    context_text = _context_text(context)
     return f"""# Bounded Development Task
 
 You are executing one bounded task inside an isolated Git worktree.
@@ -36,10 +37,29 @@ Before finishing, provide a concise summary with:
 
 ```yaml
 {contract_yaml}```
+{context_text}
 """
 
 
-def write_executor_prompt(task: TaskContract, path: Path) -> Path:
+def write_executor_prompt(
+    task: TaskContract,
+    path: Path,
+    context: ContextBundle | None = None,
+) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(build_executor_prompt(task), encoding="utf-8")
+    path.write_text(build_executor_prompt(task, context), encoding="utf-8")
     return path
+
+
+def _context_text(context: ContextBundle | None) -> str:
+    if context is None or not context.sections:
+        return ""
+
+    sections = ["\n## External Repo Context\n"]
+    for section in context.sections:
+        sections.append(f"### {section.name}\n")
+        sections.append(f"Source: `{section.source_path}`\n\n")
+        sections.append("```text\n")
+        sections.append(section.content.rstrip())
+        sections.append("\n```\n")
+    return "\n".join(sections)

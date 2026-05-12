@@ -10,7 +10,7 @@ Build the smallest useful autonomous loop first:
 4. Collect immutable evidence.
 5. Produce a deterministic accept, reject, or escalate decision.
 
-Defer databases, web UI, distributed execution, open-model serving, and automatic merging until the local loop is reliable.
+Defer databases, web UI, distributed execution, open-model serving, and implicit automatic merging until the local loop is reliable.
 
 ## Phase 1: MVP Bounded Autonomous Execution Loop
 
@@ -28,7 +28,7 @@ Scope:
 - No database.
 - No web UI.
 - No full Balfrin integration.
-- No autonomous merging.
+- Autonomous merging only when explicitly requested after deterministic acceptance.
 
 Required capabilities:
 
@@ -41,7 +41,7 @@ Required capabilities:
 7. Run deterministic verification commands.
 8. Collect evidence bundle.
 9. Produce accept, reject, or escalate recommendation.
-10. Require human approval before merge.
+10. Require human approval before merge unless autonomous finalization was explicitly requested.
 
 Success criterion:
 
@@ -84,6 +84,16 @@ Required capabilities:
 Success criterion:
 
 The system can execute multiple related tasks with lower repeated context and without manually copying long prompt histories.
+
+Current implementation status:
+
+- Repo-state files are supported through `repo_state_path`.
+- `auto_develop` has canonical state files under `repo_state/auto_develop/`.
+- Executor prompts inject selected external context from repo-state files.
+- Context size is bounded by `budget.max_context_chars_per_task`.
+- Evidence bundles persist `model_call_metadata.json` with prompt/output character counts.
+- `agent-loop status` reads existing evidence bundles and reports recent run summaries.
+- Strong-model call accounting and repeated-failure diagnosis are not yet implemented.
 
 ## Phase 3: Scientific Verification and Distributed Execution
 
@@ -461,7 +471,7 @@ Acceptance:
 - Verification run.
 - Evidence collected.
 - Decision produced.
-- No automatic merge.
+- No automatic merge unless accepted-task finalization was explicitly requested.
 
 ### Task 0.10: Review Sprint 0
 

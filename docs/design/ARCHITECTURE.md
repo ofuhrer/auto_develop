@@ -2,7 +2,7 @@
 
 ## Core Objective
 
-Build an external control layer around existing coding agents. The orchestrator owns policy, task boundaries, state transitions, budgets, and verification. Coding agents own implementation inside narrow contracts. Deterministic tools own acceptance evidence. Humans or strong review models own merge and release decisions.
+Build an external control layer around existing coding agents. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, and explicitly requested finalization. Coding agents own implementation inside narrow contracts. Deterministic tools own acceptance evidence. Humans or strong review models own release decisions and any merge or push that was not explicitly delegated to the orchestrator.
 
 ## Target Use Case
 
@@ -36,7 +36,8 @@ Human stopping points should be rare and meaningful:
 - Resolving scope changes that exceed the contract.
 - Resolving scientific or validation changes.
 - Reviewing repeated failures after bounded retries.
-- Approving merge and release operations.
+- Approving release operations.
+- Approving merge or push operations unless the run was started with explicit autonomous finalization flags.
 
 Agents must not stop for routine implementation choices, formatting fixes, local verification, log collection, or evidence packaging.
 
@@ -58,7 +59,7 @@ Rules:
 
 - No task may skip verification.
 - No task may self-expand scope.
-- No task may merge itself.
+- No task may merge or push itself unless the run explicitly enabled accepted-task finalization.
 - Failed verification may trigger bounded retries.
 - Repeated failure escalates to strong-model or human diagnosis.
 

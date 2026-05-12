@@ -33,6 +33,7 @@ class Budget(StrictModel):
     max_strong_model_calls_per_release: int = Field(ge=0)
     max_changed_files_per_task: int = Field(gt=0)
     max_diff_lines_per_task: int = Field(gt=0)
+    max_context_chars_per_task: int = Field(default=30_000, gt=0)
 
 
 class ProjectConfig(StrictModel):
@@ -43,6 +44,7 @@ class ProjectConfig(StrictModel):
     executor: ExecutorConfig
     verification_profiles: dict[str, VerificationProfile] = Field(min_length=1)
     budget: Budget
+    repo_state_path: Path | None = None
 
 
 class ReleaseObjective(StrictModel):
@@ -117,6 +119,23 @@ class ExecutorResult(StrictModel):
     timed_out: bool = False
     backend: str = Field(min_length=1)
     model: str | None = None
+    prompt_chars: int = Field(default=0, ge=0)
+    stdout_chars: int = Field(default=0, ge=0)
+    stderr_chars: int = Field(default=0, ge=0)
+
+
+class ContextSection(StrictModel):
+    name: str = Field(min_length=1)
+    source_path: Path
+    content: str
+
+
+class ContextBundle(StrictModel):
+    sections: list[ContextSection] = Field(default_factory=list)
+
+    @property
+    def total_chars(self) -> int:
+        return sum(len(section.content) for section in self.sections)
 
 
 class TaskRun(StrictModel):
@@ -144,8 +163,10 @@ class EvidenceBundle(StrictModel):
     git_diff_path: Path
     changed_files_path: Path
     verification_log_path: Path
+    model_call_metadata_path: Path | None = None
     review_path: Path | None = None
     decision_path: Path | None = None
+    finalization_path: Path | None = None
 
 
 class Decision(StrEnum):

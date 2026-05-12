@@ -8,6 +8,7 @@ from pathlib import Path
 from agentic_devloop import __version__
 from agentic_devloop.config import ProjectConfigError, load_project_config
 from agentic_devloop.orchestrator import run_task
+from agentic_devloop.status import load_run_summaries
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -84,7 +85,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Commit message to use when committing accepted task changes.",
     )
 
-    subparsers.add_parser("status", help="Show orchestrator status.")
+    status_parser = subparsers.add_parser("status", help="Show orchestrator status.")
+    status_parser.add_argument(
+        "--runs-dir",
+        default="runs",
+        help="Directory containing run evidence.",
+    )
+    status_parser.add_argument(
+        "--limit",
+        type=int,
+        default=10,
+        help="Maximum number of runs to show.",
+    )
 
     return parser
 
@@ -135,7 +147,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "status":
-        print("No runs found.")
+        summaries = load_run_summaries(Path(args.runs_dir), limit=args.limit)
+        if not summaries:
+            print("No runs found.")
+            return 0
+        print(json.dumps([summary.__dict__ | {"bundle_path": str(summary.bundle_path)} for summary in summaries], indent=2))
         return 0
 
     parser.print_help()

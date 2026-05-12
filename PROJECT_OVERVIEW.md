@@ -12,7 +12,7 @@ The system treats AI agents as unreliable proposal generators, not trusted devel
 
 1. Fast pragmatic development: ship a small local CLI first, prove the loop on one repository, and defer databases, web UI, distributed execution, and advanced model routing.
 2. High autonomy inside bounded phases: agents should keep working through implementation, verification, evidence collection, and deterministic review without stopping for minor decisions.
-3. Clear stopping criteria after major steps: stop for human approval only at release planning approval, risky scientific scope changes, failed bounded retries, merge, and release tagging.
+3. Clear stopping criteria after major steps: stop for human approval only at release planning approval, risky scientific scope changes, failed bounded retries, and release tagging. Commit, merge, and push may run autonomously only when explicitly requested.
 4. Deterministic verification before trust: tests, diffs, logs, changed-file lists, and budget checks are authoritative; agent summaries are supporting evidence only.
 5. Filesystem-first state: use run directories, task contracts, logs, evidence bundles, and Git metadata before adding persistent services.
 6. Scientific conservatism: validation fixtures, numerical tolerances, benchmarks, and scientific assumptions require explicit contract permission and review.
@@ -45,7 +45,8 @@ Agents should stop and ask for human direction only when one of these happens:
 - A scientific fixture, numerical tolerance, benchmark, or validation rule must change.
 - Verification fails after the configured retry limit.
 - The diff exceeds budget limits for changed files or line count.
-- A merge, release tag, deployment, or irreversible repository operation is required.
+- A release tag, deployment, or irreversible repository operation is required.
+- A merge or push is required but autonomous finalization was not explicitly requested.
 - Secrets, credentials, or unsafe filesystem operations are involved.
 
 ## v1 Mission
@@ -69,10 +70,15 @@ Implemented:
 - Evidence bundle collection.
 - Deterministic review with persisted `decision.yaml`.
 - Optional accepted-task finalization with commit, merge, and push.
+- Repo-state context loading from `repo_state/<project>/`.
+- Context-aware executor prompts with character budget enforcement.
+- Model-call metadata capture for prompt/output size tracking.
 
 Not yet completed:
 
 - Automated merge-conflict repair.
+- Strong-model call accounting.
+- Repeated-failure diagnosis beyond deterministic escalation.
 - A real synthetic run against `rust_rockfall`.
 - Sprint 0 review based on actual executor evidence.
 - Pull-request automation.

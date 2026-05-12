@@ -1,0 +1,7 @@
+release_id: sprint-0
+active_objective: Validate the local autonomous run loop on a low-risk documentation task.
+current_tasks:
+  - ad-0001
+next_steps:
+  - Review evidence quality after accepted self-test runs.
+  - Add conflict-resolution handling before relying on autonomous merges for larger changes.

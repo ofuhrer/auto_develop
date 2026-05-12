@@ -4,7 +4,7 @@
 
 The design direction is sound: a thin external orchestrator, bounded task contracts, isolated worktrees, deterministic verification, and evidence bundles are the right primitives for pragmatic agentic development in scientific repositories.
 
-The main risk is scope creep. The system can become a platform before the first autonomous task loop works. Phase 1 must stay narrow: one local CLI, one executor, one repository config, one task at a time, and no automatic merge.
+The main risk is scope creep. The system can become a platform before the first autonomous task loop works. Phase 1 must stay narrow: one local CLI, one executor, one repository config, one task at a time, and autonomous finalization only when explicitly requested.
 
 ## Strengths
 
@@ -13,7 +13,7 @@ The main risk is scope creep. The system can become a platform before the first 
 - Evidence bundles reduce reliance on agent summaries.
 - Deterministic verification protects against agents redefining success.
 - Filesystem state is fast to implement and easy to inspect during early development.
-- Human approval at merge and release boundaries preserves accountability.
+- Explicit finalization flags preserve accountability for autonomous commit, merge, and push operations.
 
 ## Weaknesses
 
@@ -48,7 +48,7 @@ The main risk is scope creep. The system can become a platform before the first 
 
 ## Non-Negotiables
 
-- No task merges itself.
+- No task merges or pushes itself unless explicit accepted-task finalization was requested.
 - No task skips verification.
 - No scientific fixture or tolerance changes without explicit permission.
 - No release tagging without human approval.
