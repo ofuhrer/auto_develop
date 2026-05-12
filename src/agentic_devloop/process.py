@@ -26,8 +26,11 @@ def run_process(
     shell: bool = False,
     input_text: str | None = None,
     stream_callback: Callable[[str, str], None] | None = None,
+    heartbeat_callback: Callable[[float], None] | None = None,
+    heartbeat_interval_seconds: float = 120.0,
+    clock: Callable[[], float] = time.monotonic,
 ) -> ProcessOutput:
-    started_at = time.monotonic()
+    started_at = clock()
     if stream_callback is not None:
         return _run_process_streamed(
             command,
@@ -36,7 +39,10 @@ def run_process(
             shell=shell,
             input_text=input_text,
             stream_callback=stream_callback,
+            heartbeat_callback=heartbeat_callback,
+            heartbeat_interval_seconds=heartbeat_interval_seconds,
             started_at=started_at,
+            clock=clock,
         )
     try:
         completed = subprocess.run(
@@ -54,7 +60,7 @@ def run_process(
             exit_code=completed.returncode,
             stdout=completed.stdout,
             stderr=completed.stderr,
-            duration_seconds=time.monotonic() - started_at,
+            duration_seconds=clock() - started_at,
         )
     except subprocess.TimeoutExpired as error:
         return ProcessOutput(
@@ -62,7 +68,7 @@ def run_process(
             exit_code=124,
             stdout=error.stdout or "",
             stderr=error.stderr or "",
-            duration_seconds=time.monotonic() - started_at,
+            duration_seconds=clock() - started_at,
             timed_out=True,
         )
 
@@ -75,7 +81,10 @@ def _run_process_streamed(
     shell: bool,
     input_text: str | None,
     stream_callback: Callable[[str, str], None],
+    heartbeat_callback: Callable[[float], None] | None,
+    heartbeat_interval_seconds: float,
     started_at: float,
+    clock: Callable[[], float],
 ) -> ProcessOutput:
     process = subprocess.Popen(
         command,
@@ -111,8 +120,25 @@ def _run_process_streamed(
             pass
 
     timed_out = False
+    next_heartbeat = started_at + heartbeat_interval_seconds
+    deadline = started_at + timeout_seconds
     try:
-        exit_code = process.wait(timeout=timeout_seconds)
+        while True:
+            exit_code = process.poll()
+            if exit_code is not None:
+                break
+            now = clock()
+            if now >= deadline:
+                timed_out = True
+                process.kill()
+                exit_code = 124
+                process.wait()
+                break
+            if heartbeat_callback is not None and heartbeat_interval_seconds > 0 and now >= next_heartbeat:
+                heartbeat_callback(now - started_at)
+                while next_heartbeat <= now:
+                    next_heartbeat += heartbeat_interval_seconds
+            time.sleep(min(0.2, max(0.01, deadline - now)))
     except subprocess.TimeoutExpired:
         timed_out = True
         process.kill()
@@ -126,6 +152,6 @@ def _run_process_streamed(
         exit_code=exit_code,
         stdout="".join(stdout_lines),
         stderr="".join(stderr_lines),
-        duration_seconds=time.monotonic() - started_at,
+        duration_seconds=clock() - started_at,
         timed_out=timed_out,
     )

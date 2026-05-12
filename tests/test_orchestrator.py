@@ -195,9 +195,10 @@ def test_run_task_wires_executor_verification_evidence_and_review(tmp_path) -> N
 
 def test_executor_attempts_stream_codex_output_to_progress(tmp_path, monkeypatch) -> None:
     class StreamingCodexExecutor:
-        def __init__(self, config: ExecutorConfig, *, stream_callback=None) -> None:
+        def __init__(self, config: ExecutorConfig, *, stream_callback=None, heartbeat_callback=None) -> None:
             self.config = config
             self.stream_callback = stream_callback
+            self.heartbeat_callback = heartbeat_callback
 
         def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
             output_dir.mkdir(parents=True, exist_ok=True)

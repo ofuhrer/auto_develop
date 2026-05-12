@@ -418,7 +418,7 @@ Monitor it in another terminal:
 tail -f runs/<release-run-id>/release.log
 ```
 
-The filtered log is intended for live monitoring. It reports release-level events, the current task objective and scope, executor attempts and models, verification, review decisions, finalization, and a final release summary. Full raw worker stdout and stderr are retained in:
+The filtered log is a human cockpit for live monitoring. It uses color and emojis for quick scanning, reports the current task objective and scope, shows selected models and executor attempts, emits periodic "still working" heartbeats for long-running workers, summarizes useful worker-reported sections, and highlights when a human should inspect, steer, or interrupt. Full raw worker stdout and stderr are retained in:
 
 ```text
 runs/<release-run-id>/release.raw.log
@@ -432,8 +432,8 @@ Release outputs normally include:
 - `release_tuning.md`;
 - `release_review.md`;
 - per-task evidence bundles;
-- filtered `release.log`;
-- raw `release.raw.log`.
+- human-facing `release.log`;
+- raw audit `release.raw.log`.
 
 Use `release_metrics.json` for cost and routing analysis. It records per-task prompt size, context size, output size, executor attempts, model usage, verification duration, changed-file count, and diff size. These are character-count proxies, not provider-billed token counts, but they are enough to compare task sizes, model routing, context budgets, and wasted fallback attempts.
 

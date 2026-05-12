@@ -14,9 +14,11 @@ class CodexExecutor:
         config: ExecutorConfig,
         *,
         stream_callback: Callable[[str, str], None] | None = None,
+        heartbeat_callback: Callable[[float], None] | None = None,
     ) -> None:
         self.config = config
         self.stream_callback = stream_callback
+        self.heartbeat_callback = heartbeat_callback
 
     def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -38,6 +40,7 @@ class CodexExecutor:
             timeout_seconds=self.config.max_walltime_minutes * 60,
             input_text=prompt_text,
             stream_callback=self.stream_callback,
+            heartbeat_callback=self.heartbeat_callback,
         )
 
         stdout_path.write_text(result.stdout, encoding="utf-8")

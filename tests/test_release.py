@@ -192,9 +192,9 @@ def test_run_release_executes_ordered_contracts_and_writes_summary(tmp_path) -> 
     assert [task.decision.task_id for task in result.task_results] == ["demo-0001", "demo-0002"]
     assert result.log_path.exists()
     log = result.log_path.read_text(encoding="utf-8")
-    assert "Logs:" in log
-    assert "Task 1/2 demo-0001:" in log
-    assert "=== Release Summary ===" in log
+    assert "📡 Watching:" in log
+    assert "🧭 Task 1/2 demo-0001:" in log
+    assert "🧾 Release Summary" in log
     summary = result.summary_path.read_text(encoding="utf-8")
     assert '"release_id": "v0.1.0"' in summary
     assert '"log_path":' in summary
@@ -272,13 +272,23 @@ def test_multiplexed_progress_filters_noisy_agent_lines_and_keeps_raw_log(tmp_pa
     progress("agent task=x phase=executor attempt=1 stream=stderr | 2026 WARN plugin noise")
     progress("agent task=x phase=executor attempt=1 stream=stderr | ERROR: quota")
     progress("agent task=x phase=executor attempt=1 stream=stdout | Changed files:")
+    progress("agent task=x phase=executor attempt=1 stream=stdout | - /Users/fuhrer/Desktop/auto_develop/worktrees/run/src/file.py")
+    progress("agent task=x phase=executor attempt=1 stream=stdout | Result:")
+    progress("agent task=x phase=executor attempt=1 stream=stdout | - Implemented useful behavior")
+    progress("event=executor_heartbeat task=x phase=executor attempt=1 model=gpt-5.4-mini elapsed_seconds=120")
 
-    assert visible == [
-        "agent task=x phase=executor attempt=1 stream=stderr | ERROR: quota",
-        "agent task=x phase=executor attempt=1 stream=stdout | Changed files:",
-    ]
-    assert "plugin noise" not in (tmp_path / "release.log").read_text(encoding="utf-8")
-    assert "plugin noise" in (tmp_path / "raw.log").read_text(encoding="utf-8")
+    log = (tmp_path / "release.log").read_text(encoding="utf-8")
+    raw = (tmp_path / "raw.log").read_text(encoding="utf-8")
+
+    assert not any("ERROR: quota" in line for line in visible)
+    assert "plugin noise" not in log
+    assert "ERROR: quota" not in log
+    assert "📝 x worker summary: Files changed" in log
+    assert "…/worktrees/run/src/file.py" in log
+    assert "📝 x worker summary: Result" in log
+    assert "still working after 2m 0s" in log
+    assert "plugin noise" in raw
+    assert "ERROR: quota" in raw
 
 
 def test_release_preflight_rejects_existing_project_worktrees(tmp_path) -> None:
@@ -365,10 +375,11 @@ def test_run_release_writes_metrics_and_final_log_summary(tmp_path) -> None:
     assert summary["tuning_path"] == str(result.tuning_path)
     assert str(result.budget_path) in review
     assert str(result.tuning_path) in review
-    assert "=== Release Summary ===" in log
-    assert "Release: v0.1.0" in log
-    assert f"Budget: {result.budget_path}" in log
-    assert f"Tuning: {result.tuning_path}" in log
+    assert "🧾 Release Summary" in log
+    assert "Release:" in log
+    assert "v0.1.0" in log
+    assert str(result.budget_path) in log
+    assert str(result.tuning_path) in log
     assert "Good luck, future humans. 🧑‍🚀🛠️🍀" in log
 
 
