@@ -1,0 +1,20 @@
+project_id: auto_develop
+repo_path: /Users/fuhrer/Desktop/auto_develop/main
+default_base_branch: main
+worktree_root: /Users/fuhrer/Desktop/auto_develop/worktrees
+
+executor:
+  type: codex_cli
+  model: gpt-5.3-codex-spark
+  max_walltime_minutes: 25
+
+verification_profiles:
+  default:
+    commands:
+      - .venv/bin/python -m pytest
+
+budget:
+  max_executor_attempts_per_task: 2
+  max_strong_model_calls_per_release: 10
+  max_changed_files_per_task: 8
+  max_diff_lines_per_task: 600

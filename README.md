@@ -19,7 +19,13 @@ Install locally:
 
 ```bash
 uv venv
-uv pip install -e ".[dev]"
+uv pip install ".[dev]"
+```
+
+For editable development installs in environments that ignore editable `.pth` path entries, use:
+
+```bash
+PYTHONPATH=src uv run agent-loop --help
 ```
 
 Run tests:
