@@ -16,6 +16,13 @@ Current flow:
 
 The orchestrator owns policy, state, budgets, verification, evidence, roadmap governance, and finalization. Worker agents own implementation inside narrow task contracts. Humans provide goals and hard safety boundaries rather than routine approvals.
 
+Implemented seams:
+
+1. `GovernorLoop` now coordinates one selected epic at a time.
+2. `StateStore` persists active, completed, and blocked epic state, plus recent run summaries.
+3. `RepairPolicy` classifies retryable versus stop conditions for contract-contained failures, verification drift, missing credentials, and unsafe policy expansion.
+4. These seams support the single-epic governor flow; the product-facing N-epic loop is still planned.
+
 Target flow:
 
 1. A freshly cloned `auto_develop` checkout and target repository are onboarded with one or two prompts plus repository policy/configuration.

@@ -10,4 +10,5 @@ next_steps:
   - Run governor-state-store-seam and governor-repair-policy-seam first; they are independent and can run in parallel if overlap analysis permits.
   - Run governor-loop-one-epic-service after both seams are accepted.
   - Run governor-service-docs-and-state-notes last to document only behavior that was actually implemented.
+  - Keep the multi-epic governor work planned until the code supports it; do not promote state notes into a claim that the N-epic loop has shipped.
   - After the release, update backlog_state.yaml, release_plan.yaml, and roadmap/backlog docs from release evidence.
