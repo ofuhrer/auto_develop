@@ -1,0 +1,35 @@
+task_id: ad-0001
+release_id: sprint-0
+title: Add CLI smoke-test documentation
+budget_class: S
+
+objective: >
+  Add a short README section showing how to run the local CLI smoke checks.
+
+allowed_files:
+  - README.md
+
+forbidden_changes:
+  - Do not change Python source files.
+  - Do not change tests.
+  - Do not change project configuration.
+
+required_evidence:
+  - git diff
+  - test output
+  - changed-files list
+  - executor summary
+  - verifier summary
+
+verification:
+  commands:
+    - .venv/bin/python -m pytest
+
+stop_conditions:
+  - More than 1 file changed.
+  - More than 80 diff lines.
+  - Verification fails twice.
+  - Agent proposes changing files outside README.md.
+
+scientific_assumptions:
+  - Not applicable; documentation-only task.
