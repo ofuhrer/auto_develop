@@ -13,7 +13,6 @@ objective: >
 
 allowed_files:
   - src/agentic_devloop/state_store.py
-  - src/agentic_devloop/models.py
   - tests/test_state_store.py
 
 forbidden_changes:
@@ -26,7 +25,6 @@ forbidden_changes:
 required_evidence:
   - git diff
   - focused StateStore pytest output
-  - model validation pytest output if models.py changes
   - changed-files list
 
 verification:
@@ -45,4 +43,3 @@ non_goals:
 
 scientific_assumptions:
   - Not applicable; developer tooling task.
-

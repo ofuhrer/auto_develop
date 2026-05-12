@@ -13,7 +13,6 @@ objective: >
 
 allowed_files:
   - src/agentic_devloop/repair_policy.py
-  - src/agentic_devloop/models.py
   - tests/test_repair_policy.py
 
 forbidden_changes:
@@ -26,7 +25,6 @@ forbidden_changes:
 required_evidence:
   - git diff
   - focused RepairPolicy pytest output
-  - model validation pytest output if shared models are added
   - changed-files list
 
 verification:
@@ -46,4 +44,3 @@ non_goals:
 
 scientific_assumptions:
   - Not applicable; developer tooling task.
-
