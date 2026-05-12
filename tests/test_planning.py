@@ -165,6 +165,23 @@ def test_parse_planner_output_validates_nested_task_contracts() -> None:
     assert plan.generated_contracts[0].suggested_contract.verification.commands == ["true"]
 
 
+def test_parse_planner_output_accepts_fenced_json() -> None:
+    plan = parse_planner_output(
+        """```json
+{
+  "release_id": "v0.3.1",
+  "planner": "strong-model",
+  "generated_contracts": [],
+  "warnings": []
+}
+```""",
+        release_id="v0.3.1",
+        planner="strong-model",
+    )
+
+    assert plan.release_id == "v0.3.1"
+
+
 def test_parse_planner_output_rejects_invalid_schema() -> None:
     with pytest.raises(ValueError, match="planner output did not match"):
         parse_planner_output(
@@ -208,6 +225,30 @@ def test_validate_generated_contracts_rejects_task_id_mismatch() -> None:
     )
 
     with pytest.raises(ValueError, match="did not match suggested contract task_id"):
+        validate_generated_contracts(plan)
+
+
+def test_validate_generated_contracts_rejects_release_mismatch() -> None:
+    plan = _contract_plan_with_allowed_files(
+        release_id="v0.5.0",
+        task_id="v0.5.0-0001",
+        contract_release_id="v0.5.1",
+        allowed_files=["src/agentic_devloop/planning.py"],
+    )
+
+    with pytest.raises(ValueError, match="did not match plan release_id"):
+        validate_generated_contracts(plan)
+
+
+def test_validate_generated_contracts_rejects_whole_repo_scope() -> None:
+    plan = _contract_plan_with_allowed_files(
+        release_id="v0.5.0",
+        task_id="v0.5.0-0001",
+        contract_release_id="v0.5.0",
+        allowed_files=["**"],
+    )
+
+    with pytest.raises(ValueError, match="unsafe whole-repo"):
         validate_generated_contracts(plan)
 
 
@@ -342,6 +383,42 @@ def test_strong_model_plan_uses_backend_seam_to_parse_structured_output(tmp_path
     assert result.plan.budget_ledger_path is not None
     assert result.plan.planner_prompt_path is not None
     assert result.plan.planner_prompt_path.exists()
+
+
+def _contract_plan_with_allowed_files(
+    *,
+    release_id: str,
+    task_id: str,
+    contract_release_id: str,
+    allowed_files: list[str],
+) -> ContractPlan:
+    return ContractPlan(
+        release_id=release_id,
+        planner="strong-model",
+        generated_contracts=[
+            GeneratedContract(
+                task_id=task_id,
+                title="Draft API changes",
+                objective="Implement bounded API support.",
+                rationale="Covers one acceptance criterion.",
+                suggested_contract=TaskContract.model_validate(
+                    {
+                        "task_id": task_id,
+                        "release_id": contract_release_id,
+                        "title": "Draft API changes",
+                        "task_type": "code_only",
+                        "budget_class": "M",
+                        "objective": "Implement bounded API support.",
+                        "allowed_files": allowed_files,
+                        "forbidden_changes": ["Do not touch release contracts."],
+                        "required_evidence": ["plan diff"],
+                        "verification": {"commands": ["true"]},
+                        "stop_conditions": ["Scope expands beyond the allowed file."],
+                    }
+                ),
+            )
+        ],
+    )
 
 
 def _write_yaml(path: Path, data: dict) -> None:

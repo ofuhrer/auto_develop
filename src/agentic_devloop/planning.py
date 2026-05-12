@@ -74,9 +74,10 @@ def plan_release_contracts(
             reason="release planning",
             now=now,
         )
-        warnings.append(
-            "Strong-model planning backend is not implemented; budget was reserved and a planner prompt was written."
-        )
+        if planner_backend is None:
+            warnings.append(
+                "Strong-model planning backend was not executed; budget was reserved and a planner prompt was written."
+            )
 
     plan_dir = runs_dir / make_plan_id(objective.release_id, now)
     plan_dir.mkdir(parents=True, exist_ok=True)
@@ -213,6 +214,7 @@ def parse_planner_output(
     planner: str,
 ) -> ContractPlan:
     if isinstance(raw_output, str):
+        raw_output = _extract_json_object(raw_output)
         try:
             raw_output = json.loads(raw_output)
         except json.JSONDecodeError as error:
@@ -243,6 +245,17 @@ def validate_generated_contracts(plan: ContractPlan) -> list[TaskContract]:
             )
         if suggested_contract.task_id in seen_task_ids:
             raise ValueError(f"generated contract task_id {suggested_contract.task_id!r} is duplicated")
+        if suggested_contract.release_id != plan.release_id:
+            raise ValueError(
+                "generated contract release_id "
+                f"{suggested_contract.release_id!r} did not match plan release_id {plan.release_id!r}"
+            )
+        broad_patterns = [pattern for pattern in suggested_contract.allowed_files if _is_whole_repo_pattern(pattern)]
+        if broad_patterns:
+            raise ValueError(
+                "generated contract uses unsafe whole-repo allowed_files patterns: "
+                + ", ".join(broad_patterns)
+            )
         seen_task_ids.add(suggested_contract.task_id)
         validated_contracts.append(suggested_contract)
     return validated_contracts
@@ -278,6 +291,10 @@ def _planner_prompt(objective: ReleaseObjective, contracts: list[TaskContract]) 
             "",
             "Produce bounded task contracts for the release objective. Do not emit broad tasks.",
             "Every proposed contract must include allowed files, forbidden changes, verification, and stop conditions.",
+            "Return only one JSON object matching the ContractPlan schema. Do not include Markdown prose.",
+            "",
+            "Required JSON shape:",
+            '{"release_id": "...", "planner": "strong-model", "generated_contracts": [{"task_id": "...", "title": "...", "objective": "...", "rationale": "...", "suggested_contract": {...}}], "warnings": []}',
             "",
             f"## Release: {objective.release_id}",
             "",
@@ -293,3 +310,26 @@ def _planner_prompt(objective: ReleaseObjective, contracts: list[TaskContract]) 
             "",
         ]
     )
+
+
+def _extract_json_object(raw_output: str) -> str:
+    stripped = raw_output.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+    if stripped.startswith("{"):
+        return stripped
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start >= 0 and end > start:
+        return stripped[start : end + 1]
+    return stripped
+
+
+def _is_whole_repo_pattern(pattern: str) -> bool:
+    normalized = pattern.strip().rstrip("/")
+    return normalized in {"*", "**", "**/*", "./**", "./**/*"}

@@ -57,6 +57,9 @@ PYTHONPATH=src uv run agent-loop plan-release \
   --objective objectives/v0.8.0.yaml \
   --mode strong-model \
   --project auto_develop
+PYTHONPATH=src uv run agent-loop run-objective \
+  --project auto_develop \
+  --objective objectives/v0.8.0.yaml
 PYTHONPATH=src uv run agent-loop status --limit 5
 ```
 
@@ -103,7 +106,7 @@ agent-loop plan-release \
   --objective objectives/v0.8.0.yaml
 ```
 
-`plan-release` validates whether a release objective has matching contracts and writes `contract_plan.json` under `runs/`. It is deterministic scaffolding; strong-model contract generation is still a future planning mode.
+`plan-release` validates whether a release objective has matching contracts and writes `contract_plan.json` under `runs/`. Deterministic mode emits conservative planning scaffolds. Strong-model mode reserves planner budget and writes `planner_prompt.md`; add `--execute-planner` to call the configured planner backend and parse generated contracts.
 
 To reserve strong-model planning budget and write the planner prompt artifact:
 
@@ -111,7 +114,8 @@ To reserve strong-model planning budget and write the planner prompt artifact:
 agent-loop plan-release \
   --objective objectives/v0.8.0.yaml \
   --mode strong-model \
-  --project auto_develop
+  --project auto_develop \
+  --execute-planner
 ```
 
 Reviewing generated planning artifacts is a manual step:
@@ -120,6 +124,18 @@ Reviewing generated planning artifacts is a manual step:
 2. If `--mode strong-model` was used, inspect `planner_prompt.md` for the draft inputs that were sent to the planner.
 3. Approve the draft only when the proposed release queue stays within the contract and the follow-up task contracts remain bounded.
 4. Promote the approved plan into explicit task contracts before running `run-release`.
+
+To plan, write generated contracts, and immediately execute the resulting queue:
+
+```bash
+agent-loop run-objective \
+  --project auto_develop \
+  --objective objectives/v0.8.0.yaml \
+  --mode strong-model \
+  --execute-planner
+```
+
+`run-objective` applies the same generated-contract validation as `plan-release`, writes accepted contract drafts to `contracts/`, then runs those exact contract paths with `run-release`.
 
 To provide an explicit queue:
 

@@ -100,10 +100,11 @@ Current implementation status:
 - Project configs support `model_roles` and `model_routing` for cheap-worker and stronger-model task execution routing.
 - Executor roles support `fallback_models`; attempts are bounded by `budget.max_executor_attempts_per_task`.
 - Executor failure evidence includes `executor_attempts.json` and deterministic `failure_diagnosis.yaml`.
-- `agent-loop plan-release` writes deterministic contract planning scaffolds from release objectives and can reserve strong-model planning budget while writing a planner prompt.
+- `agent-loop plan-release` writes deterministic contract planning scaffolds from release objectives and can execute a configured planner backend with `--execute-planner`.
+- `agent-loop run-objective` plans from an objective, writes validated generated contracts, and runs those contracts as a release queue.
 - Accepted-task finalization uses a local merge lock and rebases the worktree onto latest base before merging.
 - Contract-contained rebase conflicts get one bounded autonomous repair attempt before escalation.
-- Strong-model call accounting and model-based repeated-failure diagnosis are not yet implemented.
+- Model-based repeated-failure diagnosis is not yet implemented.
 
 ## Phase 3: Scientific Verification and Distributed Execution
 

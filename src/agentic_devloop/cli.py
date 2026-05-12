@@ -7,8 +7,10 @@ from pathlib import Path
 
 from agentic_devloop import __version__
 from agentic_devloop.config import ProjectConfigError, load_project_config
+from agentic_devloop.objective import run_objective
 from agentic_devloop.orchestrator import run_task
 from agentic_devloop.planning import plan_release_contracts
+from agentic_devloop.planner_backend import CodexPlannerBackend
 from agentic_devloop.release import run_release
 from agentic_devloop.status import load_run_summaries
 
@@ -203,6 +205,93 @@ def build_parser() -> argparse.ArgumentParser:
         "--write-contracts-dir",
         help="Write validated contract drafts to this directory without running them.",
     )
+    plan_release_parser.add_argument(
+        "--execute-planner",
+        action="store_true",
+        help="Execute the configured planner backend instead of only writing the planner prompt.",
+    )
+
+    run_objective_parser = subparsers.add_parser(
+        "run-objective",
+        help="Plan contracts from an objective, write them, then run the resulting release.",
+    )
+    run_objective_parser.add_argument("--project", required=True, help="Project identifier.")
+    run_objective_parser.add_argument("--objective", required=True, help="Release objective YAML file.")
+    run_objective_parser.add_argument(
+        "--mode",
+        choices=["deterministic", "strong-model"],
+        default="deterministic",
+        help="Planning mode.",
+    )
+    run_objective_parser.add_argument(
+        "--strong-model",
+        dest="mode",
+        action="store_const",
+        const="strong-model",
+        help="Shortcut for --mode strong-model.",
+    )
+    run_objective_parser.add_argument(
+        "--execute-planner",
+        action="store_true",
+        help="Execute the configured planner backend when using strong-model mode.",
+    )
+    run_objective_parser.add_argument(
+        "--config-dir",
+        default="configs",
+        help="Directory containing project config YAML files.",
+    )
+    run_objective_parser.add_argument(
+        "--contracts-dir",
+        default="contracts",
+        help="Directory containing task contract YAML files.",
+    )
+    run_objective_parser.add_argument(
+        "--runs-dir",
+        default="runs",
+        help="Directory where run evidence should be written.",
+    )
+    run_objective_parser.add_argument(
+        "--verification-timeout-seconds",
+        type=int,
+        default=600,
+        help="Timeout for each verification command.",
+    )
+    run_objective_parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="Allow creating worktrees when the base repository has uncommitted changes.",
+    )
+    run_objective_parser.add_argument(
+        "--commit-on-accept",
+        action="store_true",
+        help="Commit accepted task changes in task worktrees.",
+    )
+    run_objective_parser.add_argument(
+        "--merge-on-accept",
+        action="store_true",
+        help="Commit accepted task changes and merge task branches into the base branch.",
+    )
+    run_objective_parser.add_argument(
+        "--push-on-accept",
+        action="store_true",
+        help="Commit, merge, and push accepted task changes to origin.",
+    )
+    run_objective_parser.add_argument(
+        "--continue-on-failure",
+        action="store_true",
+        help="Continue running remaining contracts after a task is not accepted.",
+    )
+    run_objective_parser.add_argument(
+        "--execution-mode",
+        choices=["sequential", "parallel"],
+        default="sequential",
+        help="Execution scheduling mode. Parallel mode rejects broad overlaps.",
+    )
+    run_objective_parser.add_argument(
+        "--debug-keep-artifacts",
+        action="store_true",
+        help="Keep task worktrees and branches after each task for debugging.",
+    )
 
     status_parser = subparsers.add_parser("status", help="Show orchestrator status.")
     status_parser.add_argument(
@@ -294,6 +383,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "plan-release":
         try:
+            if args.execute_planner and args.mode != "strong-model":
+                raise ValueError("--execute-planner requires --mode strong-model")
+            planner_backend = _codex_planner_backend(
+                project_id=args.project,
+                config_dir=Path(args.config_dir),
+                runs_dir=Path(args.runs_dir),
+            ) if args.execute_planner else None
             result = plan_release_contracts(
                 objective_path=Path(args.objective),
                 contracts_dir=Path(args.contracts_dir),
@@ -302,6 +398,7 @@ def main(argv: list[str] | None = None) -> int:
                 mode=args.mode,
                 project_id=args.project,
                 config_dir=Path(args.config_dir),
+                planner_backend=planner_backend,
             )
         except Exception as error:
             parser.exit(2, f"error: {error}\n")
@@ -315,6 +412,43 @@ def main(argv: list[str] | None = None) -> int:
                 indent=2,
             )
         )
+        return 0
+
+    if args.command == "run-objective":
+        try:
+            if args.execute_planner and args.mode != "strong-model":
+                raise ValueError("--execute-planner requires --mode strong-model")
+            if args.mode == "strong-model" and not args.execute_planner:
+                raise ValueError("run-objective --mode strong-model requires --execute-planner")
+            planner_backend = _codex_planner_backend(
+                project_id=args.project,
+                config_dir=Path(args.config_dir),
+                runs_dir=Path(args.runs_dir),
+            ) if args.execute_planner else None
+            result = run_objective(
+                project_id=args.project,
+                objective_path=Path(args.objective),
+                config_dir=Path(args.config_dir),
+                contracts_dir=Path(args.contracts_dir),
+                runs_dir=Path(args.runs_dir),
+                planning_mode=args.mode,
+                planner_backend=planner_backend,
+                verification_timeout_seconds=args.verification_timeout_seconds,
+                allow_dirty=args.allow_dirty,
+                commit_on_accept=args.commit_on_accept,
+                merge_on_accept=args.merge_on_accept,
+                push_on_accept=args.push_on_accept,
+                stop_on_failure=not args.continue_on_failure,
+                execution_mode=args.execution_mode,
+                debug_keep_artifacts=args.debug_keep_artifacts,
+                progress=_print_progress,
+            )
+        except KeyboardInterrupt:
+            parser.exit(130, "\ninterrupted: run-objective stopped before completion\n")
+        except Exception as error:
+            parser.exit(2, f"error: {error}\n")
+
+        print(json.dumps(_objective_run_result(result), indent=2))
         return 0
 
     if args.command == "status":
@@ -376,6 +510,27 @@ def _plan_release_result(result, *, inspect_proposed_contracts: bool) -> dict[st
             for generated_contract in result.plan.generated_contracts
         ]
     return output
+
+
+def _objective_run_result(result) -> dict[str, object]:
+    return {
+        "release_id": result.release_id,
+        "plan_path": str(result.planning.plan_path),
+        "written_contract_paths": [str(path) for path in result.planning.written_contract_paths],
+        "release": _release_run_result(result.release),
+    }
+
+
+def _codex_planner_backend(*, project_id: str | None, config_dir: Path, runs_dir: Path) -> CodexPlannerBackend:
+    if project_id is None:
+        raise ValueError("--execute-planner requires --project")
+    config = load_project_config(project_id, config_dir, validate_repo=True)
+    planner = config.model_roles.get("planner", config.executor)
+    return CodexPlannerBackend(
+        config=planner,
+        repo_path=config.repo_path,
+        output_dir=runs_dir / "planner_backend",
+    )
 
 
 def _print_progress(message: str) -> None:

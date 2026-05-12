@@ -258,6 +258,12 @@ agent-loop plan-release \
   --mode strong-model \
   --project auto_develop
 
+agent-loop run-objective \
+  --project auto_develop \
+  --objective objectives/v0.8.0.yaml \
+  --mode strong-model \
+  --execute-planner
+
 agent-loop status
 
 agent-loop status --limit 5
@@ -306,11 +312,11 @@ Finalization conflicts are captured in evidence. Contract-contained rebase confl
 7. Remove task worktrees and merged task branches unless `--debug-keep-artifacts` is set; preserve accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches.
 8. Persist `runs/<release-run-id>/release_summary.json`.
 
-This command executes already-defined contracts. It does not yet use a strong model to generate contracts from a release objective.
+This command executes already-defined contracts. Objective-level planning and execution are composed by `run-objective`.
 
 ### `plan-release` Flow
 
-`agent-loop plan-release` is conservative deterministic planning scaffolding:
+`agent-loop plan-release` produces a validated contract plan:
 
 1. Load and validate a `ReleaseObjective`.
 2. Inspect existing contracts for the release.
@@ -318,8 +324,18 @@ This command executes already-defined contracts. It does not yet use a strong mo
 4. If no contracts exist, propose a planning-only release-preparation draft.
 5. If contracts exist, emit acceptance-criteria coverage review entries.
 6. In `--mode strong-model`, reserve a strong-model budget ledger entry and write `planner_prompt.md`.
+7. With `--execute-planner`, run the configured planner backend, parse structured JSON output, and validate generated contracts.
 
-This is intentionally not automatic strong-model contract generation yet.
+Generated contracts must match the release ID and must not request whole-repo file scope.
+
+### `run-objective` Flow
+
+`agent-loop run-objective` composes planning and release execution:
+
+1. Run `plan-release` behavior for the supplied objective.
+2. Write validated generated contracts to the configured contracts directory.
+3. Pass those exact written contract paths to `run-release`.
+4. Return both the planning artifact path and release summary.
 
 ### Generated Contract Review
 

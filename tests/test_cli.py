@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -73,6 +74,19 @@ def test_plan_release_command_is_registered(capsys) -> None:
     assert "--strong-model" in captured.out
     assert "--inspect-proposed-contracts" in captured.out
     assert "--write-contracts-dir" in captured.out
+    assert "--execute-planner" in captured.out
+
+
+def test_run_objective_command_is_registered(capsys) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["run-objective", "--help"])
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 0
+    assert "--objective" in captured.out
+    assert "--execute-planner" in captured.out
+    assert "--merge-on-accept" in captured.out
 
 
 def test_plan_release_can_request_strong_planning_and_write_contracts(
@@ -142,3 +156,71 @@ def test_plan_release_can_request_strong_planning_and_write_contracts(
     assert '"proposed_contracts"' in captured.out
     assert '"written_contract_paths"' in captured.out
     assert '"task_id": "v1.0.0-0001"' in captured.out
+
+
+def test_run_objective_wires_planning_and_release_flags(monkeypatch, capsys, tmp_path) -> None:
+    seen_kwargs: dict[str, object] = {}
+    result = SimpleNamespace(
+        release_id="v1.0.0",
+        planning=SimpleNamespace(
+            plan_path=tmp_path / "runs" / "plan" / "contract_plan.json",
+            written_contract_paths=[tmp_path / "contracts" / "demo.yaml"],
+        ),
+        release=SimpleNamespace(
+            release_id="v1.0.0",
+            run_id="run-1",
+            summary_path=tmp_path / "runs" / "summary.json",
+            log_path=tmp_path / "runs" / "release.log",
+            decision="accepted",
+            task_results=[],
+        ),
+    )
+
+    def fake_run_objective(**kwargs):
+        seen_kwargs.update(kwargs)
+        return result
+
+    monkeypatch.setattr(cli_module, "run_objective", fake_run_objective)
+    monkeypatch.setattr(cli_module, "_codex_planner_backend", lambda **kwargs: object())
+
+    exit_code = main(
+        [
+            "run-objective",
+            "--project",
+            "demo",
+            "--objective",
+            str(tmp_path / "objective.yaml"),
+            "--strong-model",
+            "--execute-planner",
+            "--merge-on-accept",
+            "--continue-on-failure",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert seen_kwargs["planning_mode"] == "strong-model"
+    assert seen_kwargs["merge_on_accept"] is True
+    assert seen_kwargs["stop_on_failure"] is False
+    assert '"release_id": "v1.0.0"' in captured.out
+
+
+def test_execute_planner_requires_strong_model_mode(capsys) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["plan-release", "--objective", "objective.yaml", "--execute-planner"])
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 2
+    assert "--execute-planner requires --mode strong-model" in captured.err
+
+
+def test_run_objective_strong_model_requires_execute_planner(capsys) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["run-objective", "--project", "demo", "--objective", "objective.yaml", "--strong-model"])
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 2
+    assert "run-objective --mode strong-model requires --execute-planner" in captured.err

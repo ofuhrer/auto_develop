@@ -86,7 +86,8 @@ Implemented:
 - Multiplexed release logs at `runs/<release-run-id>/release.log`.
 - Default cleanup of finalized task worktrees and merged task branches after release tasks.
 - Conservative deterministic release planning via `agent-loop plan-release`.
-- Strong-planning budget reservation and planner-prompt artifacts.
+- Strong-planning budget reservation, planner-prompt artifacts, and explicit planner backend execution.
+- Objective-level orchestration via `agent-loop run-objective`.
 - Merge finalization lock plus task-worktree rebase onto latest base branch before merging.
 - One-attempt autonomous conflict repair for contract-contained rebase conflicts.
 
