@@ -6,7 +6,15 @@ from pathlib import Path
 
 import yaml
 
-from agentic_devloop.models import ExecutorConfig, ExecutorResult
+from agentic_devloop.failure_diagnosis import FailureDiagnosisBackendResult, FailureDiagnosisRequest
+from agentic_devloop.models import (
+    ExecutorConfig,
+    ExecutorResult,
+    FailureDiagnosis,
+    FailureDiagnosisGuidance,
+    FailureDiagnosisInput,
+    FailureDiagnosisSourceMetadata,
+)
 from agentic_devloop import orchestrator as orchestrator_module
 from agentic_devloop.orchestrator import run_task
 
@@ -73,6 +81,41 @@ class FailingExecutor:
             duration_seconds=0.01,
             backend="fake",
             model=None,
+        )
+
+
+class RecordingDiagnosisBackend:
+    def __init__(self, category: str) -> None:
+        self.category = category
+        self.requests: list[FailureDiagnosisRequest] = []
+
+    def diagnose(self, request: FailureDiagnosisRequest) -> FailureDiagnosisBackendResult:
+        self.requests.append(request)
+        return FailureDiagnosisBackendResult(
+            prompt="diagnosis prompt",
+            diagnosis=FailureDiagnosis(
+                diagnosis_inputs=[
+                    FailureDiagnosisInput(name="task_id", value=request.task.task_id),
+                    FailureDiagnosisInput(
+                        name="verification_exit_codes",
+                        value=", ".join(str(result.exit_code) for result in request.verification_results) or "<none>",
+                    ),
+                ],
+                category=self.category,
+                confidence=0.8,
+                supporting_evidence_excerpts=[],
+                recommendation="Inspect the recorded failure evidence.",
+                guidance=FailureDiagnosisGuidance(retryable=True, escalate=False),
+                source_metadata=FailureDiagnosisSourceMetadata(
+                    backend="recording-test-backend",
+                    model=None,
+                    command=["recording-diagnosis"],
+                    exit_code=request.executor_result.exit_code,
+                    timed_out=request.executor_result.timed_out,
+                    stdout_path=request.executor_result.stdout_path,
+                    stderr_path=request.executor_result.stderr_path,
+                ),
+            ),
         )
 
 
@@ -584,6 +627,160 @@ def test_run_task_escalates_executor_failure_without_verification(tmp_path) -> N
     assert (
         result.bundle_path / "verification.log"
     ).read_text(encoding="utf-8") == "Verification skipped because executor failed.\n"
+    failure_diagnosis = yaml.safe_load(
+        (result.bundle_path / "failure_diagnosis.yaml").read_text(encoding="utf-8")
+    )
+    assert failure_diagnosis["category"] == "model_quota"
+    assert failure_diagnosis["recommendation"] == "Retry with a fallback model or after the quota resets."
+    assert failure_diagnosis["source_metadata"]["backend"] == "deterministic_failure_diagnosis"
+    assert len(failure_diagnosis["source_metadata"]["attempts"]) == 2
+    assert failure_diagnosis["final_exit_code"] == 2
+    assert len(failure_diagnosis["attempts"]) == 2
+
+
+def test_run_task_writes_injected_diagnosis_for_verification_failure(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "verification_profiles": {"default": {"commands": ["false"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contract_path = tmp_path / "contract.yaml"
+    _write_yaml(
+        contract_path,
+        {
+            "task_id": "demo-0006",
+            "release_id": "v0.1.0",
+            "title": "Fail verification",
+            "budget_class": "S",
+            "objective": "Create a result document but fail verification.",
+            "allowed_files": ["docs/**"],
+            "forbidden_changes": [],
+            "required_evidence": ["git diff", "test output", "verification failure diagnosis test"],
+            "verification": {"commands": ["false"]},
+            "stop_conditions": ["Verification fails twice."],
+        },
+    )
+    backend = RecordingDiagnosisBackend(category="injected_verification_failure")
+
+    result = run_task(
+        project_id="demo",
+        contract_path=contract_path,
+        config_dir=config_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FakeExecutor(),
+        now=datetime(2026, 5, 12, 12, 6, tzinfo=UTC),
+        failure_diagnosis_backend=backend,
+    )
+
+    assert result.decision.decision == "failed"
+    assert result.decision.rationale == "Verification failed."
+    assert len(backend.requests) == 1
+    assert [command.exit_code for command in backend.requests[0].verification_results] == [1]
+    assert backend.requests[0].changed_files == ["docs/result.md"]
+    failure_diagnosis = yaml.safe_load(
+        (result.bundle_path / "failure_diagnosis.yaml").read_text(encoding="utf-8")
+    )
+    assert failure_diagnosis["category"] == "injected_verification_failure"
+    assert failure_diagnosis["source_metadata"]["backend"] == "recording-test-backend"
+
+
+def test_run_task_keeps_failure_diagnosis_yaml_artifact_compatible(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "verification_profiles": {"default": {"commands": ["false"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 1,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contract_path = tmp_path / "contract.yaml"
+    _write_yaml(
+        contract_path,
+        {
+            "task_id": "demo-0007",
+            "release_id": "v0.1.0",
+            "title": "Fail before verification",
+            "budget_class": "S",
+            "objective": "Do not reach verification.",
+            "allowed_files": ["README.md"],
+            "forbidden_changes": [],
+            "required_evidence": ["git diff", "test output", "backward compatibility test"],
+            "verification": {"commands": ["false"]},
+            "stop_conditions": ["Executor fails."],
+        },
+    )
+
+    result = run_task(
+        project_id="demo",
+        contract_path=contract_path,
+        config_dir=config_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FailingExecutor(),
+        now=datetime(2026, 5, 12, 12, 7, tzinfo=UTC),
+    )
+
+    failure_diagnosis_path = result.bundle_path / "failure_diagnosis.yaml"
+    failure_diagnosis = yaml.safe_load(failure_diagnosis_path.read_text(encoding="utf-8"))
+    assert failure_diagnosis_path.name == "failure_diagnosis.yaml"
+    assert set(["category", "recommendation", "final_exit_code", "attempts"]).issubset(
+        failure_diagnosis
+    )
+    assert failure_diagnosis["category"] == "model_quota"
+    assert failure_diagnosis["final_exit_code"] == 2
+    assert failure_diagnosis["attempts"] == [
+        {"attempt": 1, "model": None, "exit_code": 2, "timed_out": False}
+    ]
 
 
 def _write_yaml(path: Path, data: dict) -> None:
