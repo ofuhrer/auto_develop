@@ -1,0 +1,44 @@
+task_id: fd-0004
+release_id: failure-diagnosis-1
+title: Document failure diagnosis workflow and update roadmap status
+task_type: documentation
+budget_class: S
+depends_on:
+  - fd-0003
+
+objective: >
+  Document how repeated-failure diagnosis works, where evidence is written, how
+  deterministic and model-backed diagnosis differ, and how users should inspect
+  diagnosis artifacts before retrying or escalating a task.
+
+allowed_files:
+  - README.md
+  - docs/USER_GUIDE.md
+  - docs/DEVELOPMENT.md
+  - docs/README.md
+  - docs/design/ROADMAP_AND_BACKLOG.md
+  - docs/design/TECHNICAL_SPECIFICATION.md
+
+forbidden_changes:
+  - Do not change Python source files.
+  - Do not change tests.
+  - Do not document planned behavior as implemented unless fd-0001 through
+    fd-0003 actually implemented it.
+
+required_evidence:
+  - git diff
+  - test output
+  - changed-files list
+  - documentation summary
+
+verification:
+  profile: documentation
+
+stop_conditions:
+  - More than 6 files changed.
+  - More than 350 diff lines.
+  - Documentation contradicts current CLI behavior.
+  - Verification fails twice.
+
+scientific_assumptions:
+  - Not applicable; documentation-only task.

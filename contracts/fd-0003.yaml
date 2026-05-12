@@ -1,0 +1,47 @@
+task_id: fd-0003
+release_id: failure-diagnosis-1
+title: Wire repeated-failure diagnosis into task orchestration
+task_type: code_only
+budget_class: L
+depends_on:
+  - fd-0002
+
+objective: >
+  Wire the structured failure-diagnosis workflow into run-task for executor
+  failures and verification failures after bounded attempts. Persist diagnosis
+  input/output evidence, preserve the existing review decision semantics, and
+  make the diagnosis backend injectable in tests.
+
+allowed_files:
+  - src/agentic_devloop/orchestrator.py
+  - src/agentic_devloop/evidence.py
+  - src/agentic_devloop/failure_diagnosis.py
+  - tests/test_orchestrator.py
+  - tests/test_failure_diagnosis.py
+
+forbidden_changes:
+  - Do not increase executor attempts beyond project budget.
+  - Do not automatically retry verification indefinitely.
+  - Do not change accepted-task finalization behavior.
+  - Do not alter release scheduling semantics.
+  - Do not require a real model call for normal tests.
+
+required_evidence:
+  - git diff
+  - test output
+  - changed-files list
+  - executor failure diagnosis test
+  - verification failure diagnosis test
+  - backward compatibility test for existing failure_diagnosis.yaml
+
+verification:
+  profile: code_only
+
+stop_conditions:
+  - More than 5 files changed.
+  - More than 650 diff lines.
+  - Existing run-task acceptance tests regress.
+  - The diagnosis path changes accepted/rejected decisions without explicit tests.
+
+scientific_assumptions:
+  - Not applicable; developer tooling task.
