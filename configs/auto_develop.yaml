@@ -5,7 +5,7 @@ worktree_root: /Users/fuhrer/Desktop/auto_develop/worktrees
 
 executor:
   type: codex_cli
-  model: gpt-5.3-codex-spark
+  model: gpt-5.4-mini
   max_walltime_minutes: 25
 
 verification_profiles:
