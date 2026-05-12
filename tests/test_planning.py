@@ -241,6 +241,57 @@ def test_parse_planner_output_normalizes_supported_schema_drift_once() -> None:
     assert plan.generated_contracts[0].task_id == "v0.3.2-0001"
 
 
+def test_parse_planner_output_normalizes_contract_wrapper_drift_before_strict_validation() -> None:
+    config = _project_config(
+        Path("/tmp"),
+        verification_profiles={
+            "default": {
+                "commands": [
+                    "PYTHONPATH=src /shared/.venv/bin/python -m pytest"
+                ]
+            }
+        },
+    )
+    plan = parse_planner_output(
+        {
+            "release_id": "v0.3.21",
+            "planner": "strong-model",
+            "generated_contracts": [
+                {
+                    "task_id": "v0.3.21-0001",
+                    "title": "Repair wrapper drift",
+                    "objective": "Normalize a semantically useful planner contract.",
+                    "rationale": "Planner emitted a useful but incomplete suggested contract.",
+                    "suggested_contract": {
+                        "allowed_files": ["src/agentic_devloop/planning.py"],
+                        "forbidden_changes": ["Do not weaken validation."],
+                        "requirements": ["This unknown key must remain rejected by strict validation."],
+                        "verification": [".venv/bin/python -m pytest tests/test_planning.py"],
+                        "stop_conditions": ["Stop if scope expands."],
+                    },
+                }
+            ],
+            "warnings": [],
+        },
+        release_id="v0.3.21",
+        planner="strong-model",
+        project_config=config,
+    )
+
+    contract = plan.generated_contracts[0].suggested_contract
+    assert contract.task_id == "v0.3.21-0001"
+    assert contract.release_id == "v0.3.21"
+    assert contract.title == "Repair wrapper drift"
+    assert contract.objective == "Normalize a semantically useful planner contract."
+    assert contract.budget_class == "M"
+    assert contract.required_evidence == ["git diff", "changed-files list"]
+    assert contract.verification.commands == [
+        "/shared/.venv/bin/python -m pytest tests/test_planning.py"
+    ]
+    assert any("planner_contract_payload_normalization=" in warning for warning in plan.warnings)
+    assert any("planner_contract_normalization=" in warning for warning in plan.warnings)
+
+
 def test_parse_planner_output_stops_with_structured_evidence_for_overbroad_allowed_files() -> None:
     with pytest.raises(PlannerNormalizationError) as exc:
         parse_planner_output(
