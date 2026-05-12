@@ -269,6 +269,60 @@ class EvidenceBundle(StrictModel):
     conflict_repair_path: Path | None = None
 
 
+class FailureDiagnosisInput(StrictModel):
+    name: str = Field(min_length=1)
+    value: str = Field(min_length=1)
+    source: str | None = None
+
+
+class FailureEvidenceExcerpt(StrictModel):
+    source: str = Field(min_length=1)
+    excerpt: str = Field(min_length=1)
+    path: Path | None = None
+
+
+class FailureDiagnosisAttempt(StrictModel):
+    attempt: int = Field(gt=0)
+    model: str | None = None
+    exit_code: int
+    timed_out: bool = False
+
+
+class FailureDiagnosisSourceMetadata(StrictModel):
+    backend: str = Field(min_length=1)
+    model: str | None = None
+    command: list[str] = Field(default_factory=list)
+    exit_code: int | None = None
+    timed_out: bool = False
+    stdout_path: Path | None = None
+    stderr_path: Path | None = None
+    attempts: list[FailureDiagnosisAttempt] = Field(default_factory=list)
+
+    @field_validator("command")
+    @classmethod
+    def command_must_not_be_empty(cls, command: list[str]) -> list[str]:
+        if any(not value.strip() for value in command):
+            raise ValueError("failure diagnosis command entries must not be empty")
+        return command
+
+
+class FailureDiagnosisGuidance(StrictModel):
+    retryable: bool
+    escalate: bool
+    retry_reason: str | None = None
+    escalate_reason: str | None = None
+
+
+class FailureDiagnosis(StrictModel):
+    diagnosis_inputs: list[FailureDiagnosisInput] = Field(default_factory=list)
+    category: str = Field(min_length=1)
+    confidence: float = Field(ge=0, le=1)
+    supporting_evidence_excerpts: list[FailureEvidenceExcerpt] = Field(default_factory=list)
+    recommendation: str = Field(min_length=1)
+    guidance: FailureDiagnosisGuidance
+    source_metadata: FailureDiagnosisSourceMetadata
+
+
 class ConflictRepairResult(StrictModel):
     attempted: bool = False
     conflicted_files: list[str] = Field(default_factory=list)

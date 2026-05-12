@@ -4,8 +4,24 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agentic_devloop.evidence import EvidenceCollector, write_conflict_repair_result, write_review_decision
-from agentic_devloop.models import ConflictRepairResult, ExecutorResult, TaskContract, TaskRun, TaskState
+from agentic_devloop.evidence import (
+    EvidenceCollector,
+    write_conflict_repair_result,
+    write_failure_diagnosis,
+    write_review_decision,
+)
+from agentic_devloop.models import (
+    ConflictRepairResult,
+    ExecutorResult,
+    FailureDiagnosis,
+    FailureDiagnosisGuidance,
+    FailureDiagnosisInput,
+    FailureDiagnosisSourceMetadata,
+    FailureEvidenceExcerpt,
+    TaskContract,
+    TaskRun,
+    TaskState,
+)
 from agentic_devloop.review import deterministic_review
 from agentic_devloop.yaml_io import load_yaml_model
 
@@ -104,6 +120,74 @@ def test_evidence_collector_writes_complete_bundle(tmp_path) -> None:
     assert repair_bundle.conflict_repair_path.exists()
 
 
+def test_write_failure_diagnosis_writes_yaml_bundle(tmp_path) -> None:
+    bundle_root = tmp_path / "runs" / "rr-0001"
+    bundle_root.mkdir(parents=True)
+    bundle = load_bundle(bundle_root)
+
+    diagnosis = FailureDiagnosis(
+        diagnosis_inputs=[FailureDiagnosisInput(name="exit_code", value="1")],
+        category="timeout",
+        confidence=0.72,
+        supporting_evidence_excerpts=[
+            FailureEvidenceExcerpt(source="executor_stderr.log", excerpt="timed out after 600s")
+        ],
+        recommendation="Retry with a narrower contract and a longer walltime.",
+        guidance=FailureDiagnosisGuidance(
+            retryable=True,
+            escalate=True,
+            retry_reason="The task may succeed with a tighter scope.",
+            escalate_reason="If retries continue to time out, human review is warranted.",
+        ),
+        source_metadata=FailureDiagnosisSourceMetadata(
+            backend="codex_cli",
+            model="gpt-5.3-codex-spark",
+            command=["codex", "run"],
+            exit_code=124,
+            timed_out=True,
+            stdout_path=bundle_root / "executor_stdout.log",
+            stderr_path=bundle_root / "executor_stderr.log",
+        ),
+    )
+
+    updated_bundle = write_failure_diagnosis(bundle, diagnosis)
+
+    assert updated_bundle.failure_diagnosis_path is not None
+    assert updated_bundle.failure_diagnosis_path.name == "failure_diagnosis.yaml"
+    contents = updated_bundle.failure_diagnosis_path.read_text(encoding="utf-8")
+    assert "category: timeout" in contents
+    assert "retryable: true" in contents
+    assert "timed_out: true" in contents
+
+
+def test_write_failure_diagnosis_preserves_legacy_dict_payload(tmp_path) -> None:
+    bundle_root = tmp_path / "runs" / "rr-0001"
+    bundle_root.mkdir(parents=True)
+    bundle = load_bundle(bundle_root)
+
+    updated_bundle = write_failure_diagnosis(
+        bundle,
+        {
+            "category": "executor_error",
+            "recommendation": "Inspect logs and retry.",
+            "final_exit_code": 1,
+            "attempts": [
+                {
+                    "attempt": 1,
+                    "model": "gpt-5.3-codex-spark",
+                    "exit_code": 1,
+                    "timed_out": False,
+                }
+            ],
+        },
+    )
+
+    contents = updated_bundle.failure_diagnosis_path.read_text(encoding="utf-8")
+    assert "final_exit_code: 1" in contents
+    assert "attempts:" in contents
+    assert "recommendation: Inspect logs and retry." in contents
+
+
 def task_budget():
     from agentic_devloop.models import Budget
 
@@ -112,4 +196,22 @@ def task_budget():
         max_strong_model_calls_per_release=10,
         max_changed_files_per_task=8,
         max_diff_lines_per_task=600,
+    )
+
+
+def load_bundle(bundle_root: Path):
+    from agentic_devloop.models import EvidenceBundle
+
+    return EvidenceBundle(
+        task_id="rr-0001",
+        run_id="2026-05-12_v0.8.0",
+        bundle_path=bundle_root,
+        contract_path=bundle_root / "contract.yaml",
+        run_state_path=bundle_root / "run_state.json",
+        executor_prompt_path=bundle_root / "executor_prompt.md",
+        executor_stdout_path=bundle_root / "executor_stdout.log",
+        executor_stderr_path=bundle_root / "executor_stderr.log",
+        git_diff_path=bundle_root / "git_diff.patch",
+        changed_files_path=bundle_root / "changed_files.txt",
+        verification_log_path=bundle_root / "verification.log",
     )

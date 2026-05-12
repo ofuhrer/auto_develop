@@ -17,6 +17,11 @@ from agentic_devloop.evidence import (
     write_scientific_outputs,
 )
 from agentic_devloop.executor import CodexExecutor
+from agentic_devloop.failure_diagnosis import (
+    DeterministicFailureDiagnosisBackend,
+    FailureDiagnosisBackend,
+    FailureDiagnosisRequest,
+)
 from agentic_devloop.git_finalize import (
     FinalizeResult,
     GitFinalizeError,
@@ -26,11 +31,14 @@ from agentic_devloop.git_finalize import (
 from agentic_devloop.git_state import changed_files as git_changed_files
 from agentic_devloop.git_state import diff_patch
 from agentic_devloop.models import (
+    CommandResult,
     Decision,
     ConflictRepairResult,
+    EvidenceBundle,
     ExecutorAttempt,
     ExecutorConfig,
     ExecutorResult,
+    FailureDiagnosis,
     ProjectConfig,
     Reviewer,
     ReviewDecision,
@@ -85,9 +93,11 @@ def run_task(
     base_branch: str | None = None,
     now: datetime | None = None,
     progress: Callable[[str], None] | None = None,
+    failure_diagnosis_backend: FailureDiagnosisBackend | None = None,
 ) -> TaskRunResult:
     config = load_project_config(project_id, config_dir, validate_repo=True)
     task = load_yaml_model(contract_path, TaskContract)
+    diagnosis_backend = failure_diagnosis_backend or DeterministicFailureDiagnosisBackend()
     run_id = make_run_id(task.release_id, task.task_id, now)
     branch = branch_name(task.release_id, task.task_id)
     worktree_path = config.worktree_root / run_id
@@ -171,8 +181,16 @@ def run_task(
             reviewer=Reviewer.DETERMINISTIC,
             rationale=f"Executor failed with exit code {executor_result.exit_code}.",
         )
-        diagnosis = _diagnose_executor_failure(executor_result)
-        bundle = write_failure_diagnosis(bundle, diagnosis)
+        bundle = _diagnose_failure(
+            bundle=bundle,
+            task=task,
+            executor_result=executor_result,
+            verification_results=[],
+            changed_files=current_changed_files,
+            verification_log_path=verification_log_path,
+            backend=diagnosis_backend,
+            progress=progress,
+        )
         write_review_decision(bundle, decision)
         _report(progress, f"decision={decision.decision}")
 
@@ -234,6 +252,17 @@ def run_task(
         scientific_review=scientific_review,
     )
     bundle = write_scientific_outputs(bundle, task, scientific_review)
+    if any(result.exit_code != 0 for result in verification_results):
+        bundle = _diagnose_failure(
+            bundle=bundle,
+            task=task,
+            executor_result=executor_result,
+            verification_results=verification_results,
+            changed_files=current_changed_files,
+            verification_log_path=bundle.verification_log_path,
+            backend=diagnosis_backend,
+            progress=progress,
+        )
     write_review_decision(bundle, decision)
     _report(progress, f"decision={decision.decision}")
     finalize_result = None
@@ -425,34 +454,40 @@ def _executor_attempt(attempt_number: int, result: ExecutorResult) -> ExecutorAt
     )
 
 
-def _diagnose_executor_failure(result: ExecutorResult) -> dict:
-    stderr_text = result.stderr_path.read_text(encoding="utf-8") if result.stderr_path.exists() else ""
-    stdout_text = result.stdout_path.read_text(encoding="utf-8") if result.stdout_path.exists() else ""
-    combined = f"{stderr_text}\n{stdout_text}".lower()
-    if "usage limit" in combined or "quota" in combined:
-        category = "model_quota"
-        recommendation = "Retry with a fallback model or wait until the quota reset."
-    elif result.timed_out:
-        category = "timeout"
-        recommendation = "Reduce task scope or increase executor walltime before retrying."
-    else:
-        category = "executor_error"
-        recommendation = "Inspect executor logs and retry only after the failure mode is understood."
+def _diagnose_failure(
+    *,
+    bundle: EvidenceBundle,
+    task: TaskContract,
+    executor_result: ExecutorResult,
+    verification_results: list[CommandResult],
+    changed_files: list[str],
+    verification_log_path: Path,
+    backend: FailureDiagnosisBackend,
+    progress: Callable[[str], None] | None,
+) -> EvidenceBundle:
+    diagnosis_result = backend.diagnose(
+        FailureDiagnosisRequest(
+            task=task,
+            executor_result=executor_result,
+            verification_results=verification_results,
+            changed_files=changed_files,
+            verification_log_path=verification_log_path,
+        )
+    )
+    _report(progress, f"failure_diagnosis category={diagnosis_result.diagnosis.category}")
+    return write_failure_diagnosis(
+        bundle,
+        _failure_diagnosis_payload(diagnosis_result.diagnosis),
+    )
 
-    return {
-        "category": category,
-        "recommendation": recommendation,
-        "final_exit_code": result.exit_code,
-        "attempts": [
-            {
-                "attempt": attempt.attempt,
-                "model": attempt.model,
-                "exit_code": attempt.exit_code,
-                "timed_out": attempt.timed_out,
-            }
-            for attempt in result.attempts
-        ],
-    }
+
+def _failure_diagnosis_payload(diagnosis: FailureDiagnosis) -> dict:
+    payload = diagnosis.model_dump(mode="json")
+    payload["final_exit_code"] = diagnosis.source_metadata.exit_code
+    payload["attempts"] = [
+        attempt.model_dump(mode="json") for attempt in diagnosis.source_metadata.attempts
+    ]
+    return payload
 
 
 def _attempt_conflict_repair(
