@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +18,8 @@ class FinalizeResult:
     pushed: bool = False
     failed_step: str | None = None
     error: str | None = None
+    lock_path: str | None = None
+    rebased_onto: str | None = None
 
 
 def commit_worktree_changes(worktree_path: Path, message: str) -> str | None:
@@ -47,20 +50,31 @@ def finalize_accepted_task(
     merge: bool,
     push: bool,
 ) -> FinalizeResult:
-    commit_hash = commit_worktree_changes(worktree_path, commit_message)
+    lock_path = repo_path / ".git" / "agent-main.lock"
+    with _merge_lock(lock_path):
+        commit_hash = commit_worktree_changes(worktree_path, commit_message)
 
-    merged = False
-    pushed = False
-    if merge:
-        _ensure_base_branch(repo_path, base_branch)
-        merge_branch(repo_path, task_branch)
-        merged = True
+        merged = False
+        pushed = False
+        rebased_onto = None
+        if merge:
+            _ensure_base_branch(repo_path, base_branch)
+            rebased_onto = _git(repo_path, ["rev-parse", base_branch]).strip()
+            _rebase_worktree_onto(worktree_path, base_branch)
+            merge_branch(repo_path, task_branch)
+            merged = True
 
-    if push:
-        push_branch(repo_path, base_branch)
-        pushed = True
+        if push:
+            push_branch(repo_path, base_branch)
+            pushed = True
 
-    return FinalizeResult(commit_hash=commit_hash, merged=merged, pushed=pushed)
+        return FinalizeResult(
+            commit_hash=commit_hash,
+            merged=merged,
+            pushed=pushed,
+            lock_path=str(lock_path),
+            rebased_onto=rebased_onto,
+        )
 
 
 def _has_changes(repo_path: Path) -> bool:
@@ -77,6 +91,50 @@ def _ensure_base_branch(repo_path: Path, base_branch: str) -> None:
     current_branch = _git(repo_path, ["branch", "--show-current"]).strip()
     if current_branch != base_branch:
         _git(repo_path, ["switch", base_branch])
+
+
+def _rebase_worktree_onto(worktree_path: Path, base_branch: str) -> None:
+    _ensure_clean(worktree_path)
+    upstream = base_branch
+    if _has_remote(worktree_path, "origin"):
+        _git(worktree_path, ["fetch", "origin", base_branch])
+        remote_ref = f"origin/{base_branch}"
+        try:
+            _git(worktree_path, ["rev-parse", "--verify", remote_ref])
+            upstream = remote_ref
+        except GitFinalizeError:
+            upstream = base_branch
+    _git(worktree_path, ["rebase", upstream])
+
+
+def _has_remote(repo_path: Path, remote: str) -> bool:
+    result = run_process(["git", "remote"], cwd=repo_path, timeout_seconds=120)
+    if result.exit_code != 0:
+        return False
+    return remote in result.stdout.splitlines()
+
+
+class _merge_lock:
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.fd: int | None = None
+
+    def __enter__(self) -> "_merge_lock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(self.fd, f"pid={os.getpid()}\n".encode())
+        except FileExistsError as error:
+            raise GitFinalizeError(f"merge lock already held: {self.path}") from error
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        if self.fd is not None:
+            os.close(self.fd)
+        try:
+            self.path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _git(repo_path: Path, args: list[str]) -> str:

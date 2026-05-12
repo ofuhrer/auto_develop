@@ -305,3 +305,20 @@ class ContractPlan(StrictModel):
     planner: str = Field(default="deterministic")
     generated_contracts: list[GeneratedContract] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    budget_ledger_path: Path | None = None
+    planner_prompt_path: Path | None = None
+
+
+class OverlapFinding(StrictModel):
+    first_task_id: str = Field(min_length=1)
+    second_task_id: str = Field(min_length=1)
+    pattern: str = Field(min_length=1)
+    severity: str = Field(min_length=1)
+
+
+class ReleaseOverlapReport(StrictModel):
+    findings: list[OverlapFinding] = Field(default_factory=list)
+
+    @property
+    def has_blocking_findings(self) -> bool:
+        return any(finding.severity == "blocking" for finding in self.findings)

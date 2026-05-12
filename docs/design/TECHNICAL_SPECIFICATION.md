@@ -253,6 +253,11 @@ agent-loop run-release \
 agent-loop plan-release \
   --objective objectives/v0.8.0.yaml
 
+agent-loop plan-release \
+  --objective objectives/v0.8.0.yaml \
+  --mode strong-model \
+  --project auto_develop
+
 agent-loop status
 
 agent-loop status --limit 5
@@ -294,9 +299,10 @@ Merge conflicts currently stop the command and leave the base repository in Git'
 
 1. Load and validate `ProjectConfig`.
 2. Resolve an ordered contract queue from explicit `--contract` arguments or `repo_state/<project>/release_plan.yaml`.
-3. Run each contract through the existing `run-task` state machine.
-4. Stop after the first non-accepted task unless `--continue-on-failure` is set.
-5. Persist `runs/<release-run-id>/release_summary.json`.
+3. Reject queues whose `allowed_files` scopes overlap.
+4. Run each contract through the existing `run-task` state machine.
+5. Stop after the first non-accepted task unless `--continue-on-failure` is set.
+6. Persist `runs/<release-run-id>/release_summary.json`.
 
 This command executes already-defined contracts. It does not yet use a strong model to generate contracts from a release objective.
 
@@ -309,8 +315,22 @@ This command executes already-defined contracts. It does not yet use a strong mo
 3. Write `runs/<plan-id>/contract_plan.json`.
 4. If no contracts exist, propose a planning-only release-preparation draft.
 5. If contracts exist, emit acceptance-criteria coverage review entries.
+6. In `--mode strong-model`, reserve a strong-model budget ledger entry and write `planner_prompt.md`.
 
 This is intentionally not automatic strong-model contract generation yet.
+
+### Finalization Locking
+
+Accepted-task finalization:
+
+1. Acquires `.git/agent-main.lock`.
+2. Commits task worktree changes if needed.
+3. Switches the base repository to the configured base branch.
+4. Rebases the task worktree onto `origin/<base>` when available, otherwise local `<base>`.
+5. Merges the task branch into base.
+6. Pushes base when requested.
+
+Rebase and merge conflicts are persisted through `finalization.yaml` and an escalated decision. Automated semantic repair is not implemented yet.
 
 `agent-loop status` reads existing evidence bundles and prints recent run summaries with run ID, task ID, decision, and bundle path.
 

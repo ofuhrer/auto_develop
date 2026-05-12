@@ -295,6 +295,8 @@ def test_run_task_can_commit_merge_and_push_accepted_changes(tmp_path) -> None:
     assert result.finalize.commit_hash is not None
     assert result.finalize.merged is True
     assert result.finalize.pushed is True
+    assert result.finalize.lock_path is not None
+    assert result.finalize.rebased_onto is not None
     assert (repo / "docs" / "result.md").read_text(encoding="utf-8").startswith("# Result")
     assert (result.bundle_path / "finalization.yaml").exists()
     assert "prompt_chars: 0" not in (result.bundle_path / "model_call_metadata.json").read_text(

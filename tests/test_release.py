@@ -7,7 +7,7 @@ import yaml
 
 from agentic_devloop.models import ExecutorResult, ProjectConfig, TaskContract
 from agentic_devloop.orchestrator import executor_config_for_task, executor_configs_for_task
-from agentic_devloop.release import run_release
+from agentic_devloop.release import analyze_contract_overlaps, run_release
 
 
 class FakeExecutor:
@@ -150,8 +150,14 @@ def test_run_release_executes_ordered_contracts_and_writes_summary(tmp_path) -> 
 
     contracts_dir = tmp_path / "contracts"
     contracts_dir.mkdir()
-    _write_yaml(contracts_dir / "demo-0001.yaml", _task_contract("demo-0001").model_dump(mode="json"))
-    _write_yaml(contracts_dir / "demo-0002.yaml", _task_contract("demo-0002").model_dump(mode="json"))
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+    _write_yaml(
+        contracts_dir / "demo-0002.yaml",
+        _task_contract("demo-0002", allowed_files=["docs/demo-0002.md"]).model_dump(mode="json"),
+    )
 
     result = run_release(
         project_id="demo",
@@ -170,7 +176,23 @@ def test_run_release_executes_ordered_contracts_and_writes_summary(tmp_path) -> 
     assert '"task_id": "demo-0002"' in summary
 
 
-def _task_contract(task_id: str, budget_class: str = "S") -> TaskContract:
+def test_analyze_contract_overlaps_blocks_shared_allowed_files() -> None:
+    report = analyze_contract_overlaps(
+        [
+            _task_contract("demo-0001"),
+            _task_contract("demo-0002"),
+        ]
+    )
+
+    assert report.has_blocking_findings is True
+    assert report.findings[0].pattern == "docs/** <-> docs/**"
+
+
+def _task_contract(
+    task_id: str,
+    budget_class: str = "S",
+    allowed_files: list[str] | None = None,
+) -> TaskContract:
     return TaskContract.model_validate(
         {
             "task_id": task_id,
@@ -179,7 +201,7 @@ def _task_contract(task_id: str, budget_class: str = "S") -> TaskContract:
             "task_type": "documentation",
             "budget_class": budget_class,
             "objective": f"Create docs for {task_id}.",
-            "allowed_files": ["docs/**"],
+            "allowed_files": allowed_files or ["docs/**"],
             "forbidden_changes": [],
             "required_evidence": ["git diff", "test output"],
             "verification": {"commands": ["test -d docs"]},

@@ -7,7 +7,16 @@ from pathlib import Path
 from typing import Callable
 
 from agentic_devloop.config import load_project_config
-from agentic_devloop.models import Decision, ReleasePlan, ReviewDecision, TaskContract
+from fnmatch import fnmatch
+
+from agentic_devloop.models import (
+    Decision,
+    OverlapFinding,
+    ReleaseOverlapReport,
+    ReleasePlan,
+    ReviewDecision,
+    TaskContract,
+)
 from agentic_devloop.orchestrator import ExecutorProtocol, TaskRunResult, run_task
 from agentic_devloop.yaml_io import load_yaml_model
 
@@ -55,13 +64,21 @@ def run_release(
     )
     if not selected_contracts:
         raise ValueError(f"no contracts found for release {release_id}")
+    selected_tasks = [load_yaml_model(path, TaskContract) for path in selected_contracts]
+    overlap_report = analyze_contract_overlaps(selected_tasks)
+    if overlap_report.has_blocking_findings:
+        details = "; ".join(
+            f"{finding.first_task_id}/{finding.second_task_id}: {finding.pattern}"
+            for finding in overlap_report.findings
+            if finding.severity == "blocking"
+        )
+        raise ValueError(f"release contracts have overlapping allowed files: {details}")
 
     _report(progress, f"release_run_id={run_id}")
     _report(progress, f"release={release_id} tasks={len(selected_contracts)}")
 
     task_results: list[TaskRunResult] = []
-    for index, contract_path in enumerate(selected_contracts, start=1):
-        task = load_yaml_model(contract_path, TaskContract)
+    for index, (contract_path, task) in enumerate(zip(selected_contracts, selected_tasks), start=1):
         if task.release_id != release_id:
             raise ValueError(
                 f"contract {contract_path} belongs to release {task.release_id}, expected {release_id}"
@@ -178,6 +195,43 @@ def _write_release_summary(
     }
     summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     return summary_path
+
+
+def analyze_contract_overlaps(tasks: list[TaskContract]) -> ReleaseOverlapReport:
+    findings: list[OverlapFinding] = []
+    for index, first in enumerate(tasks):
+        for second in tasks[index + 1 :]:
+            for first_pattern in first.allowed_files:
+                for second_pattern in second.allowed_files:
+                    if _patterns_overlap(first_pattern, second_pattern):
+                        findings.append(
+                            OverlapFinding(
+                                first_task_id=first.task_id,
+                                second_task_id=second.task_id,
+                                pattern=f"{first_pattern} <-> {second_pattern}",
+                                severity="blocking",
+                            )
+                        )
+    return ReleaseOverlapReport(findings=findings)
+
+
+def _patterns_overlap(first: str, second: str) -> bool:
+    if first == second:
+        return True
+    if first == "**" or second == "**":
+        return True
+    first_prefix = _glob_prefix(first)
+    second_prefix = _glob_prefix(second)
+    if first_prefix and second_prefix:
+        return first_prefix.startswith(second_prefix) or second_prefix.startswith(first_prefix)
+    return fnmatch(first, second) or fnmatch(second, first)
+
+
+def _glob_prefix(pattern: str) -> str:
+    wildcard_index = min([index for index in [pattern.find("*"), pattern.find("?")] if index >= 0], default=-1)
+    if wildcard_index < 0:
+        return pattern
+    return pattern[:wildcard_index].rstrip("/")
 
 
 def _report(progress: Callable[[str], None] | None, message: str) -> None:

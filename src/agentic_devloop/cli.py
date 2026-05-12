@@ -152,6 +152,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plan_release_parser.add_argument("--objective", required=True, help="Release objective YAML file.")
     plan_release_parser.add_argument(
+        "--mode",
+        choices=["deterministic", "strong-model"],
+        default="deterministic",
+        help="Planning mode.",
+    )
+    plan_release_parser.add_argument(
+        "--project",
+        help="Project identifier. Required for strong-model mode.",
+    )
+    plan_release_parser.add_argument(
+        "--config-dir",
+        default="configs",
+        help="Directory containing project config YAML files.",
+    )
+    plan_release_parser.add_argument(
         "--contracts-dir",
         default="contracts",
         help="Directory containing task contract YAML files.",
@@ -254,6 +269,9 @@ def main(argv: list[str] | None = None) -> int:
                 objective_path=Path(args.objective),
                 contracts_dir=Path(args.contracts_dir),
                 runs_dir=Path(args.runs_dir),
+                mode=args.mode,
+                project_id=args.project,
+                config_dir=Path(args.config_dir),
             )
         except Exception as error:
             parser.exit(2, f"error: {error}\n")

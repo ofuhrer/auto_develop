@@ -77,18 +77,21 @@ Implemented:
 - Scientific guardrails for fixture and tolerance changes.
 - Benchmark and remote-dispatch evidence metadata.
 - Ordered release execution from explicit contracts or `repo_state/<project>/release_plan.yaml`.
+- Release-level allowed-file overlap checks before worker execution.
 - Role-based executor model routing via `model_roles` and `model_routing`.
 - Fallback executor models with persisted per-attempt evidence.
 - Bounded executor retries using `budget.max_executor_attempts_per_task`.
 - Deterministic executor-failure diagnosis evidence.
 - Release-level summary files for multi-task runs.
 - Conservative deterministic release planning via `agent-loop plan-release`.
+- Strong-planning budget reservation and planner-prompt artifacts.
+- Merge finalization lock plus task-worktree rebase onto latest base branch before merging.
 
 Not yet completed:
 
-- Automated merge-conflict repair.
+- Automated semantic merge-conflict repair after rebase conflicts.
 - Strong-model call accounting.
-- Strong-model release planning and automatic contract generation.
+- Strong-model release planning backend and automatic contract generation.
 - Model-based repeated-failure diagnosis beyond deterministic classification.
 - Actual Balfrin remote execution and artifact collection.
 - A real synthetic run against `rust_rockfall`.
