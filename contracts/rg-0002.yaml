@@ -1,0 +1,44 @@
+task_id: rg-0002
+release_id: release-governor-1
+title: Add budget and tuning report primitives
+task_type: code_only
+budget_class: M
+
+objective: >
+  Add reusable budget and tuning helpers that transform release metrics and task
+  evidence into a structured budget ledger plus human-readable tuning guidance.
+  The helpers should compute configured-vs-actual usage, model attempt totals,
+  prompt/context/output sizes, task-size outliers, verification bottlenecks, and
+  waste signals such as failed primary model attempts followed by successful
+  fallback attempts.
+
+allowed_files:
+  - src/agentic_devloop/budget.py
+  - src/agentic_devloop/models.py
+  - tests/test_budget.py
+  - tests/test_models.py
+
+forbidden_changes:
+  - Do not wire helpers into release execution in this task.
+  - Do not change executor behavior.
+  - Do not add provider-specific pricing tables.
+  - Do not remove existing metrics fields.
+
+required_evidence:
+  - git diff
+  - test output
+  - changed-files list
+  - budget ledger tests
+  - tuning report tests
+
+verification:
+  profile: code_only
+
+stop_conditions:
+  - More than 4 files changed.
+  - More than 550 diff lines.
+  - The helper API cannot be tested without running Codex.
+  - Existing model tests fail.
+
+scientific_assumptions:
+  - Not applicable; developer tooling task.

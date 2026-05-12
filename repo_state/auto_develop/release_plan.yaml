@@ -1,11 +1,11 @@
-release_id: failure-diagnosis-1
-active_objective: Add model-assisted repeated-failure diagnosis with deterministic fallback and auditable evidence.
+release_id: release-governor-1
+active_objective: Add budget-aware release governance with preflight diagnostics, budget artifacts, enforcement, and tuning guidance.
 current_tasks:
-  - fd-0001
-  - fd-0002
-  - fd-0003
-  - fd-0004
+  - rg-0001
+  - rg-0002
+  - rg-0003
+  - rg-0004
 next_steps:
-  - Run the release queue in sequential mode first.
-  - Inspect diagnosis model/evidence changes before enabling merge finalization.
-  - If the run is clean, rerun or continue with accepted-task merge into feature/failure-diagnosis-1.
+  - Run the release queue sequentially with accepted-task merge into feature/release-governor-1.
+  - Inspect release.log, release_metrics.json, release_budget.json, and release_tuning.md after execution.
+  - If the generated feature branch is clean, push it for review before merging to main.

@@ -1,0 +1,49 @@
+task_id: rg-0004
+release_id: release-governor-1
+title: Document release governance workflow and update defaults
+task_type: documentation
+budget_class: S
+depends_on:
+  - rg-0001
+  - rg-0003
+
+objective: >
+  Update user-facing and design documentation for the release-governor workflow:
+  run `doctor`, launch a governed release, monitor the activity log, inspect
+  metrics, inspect the budget ledger, read tuning recommendations, and adjust
+  model routing or task size before the next run. Also update roadmap status and
+  examples so the documented workflow matches the implemented commands.
+
+allowed_files:
+  - README.md
+  - docs/README.md
+  - docs/USER_GUIDE.md
+  - docs/DEVELOPMENT.md
+  - docs/design/ARCHITECTURE.md
+  - docs/design/ROADMAP_AND_BACKLOG.md
+  - docs/design/TECHNICAL_SPECIFICATION.md
+  - configs/auto_develop.yaml
+
+forbidden_changes:
+  - Do not edit implementation code.
+  - Do not describe unimplemented PR automation as available.
+  - Do not remove safety warnings about explicit finalization flags.
+  - Do not document provider-billed token accounting as implemented.
+
+required_evidence:
+  - git diff
+  - test output
+  - changed-files list
+  - documentation review summary
+
+verification:
+  profile: documentation
+
+stop_conditions:
+  - More than 8 files changed.
+  - More than 500 diff lines.
+  - Documentation contradicts current CLI behavior.
+  - The full pytest suite fails.
+
+scientific_assumptions:
+  - Not applicable; developer tooling task.

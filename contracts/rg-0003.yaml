@@ -1,0 +1,48 @@
+task_id: rg-0003
+release_id: release-governor-1
+title: Wire budget enforcement and tuning artifacts into release runs
+task_type: code_only
+budget_class: L
+depends_on:
+  - rg-0002
+
+objective: >
+  Wire the budget and tuning helpers into `agent-loop run-release`. Release
+  runs should write `release_budget.json` and `release_tuning.md`, include their
+  paths in CLI output and review/summary artifacts, and deterministically fail
+  or escalate when configured release-level budget limits are exceeded. The
+  implementation should reuse existing release metrics and evidence rather than
+  duplicating measurement logic.
+
+allowed_files:
+  - src/agentic_devloop/release.py
+  - src/agentic_devloop/*.py
+  - tests/test_release.py
+  - tests/test_*.py
+
+forbidden_changes:
+  - Do not remove `release_metrics.json`.
+  - Do not change task contract schemas unless rg-0002 has already added
+    backward-compatible fields.
+  - Do not merge or push automatically without existing explicit finalization flags.
+  - Do not make budget checks depend on network calls.
+
+required_evidence:
+  - git diff
+  - test output
+  - changed-files list
+  - release budget artifact tests
+  - budget enforcement tests
+  - CLI output tests
+
+verification:
+  profile: code_only
+
+stop_conditions:
+  - More than 4 files changed.
+  - More than 650 diff lines.
+  - Existing release finalization tests fail.
+  - Budget enforcement cannot be made deterministic.
+
+scientific_assumptions:
+  - Not applicable; developer tooling task.

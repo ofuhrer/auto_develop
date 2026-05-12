@@ -1,0 +1,44 @@
+task_id: rg-0001
+release_id: release-governor-1
+title: Add project doctor preflight diagnostics
+task_type: code_only
+budget_class: M
+
+objective: >
+  Add `agent-loop doctor --project <project>` as a preflight command that
+  validates project configuration and reports actionable diagnostics before a
+  release run starts. The doctor should inspect repo existence, current branch,
+  dirty state, worktree root cleanliness, stale release/task branches when a
+  release is supplied, verification profile commands, and obvious model-routing
+  risks such as unsupported known worker primaries.
+
+allowed_files:
+  - src/agentic_devloop/doctor.py
+  - src/agentic_devloop/cli.py
+  - tests/test_doctor.py
+  - tests/test_cli.py
+
+forbidden_changes:
+  - Do not run task executors from the doctor command.
+  - Do not mutate Git state or remove worktrees.
+  - Do not make doctor warnings fatal unless configuration loading itself fails.
+  - Do not change existing run-task or run-release behavior.
+
+required_evidence:
+  - git diff
+  - test output
+  - changed-files list
+  - doctor command tests
+  - CLI argument tests
+
+verification:
+  profile: code_only
+
+stop_conditions:
+  - More than 4 files changed.
+  - More than 500 diff lines.
+  - Doctor requires network access.
+  - Existing CLI tests fail.
+
+scientific_assumptions:
+  - Not applicable; developer tooling task.
