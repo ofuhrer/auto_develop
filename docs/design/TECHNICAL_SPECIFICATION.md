@@ -1,0 +1,390 @@
+# Technical Specification
+
+## Tech Stack
+
+Core runtime:
+
+- Python 3.11+.
+- YAML or TOML configuration files.
+- JSON for machine-generated state and evidence metadata.
+- Markdown for human-readable summaries and reviews.
+- Git worktrees for isolated task execution.
+- Subprocess-based execution for coding agents and deterministic tools.
+
+Initial agent backend:
+
+- Codex CLI as bounded executor.
+
+Potential future backends:
+
+- Aider.
+- Claude Code.
+- OpenHands.
+- Other CLI coding agents.
+
+## Storage
+
+v1 uses filesystem state only. Do not add a database until run indexing and search become painful.
+
+State includes:
+
+- Run directories.
+- Task contracts.
+- Evidence bundles.
+- Logs.
+- Model call metadata.
+- Generated summaries.
+- Git branch and worktree metadata.
+
+SQLite is acceptable later if filesystem search becomes a bottleneck.
+
+## Primary Data Models
+
+### ProjectConfig
+
+Defines how the orchestrator interacts with a target repository.
+
+```yaml
+project_id: rust_rockfall
+repo_path: /path/to/rust_rockfall
+default_base_branch: main
+worktree_root: /path/to/worktrees/rust_rockfall
+
+executor:
+  type: codex_cli
+  model: gpt-5.3-codex-spark
+  max_walltime_minutes: 25
+
+verification_profiles:
+  default:
+    commands:
+      - cargo fmt --check
+      - cargo clippy --all-targets --all-features -- -D warnings
+      - cargo test --all-targets --all-features
+
+budget:
+  max_executor_attempts_per_task: 2
+  max_strong_model_calls_per_release: 10
+  max_changed_files_per_task: 8
+  max_diff_lines_per_task: 600
+```
+
+### ReleaseObjective
+
+A release-sized goal that must be decomposed before execution.
+
+```yaml
+release_id: v0.8.0
+title: Major feature release
+objective: >
+  Implement a release-sized feature increment for rust_rockfall.
+non_goals:
+  - Do not rewrite core architecture without explicit approval.
+  - Do not weaken validation gates.
+acceptance_criteria:
+  - All default verification checks pass.
+  - Scientific assumptions are documented.
+  - Evidence bundle exists for each accepted task.
+  - Human approval before merge.
+```
+
+### TaskContract
+
+A bounded unit of execution.
+
+```yaml
+task_id: rr-0001
+release_id: v0.8.0
+title: Add regression test for selected validation gate report mismatch
+budget_class: M
+
+objective: >
+  Add one regression test covering the mismatch between selected gate evidence
+  and generated report output.
+
+allowed_files:
+  - tests/**
+  - scripts/validate_public_real_site_conditional_pilot_run.py
+
+forbidden_changes:
+  - Do not change validation schema.
+  - Do not update benchmark fixtures.
+  - Do not weaken existing assertions.
+
+required_evidence:
+  - git diff
+  - test output
+  - changed-files list
+  - executor summary
+  - verifier summary
+
+verification:
+  commands:
+    - cargo test --all-targets
+    - python scripts/validate_public_real_site_conditional_pilot_run.py --check
+
+stop_conditions:
+  - More than 8 files changed.
+  - More than 600 diff lines.
+  - Verification fails twice.
+  - Agent proposes changing forbidden files.
+```
+
+### TaskRun
+
+Machine state for one task execution.
+
+```json
+{
+  "task_id": "rr-0001",
+  "state": "VERIFYING",
+  "worktree_path": "/tmp/agent-worktrees/rr-0001",
+  "branch": "agent/v0.8.0/rr-0001",
+  "executor_attempts": 1,
+  "started_at": "2026-05-11T21:00:00+02:00",
+  "updated_at": "2026-05-11T21:18:00+02:00",
+  "changed_files": [],
+  "diff_lines": 0,
+  "verification_results": []
+}
+```
+
+### EvidenceBundle
+
+Immutable record of what happened.
+
+```text
+runs/
+  2026-05-11_v0.8.0/
+    rr-0001/
+      contract.yaml
+      run_state.json
+      executor_prompt.md
+      executor_stdout.log
+      executor_stderr.log
+      git_diff.patch
+      changed_files.txt
+      verification.log
+      review.md
+      decision.yaml
+```
+
+### ReviewDecision
+
+```yaml
+task_id: rr-0001
+decision: accepted
+reviewer: human | strong_model
+rationale: >
+  Diff is within contract. Verification passed. No forbidden files changed.
+risks:
+  - Regression test covers only one failure path.
+follow_up_tasks:
+  - Add negative fixture for malformed report evidence.
+```
+
+## CLI Interface
+
+Initial CLI shape:
+
+```bash
+agent-loop init --project rust_rockfall --repo ~/dev/rust_rockfall
+
+agent-loop plan \
+  --project rust_rockfall \
+  --objective objectives/v0.8.0.md
+
+agent-loop run-next \
+  --project rust_rockfall \
+  --release v0.8.0
+
+agent-loop verify \
+  --project rust_rockfall \
+  --task rr-0001
+
+agent-loop review \
+  --project rust_rockfall \
+  --task rr-0001
+
+agent-loop status \
+  --project rust_rockfall \
+  --release v0.8.0
+```
+
+## Project Adapter Interface
+
+```python
+class ProjectAdapter:
+    def load_config(self) -> ProjectConfig:
+        ...
+
+    def create_worktree(self, task: TaskContract) -> WorktreeRef:
+        ...
+
+    def build_executor_prompt(self, task: TaskContract, context: ContextBundle) -> str:
+        ...
+
+    def run_verification(self, task: TaskContract, worktree: WorktreeRef) -> VerificationResult:
+        ...
+
+    def collect_evidence(self, task: TaskContract, worktree: WorktreeRef) -> EvidenceBundle:
+        ...
+```
+
+## Executor Interface
+
+```python
+class Executor:
+    def run(self, prompt: str, worktree_path: Path, timeout: int) -> ExecutorResult:
+        ...
+```
+
+Executor results must include:
+
+- Standard output.
+- Standard error.
+- Exit code.
+- Wall-clock duration.
+- Model or backend identity when available.
+- Generated summary when available.
+
+## Reviewer Interface
+
+```python
+class Reviewer:
+    def review(self, task: TaskContract, evidence: EvidenceBundle) -> ReviewDecision:
+        ...
+```
+
+Review may be deterministic, model-based, human, strong-model-assisted, or hybrid. v1 should start with deterministic pre-review and human final review.
+
+## Security and Auth
+
+### State Handling
+
+All orchestrator state is local filesystem state. No secrets may be written to evidence bundles. Evidence bundles may contain source code diffs and logs and must be treated as repository-sensitive.
+
+### Identity
+
+For v1, identity is local-user identity. No multi-user auth layer is required. Git author identity comes from local Git configuration.
+
+### Data Protection
+
+Required controls:
+
+- Redact environment variables from logs.
+- Avoid dumping the full shell environment.
+- Avoid storing API keys in config.
+- Use provider CLI authentication mechanisms instead of embedding credentials.
+- Mark evidence bundles as non-public by default.
+
+### Agent Permissions
+
+Execution agents run in isolated Git worktrees.
+
+Commands should run with:
+
+- Explicit working directory.
+- Explicit timeout.
+- Bounded environment.
+- No destructive filesystem permissions outside the worktree.
+
+v1 subprocess isolation is not a sandbox. Later phases may add containers, restricted shells, allowlisted commands, ephemeral users, or filesystem sandboxing.
+
+## Infrastructure
+
+### Deployment Targets
+
+v1 target:
+
+- Local Mac with Apple Silicon as primary orchestrator host.
+
+Optional dispatch:
+
+- CSCS Balfrin for heavy simulation or calibration tasks.
+
+Balfrin is an execution target, not the primary control plane.
+
+### Worktree Strategy
+
+Each task gets:
+
+- A dedicated Git branch.
+- A dedicated Git worktree.
+- A bounded contract.
+- Isolated logs and evidence.
+
+Worktree naming:
+
+```text
+agent-worktrees/
+  rust_rockfall/
+    rr-0001/
+    rr-0002/
+```
+
+Branch naming:
+
+```text
+agent/<release-id>/<task-id>
+```
+
+## CI/CD Requirements
+
+v1 should not depend on CI for core verification. Local deterministic verification must run before PR creation. CI is a second-level verification gate.
+
+Required checks for Rust projects:
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-targets --all-features
+```
+
+Optional project-specific checks:
+
+- Benchmark scripts.
+- Validation scripts.
+- Documentation generation.
+- Schema checks.
+- Fixture consistency checks.
+
+## Balfrin Integration
+
+Balfrin dispatch is optional in v1 and should only be used for tasks that require heavy simulation or calibration.
+
+Risks:
+
+- Preemption.
+- Queue latency.
+- Different filesystem semantics.
+- Non-reproducible runtime environment.
+- More complex evidence collection.
+
+Balfrin integration must be explicit in the task contract.
+
+## Known Unknowns and Technical Risks
+
+### Existing Orchestrator Reuse
+
+There may be existing projects that already manage worktrees and coding-agent sessions.
+
+Mitigation: design v1 as a policy wrapper that can later delegate worktree or session management to existing tools.
+
+### Cost Accounting
+
+Provider CLIs may not expose precise token usage.
+
+Mitigation: track approximate call count, wall time, model identity, prompt size, and output size.
+
+### Prompt Compression
+
+Aggressive compression may remove scientific details.
+
+Mitigation: never compress equations, validation rules, numerical tolerances, or benchmark definitions without review.
+
+### Scientific Review
+
+Strong models can still approve scientifically invalid changes.
+
+Mitigation: require deterministic evidence, explicit assumptions, and human approval for risky changes.
