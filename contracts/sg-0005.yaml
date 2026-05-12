@@ -1,0 +1,47 @@
+task_id: sg-0005
+release_id: agent-governed-soft-gates
+title: Document implemented soft-gate behavior
+task_type: documentation
+budget_class: S
+objective: Document how hard invariant violations differ from soft findings, where
+  soft-decision artifacts are written, which fields they contain, how accepted soft
+  exceptions rerun validators, how small budget overages and normal source overlap
+  are handled, and which hard gates remain non-bypassable.
+allowed_files:
+- docs/README.md
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/design/ARCHITECTURE.md
+- docs/design/TECHNICAL_SPECIFICATION.md
+- docs/design/CRITICAL_ASSESSMENT.md
+- README.md
+forbidden_changes:
+- Do not claim the full N-epic governor loop is implemented.
+- Do not describe soft decisions as bypassing hard validators.
+- Do not update CLI examples unless behavior actually changed in prior tasks.
+- Do not edit source code or tests in this documentation task.
+required_evidence:
+- git diff
+- 'Docs identify hard gates that remain non-bypassable: forbidden paths, generated
+  artifacts, missing required evidence, unsafe finalization, credentials or network
+  policy violations, destructive operations, and unrepaired verification failures.'
+- Docs describe soft findings with severity, risk, evidence paths, recommended action
+  inputs, decision, rationale, fallback plan, and validators rerun.
+- Docs explain small budget overages and normal source-file overlap as soft risks
+  when hard validators pass.
+- Docs explicitly state broader multi-epic governor automation remains planned if
+  not implemented.
+- changed-files list
+verification:
+  commands:
+  - PYTHONPATH=src python -m pytest tests/test_release.py tests/test_review.py
+  - git diff --check
+stop_conditions:
+- Stop if implementation tasks sg-0002 through sg-0004 are not complete enough to
+  document concrete behavior.
+- Stop if docs would need to describe aspirational behavior as shipped.
+- Stop if source behavior and documentation disagree.
+depends_on:
+- sg-0002
+- sg-0003
+- sg-0004

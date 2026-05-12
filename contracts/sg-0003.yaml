@@ -1,0 +1,42 @@
+task_id: sg-0003
+release_id: agent-governed-soft-gates
+title: Apply soft decisions to release budget admission
+task_type: code_only
+budget_class: M
+objective: Update release-level budget admission to emit structured soft findings
+  for minor release budget overages, record a release soft-decision artifact when
+  accepted, and keep severe budget overages as release failures. Ensure failed task
+  decisions, unsafe finalization, missing summaries, and verification failures are
+  still hard blockers.
+allowed_files:
+- src/agentic_devloop/release.py
+- src/agentic_devloop/budget.py
+- src/agentic_devloop/models.py
+- src/agentic_devloop/evidence.py
+- tests/test_release.py
+forbidden_changes:
+- Do not change task execution scheduling or worktree creation.
+- Do not allow release acceptance when any task decision is FAILED, NEEDS_REVISION,
+  or ESCALATED.
+- Do not change finalization modes or permit unsafe writes to main.
+- Do not remove release_budget.json, release_metrics.json, release_tuning.md, or release_review.md.
+required_evidence:
+- git diff
+- Focused release test for accepted small release budget overage with a release soft-decision
+  artifact and accepted release decision.
+- Focused release test for rejected severe release budget overage.
+- Focused release test proving an unrepaired failed task remains a hard release failure
+  even if budget findings are soft.
+- Evidence that release_summary.json and release_review.md reference soft findings
+  or the soft-decision artifact path.
+- changed-files list
+verification:
+  commands:
+  - PYTHONPATH=src python -m pytest tests/test_release.py
+  - git diff --check
+stop_conditions:
+- Stop if release acceptance would require suppressing budget ledger entries.
+- Stop if finalization can run after a hard failed task decision.
+- Stop if severe-overage thresholds are ambiguous or nondeterministic.
+depends_on:
+- sg-0001

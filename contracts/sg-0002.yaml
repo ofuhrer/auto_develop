@@ -1,0 +1,47 @@
+task_id: sg-0002
+release_id: agent-governed-soft-gates
+title: Emit task-review soft findings for budget overages
+task_type: code_only
+budget_class: M
+objective: Update task review/orchestration to classify changed-file and diff-line
+  budget overages as soft findings with severity, risk, evidence paths, and recommended
+  action inputs. Add a deterministic reviewer/supervisor decision path that accepts
+  minor budget overages only when verification passed and all hard invariants passed,
+  records the required soft-decision artifact, and rejects severe overages.
+allowed_files:
+- src/agentic_devloop/review.py
+- src/agentic_devloop/orchestrator.py
+- src/agentic_devloop/evidence.py
+- src/agentic_devloop/models.py
+- tests/test_review.py
+- tests/test_orchestrator.py
+- tests/test_evidence.py
+forbidden_changes:
+- Do not permit acceptance when verification commands fail.
+- Do not permit acceptance for changed files outside task.allowed_files.
+- Do not permit acceptance for scientific review violations.
+- Do not change executor retry behavior.
+- Do not change release-level budget admission in this task.
+required_evidence:
+- git diff
+- Focused test for accepted soft changed-file or diff-line budget overage with a written
+  soft-gate decision artifact.
+- Focused test for rejected severe budget overage.
+- Focused test proving verification failure remains a hard failed decision with no
+  bypass.
+- Focused test proving disallowed changed files remain needs-revision or failed without
+  soft acceptance.
+- changed-files list
+verification:
+  commands:
+  - PYTHONPATH=src python -m pytest tests/test_review.py tests/test_orchestrator.py
+    tests/test_evidence.py
+  - git diff --check
+stop_conditions:
+- Stop if budget severity thresholds cannot be made deterministic and documented in
+  code constants.
+- Stop if accepting a soft budget overage would skip evidence collection or review
+  artifact writing.
+- Stop if the change requires weakening allowed_files enforcement.
+depends_on:
+- sg-0001
