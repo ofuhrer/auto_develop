@@ -514,6 +514,56 @@ class ContractPlan(StrictModel):
     planner_metadata_path: Path | None = None
 
 
+class ContractNormalizationDecision(StrEnum):
+    NORMALIZED = "normalized"
+    REFUSED = "refused"
+
+
+class ContractNormalizationRefusalReason(StrEnum):
+    MISSING_REQUIRED_EVIDENCE = "missing_required_evidence"
+    INVALID_VERIFICATION_COMMANDS = "invalid_verification_commands"
+    OUT_OF_SCOPE_FILE_CHANGES = "out_of_scope_file_changes"
+    AMBIGUOUS_CONTRACT_SEMANTICS = "ambiguous_contract_semantics"
+    UNSAFE_NORMALIZATION = "unsafe_normalization"
+
+
+class ContractNormalizationArtifactPaths(StrictModel):
+    planner_prompt_path: Path | None = None
+    planner_stdout_path: Path | None = None
+    planner_stderr_path: Path | None = None
+    planner_metadata_path: Path | None = None
+    normalization_log_path: Path | None = None
+
+
+class ContractNormalizationSnapshot(StrictModel):
+    contract: TaskContract
+
+
+class ContractNormalizationChangedField(StrictModel):
+    path: str = Field(min_length=1)
+    before: object | None = None
+    after: object | None = None
+
+
+class ContractNormalizationRequest(StrictModel):
+    release_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+    before_snapshot: ContractNormalizationSnapshot
+    artifact_paths: ContractNormalizationArtifactPaths = Field(default_factory=ContractNormalizationArtifactPaths)
+
+
+class ContractNormalizationOutcome(StrictModel):
+    release_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    decision: ContractNormalizationDecision
+    rationale: str = Field(min_length=1)
+    before_snapshot: ContractNormalizationSnapshot
+    after_snapshot: ContractNormalizationSnapshot | None = None
+    changed_fields: list[ContractNormalizationChangedField] = Field(default_factory=list)
+    refusal_reasons: list[ContractNormalizationRefusalReason] = Field(default_factory=list)
+    artifact_paths: ContractNormalizationArtifactPaths = Field(default_factory=ContractNormalizationArtifactPaths)
+
 class OverlapFinding(StrictModel):
     first_task_id: str = Field(min_length=1)
     second_task_id: str = Field(min_length=1)

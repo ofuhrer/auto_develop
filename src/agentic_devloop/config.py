@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
 
 from agentic_devloop.models import ProjectConfig
 from agentic_devloop.yaml_io import load_yaml_model
@@ -48,3 +49,16 @@ def _resolve_controller_paths(config: ProjectConfig, config_path: Path) -> Proje
     else:
         repo_state_path = target_candidate
     return config.model_copy(update={"repo_state_path": repo_state_path})
+
+
+def discover_safe_verification_runtime(config: ProjectConfig | None) -> str | None:
+    if config is None:
+        return None
+    for profile in config.verification_profiles.values():
+        for command in profile.commands:
+            for token in shlex.split(command):
+                if not token.startswith("/"):
+                    continue
+                if token.endswith("/bin/python") or token.endswith("/bin/python3"):
+                    return token
+    return None

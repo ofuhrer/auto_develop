@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
 
 from agentic_devloop.models import CommandResult
 from agentic_devloop.process import run_process
@@ -71,3 +72,22 @@ def _excerpt(text: str) -> str:
         return text.rstrip("\n")
     omitted = len(text) - MAX_LOG_EXCERPT_CHARS
     return text[:MAX_LOG_EXCERPT_CHARS].rstrip("\n") + f"\n... <truncated {omitted} chars>"
+
+
+def rewrite_worktree_local_verification_command(command: str, *, safe_runtime: str | None) -> str:
+    if not safe_runtime:
+        return command
+    if ".venv/bin/python" not in command:
+        return command
+    tokens = shlex.split(command)
+    rewritten = False
+    updated_tokens: list[str] = []
+    for token in tokens:
+        if token in {".venv/bin/python", "./.venv/bin/python"}:
+            updated_tokens.append(safe_runtime)
+            rewritten = True
+            continue
+        updated_tokens.append(token)
+    if not rewritten:
+        return command
+    return shlex.join(updated_tokens)
