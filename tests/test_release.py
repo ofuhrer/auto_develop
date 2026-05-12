@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 import time
 import json
 from pathlib import Path
@@ -55,9 +56,21 @@ class FakeExecutor:
 
 
 class SlowFakeExecutor(FakeExecutor):
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active = 0
+        self.max_active = 0
+
     def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
-        time.sleep(0.2)
-        return super().run(prompt_path=prompt_path, worktree_path=worktree_path, output_dir=output_dir)
+        with self._lock:
+            self._active += 1
+            self.max_active = max(self.max_active, self._active)
+        try:
+            time.sleep(0.2)
+            return super().run(prompt_path=prompt_path, worktree_path=worktree_path, output_dir=output_dir)
+        finally:
+            with self._lock:
+                self._active -= 1
 
 
 def test_executor_config_for_task_uses_budget_then_task_type_roles() -> None:
@@ -234,20 +247,19 @@ def test_run_release_parallel_executes_independent_tasks_concurrently(tmp_path) 
         _task_contract("demo-0002", allowed_files=["docs/demo-0002.md"]).model_dump(mode="json"),
     )
 
-    started = time.monotonic()
+    executor = SlowFakeExecutor()
     result = run_release(
         project_id="demo",
         release_id="v0.1.0",
         config_dir=config_dir,
         contracts_dir=contracts_dir,
         runs_dir=tmp_path / "runs",
-        executor=SlowFakeExecutor(),
+        executor=executor,
         execution_mode="parallel",
     )
-    elapsed = time.monotonic() - started
 
     assert result.decision == Decision.ACCEPTED
-    assert elapsed < 0.7
+    assert executor.max_active == 2
     assert "parallel_scheduler" in result.log_path.read_text(encoding="utf-8")
     assert result.review_path.exists()
 
