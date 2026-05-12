@@ -304,6 +304,62 @@ def test_run_backlog_requires_execute_planner(capsys) -> None:
     assert "run-backlog requires --execute-planner" in captured.err
 
 
+def test_run_backlog_surfaces_planner_failure(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli_module, "_codex_backlog_planner_backend", lambda **kwargs: object())
+
+    def failing_run_backlog(**_kwargs):
+        raise RuntimeError("backlog planner command failed (codex exec): planner crashed")
+
+    monkeypatch.setattr(cli_module, "run_backlog", failing_run_backlog)
+
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "run-backlog",
+                "--project",
+                "demo",
+                "--epic-id",
+                "run-backlog",
+                "--goal",
+                "Move toward fully autonomous roadmap-driven development",
+                "--execute-planner",
+            ]
+        )
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 2
+    assert "backlog planner command failed" in captured.err
+
+
+def test_run_backlog_surfaces_run_objective_failure(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli_module, "_codex_backlog_planner_backend", lambda **kwargs: object())
+
+    def failing_run_backlog(**_kwargs):
+        raise RuntimeError("run-objective failed: release execution failed")
+
+    monkeypatch.setattr(cli_module, "run_backlog", failing_run_backlog)
+
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "run-backlog",
+                "--project",
+                "demo",
+                "--epic-id",
+                "run-backlog",
+                "--goal",
+                "Move toward fully autonomous roadmap-driven development",
+                "--execute-planner",
+            ]
+        )
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 2
+    assert "run-objective failed" in captured.err
+
+
 def test_cleanup_command_is_registered(capsys) -> None:
     with pytest.raises(SystemExit) as error:
         main(["cleanup", "--help"])

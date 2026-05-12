@@ -5,6 +5,7 @@ import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 import yaml
 
 from agentic_devloop.backlog import BacklogPlannerBackendResult, parse_backlog_planner_output, plan_backlog
@@ -452,6 +453,192 @@ def test_run_backlog_records_generated_objective_path_when_objective_is_created(
     assert result.evidence_manifest.release_metrics_path == result.release_metrics_path
     assert result.evidence_manifest.release_budget_path == result.release_budget_path
     assert result.evidence_manifest.release_tuning_path == result.release_tuning_path
+
+
+def test_run_backlog_fails_clearly_when_planner_backend_raises(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# demo\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "worker", "max_walltime_minutes": 5},
+            "model_roles": {
+                "planner": {"type": "codex_cli", "model": "planner", "max_walltime_minutes": 5}
+            },
+            "model_routing": {"default_role": "planner"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    roadmap = tmp_path / "ROADMAP.md"
+    roadmap.write_text("# Roadmap\n\nRemaining work:\n\n1. Add run-backlog.\n", encoding="utf-8")
+
+    class FailingBacklogBackend(FakeBacklogBackend):
+        def generate(self, *, prompt: str, goal: str, roadmap_text: str, model: str):
+            raise RuntimeError("backlog planner command failed (codex exec): backend exploded")
+
+    with pytest.raises(RuntimeError, match="backlog planner command failed"):
+        run_backlog(
+            project_id="demo",
+            goal="Let an agent choose the next epic.",
+            roadmap_path=roadmap,
+            selected_epic_id="epic-0001",
+            config_dir=config_dir,
+            contracts_dir=tmp_path / "contracts",
+            runs_dir=tmp_path / "runs",
+            objectives_dir=tmp_path / "objectives",
+            mode="strong-model",
+            planner_backend=FailingBacklogBackend(tmp_path),
+            objective_planner_backend=FakeObjectivePlannerBackend(),
+            executor=FakeExecutor(),
+        )
+
+
+def test_run_backlog_fails_on_invalid_planner_output(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# demo\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "worker", "max_walltime_minutes": 5},
+            "model_roles": {
+                "planner": {"type": "codex_cli", "model": "planner", "max_walltime_minutes": 5}
+            },
+            "model_routing": {"default_role": "planner"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    roadmap = tmp_path / "ROADMAP.md"
+    roadmap.write_text("# Roadmap\n\nRemaining work:\n\n1. Add run-backlog.\n", encoding="utf-8")
+
+    class InvalidBacklogBackend(FakeBacklogBackend):
+        def generate(self, *, prompt: str, goal: str, roadmap_text: str, model: str):
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            stdout_path = self.output_dir / "backlog_planner_stdout.log"
+            stderr_path = self.output_dir / "backlog_planner_stderr.log"
+            metadata_path = self.output_dir / "backlog_planner_metadata.json"
+            stdout_path.write_text("{}", encoding="utf-8")
+            stderr_path.write_text("", encoding="utf-8")
+            metadata_path.write_text("{}\n", encoding="utf-8")
+            return BacklogPlannerBackendResult(
+                raw_output={"project_id": "demo", "selected_epic_id": "missing", "epics": []},
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                metadata_path=metadata_path,
+            )
+
+    with pytest.raises(ValueError, match="backlog planner output did not match the BacklogPlan schema"):
+        run_backlog(
+            project_id="demo",
+            goal="Let an agent choose the next epic.",
+            roadmap_path=roadmap,
+            selected_epic_id="epic-0001",
+            config_dir=config_dir,
+            contracts_dir=tmp_path / "contracts",
+            runs_dir=tmp_path / "runs",
+            objectives_dir=tmp_path / "objectives",
+            mode="strong-model",
+            planner_backend=InvalidBacklogBackend(tmp_path),
+            objective_planner_backend=FakeObjectivePlannerBackend(),
+            executor=FakeExecutor(),
+        )
+
+
+def test_run_backlog_propagates_run_objective_failure(tmp_path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# demo\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "worker", "max_walltime_minutes": 5},
+            "model_roles": {
+                "planner": {"type": "codex_cli", "model": "planner", "max_walltime_minutes": 5}
+            },
+            "model_routing": {"default_role": "planner"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    roadmap = tmp_path / "ROADMAP.md"
+    roadmap.write_text("# Roadmap\n\nRemaining work:\n\n1. Add run-backlog.\n", encoding="utf-8")
+
+    def failing_run_objective(**_kwargs):
+        raise RuntimeError("run-objective failed: release execution failed")
+
+    monkeypatch.setattr("agentic_devloop.backlog.run_objective", failing_run_objective)
+
+    with pytest.raises(RuntimeError, match="run-objective failed: release execution failed"):
+        run_backlog(
+            project_id="demo",
+            goal="Let an agent choose the next epic.",
+            roadmap_path=roadmap,
+            selected_epic_id="epic-0001",
+            config_dir=config_dir,
+            contracts_dir=tmp_path / "contracts",
+            runs_dir=tmp_path / "runs",
+            objectives_dir=tmp_path / "objectives",
+            mode="strong-model",
+            planner_backend=FakeBacklogBackend(tmp_path),
+            objective_planner_backend=FakeObjectivePlannerBackend(),
+            executor=FakeExecutor(),
+        )
 
 
 def _write_yaml(path: Path, data: dict[str, object]) -> None:
