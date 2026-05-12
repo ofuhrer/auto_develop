@@ -201,6 +201,11 @@ agent-loop run-task \
   --project rust_rockfall \
   --contract contracts/rr-0001.yaml
 
+agent-loop run-task \
+  --project auto_develop \
+  --contract contracts/ad-0001.yaml \
+  --push-on-accept
+
 agent-loop status
 ```
 
@@ -224,8 +229,15 @@ Planned later commands:
 7. Collect evidence into `runs/<run-id>/<task-id>/evidence/`.
 8. Run deterministic review.
 9. Persist `decision.yaml` and `review.md`.
+10. Optionally commit, merge, and push accepted changes when completion flags are set.
 
-The command does not merge changes or create a pull request.
+By default, the command does not merge changes or create a pull request. Autonomous completion is opt-in:
+
+- `--commit-on-accept`: commit accepted task changes in the task worktree.
+- `--merge-on-accept`: commit accepted task changes and merge the task branch into the base branch.
+- `--push-on-accept`: commit, merge, and push the base branch to `origin`.
+
+Merge conflicts currently stop the command and leave the base repository in Git's conflict state for follow-up resolution.
 
 ## Project Adapter Interface
 

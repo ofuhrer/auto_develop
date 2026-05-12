@@ -57,4 +57,15 @@ agent-loop run-task \
 
 `run-task` creates an isolated worktree, writes an executor prompt, runs the configured executor, runs the contract verification commands, collects an evidence bundle, and writes `decision.yaml`.
 
+To let an accepted task complete the Git path automatically:
+
+```bash
+agent-loop run-task \
+  --project auto_develop \
+  --contract contracts/ad-0001.yaml \
+  --push-on-accept
+```
+
+`--push-on-accept` commits accepted changes in the task worktree, merges the task branch into the configured base branch, and pushes the base branch to `origin`. Use `--merge-on-accept` to commit and merge without pushing, or `--commit-on-accept` to only commit in the task worktree.
+
 Before running against `rust_rockfall`, update [configs/rust_rockfall.yaml](configs/rust_rockfall.yaml) so `repo_path` and `worktree_root` point to real local paths.

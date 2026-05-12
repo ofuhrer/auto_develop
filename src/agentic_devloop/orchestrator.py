@@ -8,6 +8,7 @@ from typing import Callable, Protocol
 from agentic_devloop.config import load_project_config
 from agentic_devloop.evidence import EvidenceCollector, write_review_decision
 from agentic_devloop.executor import CodexExecutor
+from agentic_devloop.git_finalize import FinalizeResult, finalize_accepted_task
 from agentic_devloop.git_state import changed_files as git_changed_files
 from agentic_devloop.git_state import diff_patch
 from agentic_devloop.models import (
@@ -38,6 +39,7 @@ class TaskRunResult:
     worktree_path: Path
     bundle_path: Path
     decision: ReviewDecision
+    finalize: FinalizeResult | None = None
 
 
 def make_run_id(release_id: str, task_id: str, now: datetime | None = None) -> str:
@@ -58,6 +60,10 @@ def run_task(
     executor: ExecutorProtocol | None = None,
     verification_timeout_seconds: int = 600,
     allow_dirty: bool = False,
+    commit_on_accept: bool = False,
+    merge_on_accept: bool = False,
+    push_on_accept: bool = False,
+    commit_message: str | None = None,
     now: datetime | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> TaskRunResult:
@@ -193,12 +199,36 @@ def run_task(
     )
     write_review_decision(bundle, decision)
     _report(progress, f"decision={decision.decision}")
+    finalize_result = None
+    if decision.decision == Decision.ACCEPTED and (
+        commit_on_accept or merge_on_accept or push_on_accept
+    ):
+        should_merge = merge_on_accept or push_on_accept
+        should_push = push_on_accept
+        message = commit_message or f"{task.task_id}: {task.title}"
+        _report(progress, "committing accepted task changes")
+        finalize_result = finalize_accepted_task(
+            repo_path=config.repo_path,
+            worktree_path=worktree_path,
+            task_branch=branch,
+            base_branch=config.default_base_branch,
+            commit_message=message,
+            merge=should_merge,
+            push=should_push,
+        )
+        if finalize_result.commit_hash:
+            _report(progress, f"commit={finalize_result.commit_hash}")
+        if finalize_result.merged:
+            _report(progress, f"merged_into={config.default_base_branch}")
+        if finalize_result.pushed:
+            _report(progress, f"pushed=origin/{config.default_base_branch}")
 
     return TaskRunResult(
         run_id=run_id,
         worktree_path=worktree_path,
         bundle_path=bundle.bundle_path,
         decision=decision,
+        finalize=finalize_result,
     )
 
 

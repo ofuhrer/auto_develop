@@ -41,3 +41,4 @@ def test_run_task_command_is_registered(capsys) -> None:
 
     assert error.value.code == 0
     assert "--contract" in captured.out
+    assert "--push-on-accept" in captured.out

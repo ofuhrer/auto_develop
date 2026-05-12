@@ -68,9 +68,11 @@ Implemented:
 - Verification command runner.
 - Evidence bundle collection.
 - Deterministic review with persisted `decision.yaml`.
+- Optional accepted-task finalization with commit, merge, and push.
 
 Not yet completed:
 
+- Automated merge-conflict repair.
 - A real synthetic run against `rust_rockfall`.
 - Sprint 0 review based on actual executor evidence.
-- Merge or pull-request automation.
+- Pull-request automation.

@@ -126,6 +126,88 @@ def test_run_task_wires_executor_verification_evidence_and_review(tmp_path) -> N
     )
 
 
+def test_run_task_can_commit_merge_and_push_accepted_changes(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    remote = tmp_path / "remote.git"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True, text=True)
+    _git(repo, "remote", "add", "origin", str(remote))
+    _git(repo, "push", "-u", "origin", "main")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "verification_profiles": {"default": {"commands": ["test -f docs/result.md"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    contract_path = tmp_path / "contract.yaml"
+    _write_yaml(
+        contract_path,
+        {
+            "task_id": "demo-0003",
+            "release_id": "v0.1.0",
+            "title": "Create docs result",
+            "budget_class": "S",
+            "objective": "Create a result document.",
+            "allowed_files": ["docs/**"],
+            "forbidden_changes": [],
+            "required_evidence": ["git diff", "test output"],
+            "verification": {"commands": ["test -f docs/result.md"]},
+            "stop_conditions": ["Verification fails twice."],
+        },
+    )
+
+    result = run_task(
+        project_id="demo",
+        contract_path=contract_path,
+        config_dir=config_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FakeExecutor(),
+        now=datetime(2026, 5, 12, 12, 2, tzinfo=UTC),
+        push_on_accept=True,
+        commit_message="Add generated docs result",
+    )
+
+    assert result.decision.decision == "accepted"
+    assert result.finalize is not None
+    assert result.finalize.commit_hash is not None
+    assert result.finalize.merged is True
+    assert result.finalize.pushed is True
+    assert (repo / "docs" / "result.md").read_text(encoding="utf-8").startswith("# Result")
+
+    remote_main = subprocess.run(
+        ["git", "--git-dir", str(remote), "rev-parse", "main"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert remote_main == result.finalize.commit_hash
+
+
 def test_run_task_escalates_executor_failure_without_verification(tmp_path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

@@ -64,6 +64,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow creating a worktree when the base repository has uncommitted changes.",
     )
+    run_task_parser.add_argument(
+        "--commit-on-accept",
+        action="store_true",
+        help="Commit accepted task changes in the task worktree.",
+    )
+    run_task_parser.add_argument(
+        "--merge-on-accept",
+        action="store_true",
+        help="Commit accepted task changes and merge the task branch into the base branch.",
+    )
+    run_task_parser.add_argument(
+        "--push-on-accept",
+        action="store_true",
+        help="Commit, merge, and push accepted task changes to origin.",
+    )
+    run_task_parser.add_argument(
+        "--commit-message",
+        help="Commit message to use when committing accepted task changes.",
+    )
 
     subparsers.add_parser("status", help="Show orchestrator status.")
 
@@ -101,6 +120,10 @@ def main(argv: list[str] | None = None) -> int:
                 runs_dir=Path(args.runs_dir),
                 verification_timeout_seconds=args.verification_timeout_seconds,
                 allow_dirty=args.allow_dirty,
+                commit_on_accept=args.commit_on_accept,
+                merge_on_accept=args.merge_on_accept,
+                push_on_accept=args.push_on_accept,
+                commit_message=args.commit_message,
                 progress=_print_progress,
             )
         except KeyboardInterrupt:
@@ -119,14 +142,19 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _task_run_result(result) -> dict[str, str]:
-    return {
+def _task_run_result(result) -> dict[str, object]:
+    output = {
         "run_id": result.run_id,
         "worktree_path": str(result.worktree_path),
         "bundle_path": str(result.bundle_path),
         "decision": result.decision.decision,
         "rationale": result.decision.rationale,
     }
+    if result.finalize is not None:
+        output["commit_hash"] = result.finalize.commit_hash
+        output["merged"] = result.finalize.merged
+        output["pushed"] = result.finalize.pushed
+    return output
 
 
 def _print_progress(message: str) -> None:
