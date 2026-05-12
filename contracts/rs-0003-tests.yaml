@@ -1,0 +1,43 @@
+task_id: rs-0003-tests
+release_id: runtime-supervisor-repair-loop
+title: Add release tests for supervisor repair and resume
+task_type: code_only
+budget_class: M
+objective: Add focused release tests for the sequential RuntimeSupervisor integration
+  introduced by `rs-0003`. Cover successful verification-environment repair/resume
+  and stop-on-unsafe-repair behavior with structured supervisor evidence, while
+  keeping deterministic gates and finalization behavior intact.
+allowed_files:
+- tests/test_release.py
+- src/agentic_devloop/release.py
+- src/agentic_devloop/runtime_supervisor.py
+forbidden_changes:
+- Do not broaden the implementation beyond fixing defects exposed by the new tests.
+- Do not modify planner, objective, executor, orchestrator, CLI, or docs code.
+- Do not bypass verification, review, budget, overlap, or finalization gates.
+- Do not add tests that require live model calls, network access, or developer-local
+  Git state.
+required_evidence:
+- git diff
+- focused release supervisor pytest output
+- focused RuntimeSupervisor pytest output
+- changed-files list
+verification:
+  profile: code_only
+stop_conditions:
+- Stop if tests require changing public CLI flags or release JSON output schemas.
+- Stop if test fixtures need real external model calls or non-temporary repositories.
+- Stop if supporting fixes would exceed the allowed files or weaken deterministic
+  gates.
+- Stop if the diff exceeds the task budget and should be split again.
+non_goals:
+- Do not implement planner normalization integration.
+- Do not implement long-running worker inspection integration.
+- Do not update documentation or repo-state notes.
+scientific_assumptions:
+- Not applicable; developer tooling task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+depends_on:
+- rs-0003

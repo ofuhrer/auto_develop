@@ -8,13 +8,11 @@ objective: Modify sequential `run_release` task execution to construct RuntimeSu
   events, apply only bounded supervisor actions, and resume the failed task when the
   repair action explicitly allows release resume. Write structured repair evidence
   under the release run directory when repair is unsafe, unsupported, or exhausted.
-  Add tests for successful verification-environment repair/resume and stop-on-unsafe-repair
-  paths.
+  Keep this task scoped to release implementation only; regression tests are covered
+  by the follow-up `rs-0003-tests` contract.
 allowed_files:
 - src/agentic_devloop/release.py
 - src/agentic_devloop/runtime_supervisor.py
-- tests/test_release.py
-- tests/test_runtime_supervisor.py
 forbidden_changes:
 - Do not change default finalization semantics or allow failed releases to merge or
   push.
@@ -26,8 +24,7 @@ forbidden_changes:
 - Do not delete or hide failed task evidence.
 required_evidence:
 - git diff
-- focused release supervisor pytest output
-- focused RuntimeSupervisor pytest output
+- focused release pytest output showing existing release tests still pass
 - changed-files list
 verification:
   commands: []
@@ -45,6 +42,7 @@ non_goals:
 - Do not implement long-running worker inspection integration.
 - Do not add new user-facing CLI options.
 - Do not document behavior in this task.
+- Do not add release regression tests in this task.
 scientific_assumptions:
 - Not applicable; developer tooling task.
 fixture_changes_allowed: false
