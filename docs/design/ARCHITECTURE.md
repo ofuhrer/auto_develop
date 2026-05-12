@@ -108,9 +108,9 @@ cheap deterministic checks first
 -> frontier model only for planning, review, or failure diagnosis
 ```
 
-Current implementation supports configurable task execution roles through `model_roles` and `model_routing`. Worker roles may define `fallback_models`, and every executor attempt is recorded in evidence. Release queues are checked for overlapping allowed-file scopes before execution. Release-level planning exists as deterministic scaffolding with strong-model budget reservation and prompt artifacts; strong-model review and model-based failure diagnosis are still explicit future control points rather than active automated calls.
+Current implementation supports configurable task execution roles through `model_roles` and `model_routing`. Worker roles may define `fallback_models`, and every executor attempt is recorded in evidence. Release queues classify overlapping allowed-file scopes before execution: minor overlap is sequential-only, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected. Release-level planning exists as deterministic scaffolding with strong-model budget reservation and prompt artifacts; strong-model review and model-based failure diagnosis are still explicit future control points rather than active automated calls.
 
-Merge finalization uses a local lock, rebases the task worktree onto the latest available base branch, then merges into `main`. Rebase or merge conflicts are surfaced as finalization evidence rather than repaired automatically.
+Merge finalization uses a local lock, rebases the task worktree onto the latest available base branch, then merges into `main`. Contract-contained rebase conflicts get one bounded autonomous repair attempt followed by verification and one finalization retry. Remaining conflicts are surfaced as evidence.
 
 ## Context Controls
 

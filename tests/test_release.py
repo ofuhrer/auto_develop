@@ -176,16 +176,43 @@ def test_run_release_executes_ordered_contracts_and_writes_summary(tmp_path) -> 
     assert '"task_id": "demo-0002"' in summary
 
 
-def test_analyze_contract_overlaps_blocks_shared_allowed_files() -> None:
+def test_analyze_contract_overlaps_classifies_shared_scope_as_minor() -> None:
     report = analyze_contract_overlaps(
         [
-            _task_contract("demo-0001"),
-            _task_contract("demo-0002"),
+            _task_contract("demo-0001", allowed_files=["docs/guides/**"]),
+            _task_contract("demo-0002", allowed_files=["docs/guides/setup.md"]),
+        ]
+    )
+
+    assert report.has_blocking_findings is False
+    assert report.has_parallel_blockers is False
+    assert report.findings[0].severity == "minor"
+    assert report.findings[0].pattern == "docs/guides/** <-> docs/guides/setup.md"
+
+
+def test_analyze_contract_overlaps_classifies_broad_scope_as_parallel_blocker() -> None:
+    report = analyze_contract_overlaps(
+        [
+            _task_contract("demo-0001", allowed_files=["src/**"]),
+            _task_contract("demo-0002", allowed_files=["src/agentic_devloop/release.py"]),
+        ]
+    )
+
+    assert report.has_blocking_findings is False
+    assert report.has_parallel_blockers is True
+    assert report.findings[0].severity == "broad"
+
+
+def test_analyze_contract_overlaps_blocks_same_concrete_file() -> None:
+    report = analyze_contract_overlaps(
+        [
+            _task_contract("demo-0001", allowed_files=["README.md"]),
+            _task_contract("demo-0002", allowed_files=["README.md"]),
         ]
     )
 
     assert report.has_blocking_findings is True
-    assert report.findings[0].pattern == "docs/** <-> docs/**"
+    assert report.findings[0].severity == "blocking"
 
 
 def _task_contract(

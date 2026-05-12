@@ -145,6 +145,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Continue running remaining contracts after a task is not accepted.",
     )
+    run_release_parser.add_argument(
+        "--execution-mode",
+        choices=["sequential", "parallel"],
+        default="sequential",
+        help="Execution scheduling mode. Parallel mode rejects broad overlaps.",
+    )
 
     plan_release_parser = subparsers.add_parser(
         "plan-release",
@@ -253,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
                 merge_on_accept=args.merge_on_accept,
                 push_on_accept=args.push_on_accept,
                 stop_on_failure=not args.continue_on_failure,
+                execution_mode=args.execution_mode,
                 progress=_print_progress,
             )
         except KeyboardInterrupt:

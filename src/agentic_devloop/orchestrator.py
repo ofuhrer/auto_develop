@@ -7,19 +7,27 @@ from typing import Callable, Protocol
 
 from agentic_devloop.config import load_project_config
 from agentic_devloop.context import enforce_context_budget, load_context_bundle
+from agentic_devloop.conflict_repair import conflicted_files, write_conflict_repair_prompt
 from agentic_devloop.evidence import (
     EvidenceCollector,
+    write_conflict_repair_result,
     write_failure_diagnosis,
     write_finalization_result,
     write_review_decision,
     write_scientific_outputs,
 )
 from agentic_devloop.executor import CodexExecutor
-from agentic_devloop.git_finalize import FinalizeResult, GitFinalizeError, finalize_accepted_task
+from agentic_devloop.git_finalize import (
+    FinalizeResult,
+    GitFinalizeError,
+    continue_rebase,
+    finalize_accepted_task,
+)
 from agentic_devloop.git_state import changed_files as git_changed_files
 from agentic_devloop.git_state import diff_patch
 from agentic_devloop.models import (
     Decision,
+    ConflictRepairResult,
     ExecutorAttempt,
     ExecutorConfig,
     ExecutorResult,
@@ -250,19 +258,36 @@ def run_task(
             if finalize_result.pushed:
                 _report(progress, f"pushed=origin/{config.default_base_branch}")
         except GitFinalizeError as error:
-            finalize_result = FinalizeResult(
-                failed_step="finalize",
-                error=str(error),
-            )
-            decision = ReviewDecision(
-                task_id=task.task_id,
-                decision=Decision.ESCALATED,
-                reviewer=Reviewer.DETERMINISTIC,
-                rationale=f"Accepted task could not be finalized: {error}",
-                risks=["Accepted work remains in the task worktree or branch."],
-                follow_up_tasks=["Inspect finalization.yaml and resolve the Git failure."],
-            )
             _report(progress, f"finalization_failed={error}")
+            repair_result = _attempt_conflict_repair(
+                error=error,
+                task=task,
+                executor_configs=executor_configs,
+                executor=executor,
+                worktree_path=worktree_path,
+                scratch_dir=scratch_dir,
+                verification_commands=verification_commands,
+                verification_timeout_seconds=verification_timeout_seconds,
+                progress=progress,
+            )
+            bundle = write_conflict_repair_result(bundle, repair_result)
+            if repair_result.resolved:
+                try:
+                    finalize_result = finalize_accepted_task(
+                        repo_path=config.repo_path,
+                        worktree_path=worktree_path,
+                        task_branch=branch,
+                        base_branch=config.default_base_branch,
+                        commit_message=message,
+                        merge=should_merge,
+                        push=should_push,
+                    )
+                except GitFinalizeError as retry_error:
+                    finalize_result = _failed_finalize_result(retry_error)
+                    decision = _finalization_failure_decision(task, retry_error)
+            else:
+                finalize_result = _failed_finalize_result(error)
+                decision = _finalization_failure_decision(task, error)
         write_finalization_result(bundle, finalize_result)
         if finalize_result.error is not None:
             write_review_decision(bundle, decision)
@@ -413,6 +438,94 @@ def _diagnose_executor_failure(result: ExecutorResult) -> dict:
             for attempt in result.attempts
         ],
     }
+
+
+def _attempt_conflict_repair(
+    *,
+    error: GitFinalizeError,
+    task: TaskContract,
+    executor_configs: list[ExecutorConfig],
+    executor: ExecutorProtocol | None,
+    worktree_path: Path,
+    scratch_dir: Path,
+    verification_commands: list[str],
+    verification_timeout_seconds: int,
+    progress: Callable[[str], None] | None,
+) -> ConflictRepairResult:
+    if error.step not in {"rebase", "merge"}:
+        return ConflictRepairResult(attempted=False)
+    conflicted = conflicted_files(worktree_path)
+    if not conflicted:
+        return ConflictRepairResult(attempted=False)
+    if any(not _path_allowed(path, task.allowed_files) for path in conflicted):
+        return ConflictRepairResult(attempted=False, conflicted_files=conflicted)
+
+    _report(progress, f"attempting_conflict_repair files={len(conflicted)}")
+    prompt_path = write_conflict_repair_prompt(
+        path=scratch_dir / "conflict_repair_prompt.md",
+        task=task,
+        conflicted=conflicted,
+        failure=str(error),
+    )
+    repair_executor = executor or _executor_for_config(executor_configs[-1])
+    repair_output_dir = scratch_dir / "conflict_repair"
+    repair_result = repair_executor.run(
+        prompt_path=prompt_path,
+        worktree_path=worktree_path,
+        output_dir=repair_output_dir,
+    )
+    repair_result = _normalize_executor_metadata(repair_result, prompt_path)
+    remaining_conflicts = conflicted_files(worktree_path)
+    if repair_result.exit_code != 0 or remaining_conflicts:
+        return ConflictRepairResult(
+            attempted=True,
+            conflicted_files=conflicted,
+            prompt_path=prompt_path,
+            executor_exit_code=repair_result.exit_code,
+            resolved=False,
+        )
+
+    verification_results = VerificationRunner(timeout_seconds=verification_timeout_seconds).run(
+        commands=verification_commands,
+        worktree_path=worktree_path,
+        output_dir=scratch_dir / "conflict_repair_verification",
+    )
+    verification_exit_codes = [result.exit_code for result in verification_results]
+    resolved = all(exit_code == 0 for exit_code in verification_exit_codes)
+    if resolved and error.step == "rebase":
+        try:
+            continue_rebase(worktree_path)
+        except GitFinalizeError:
+            resolved = False
+    return ConflictRepairResult(
+        attempted=True,
+        conflicted_files=conflicted,
+        prompt_path=prompt_path,
+        executor_exit_code=repair_result.exit_code,
+        verification_exit_codes=verification_exit_codes,
+        resolved=resolved,
+    )
+
+
+def _path_allowed(path: str, allowed_patterns: list[str]) -> bool:
+    from fnmatch import fnmatch
+
+    return any(fnmatch(path, pattern) for pattern in allowed_patterns)
+
+
+def _failed_finalize_result(error: GitFinalizeError) -> FinalizeResult:
+    return FinalizeResult(failed_step=error.step, error=str(error))
+
+
+def _finalization_failure_decision(task: TaskContract, error: GitFinalizeError) -> ReviewDecision:
+    return ReviewDecision(
+        task_id=task.task_id,
+        decision=Decision.ESCALATED,
+        reviewer=Reviewer.DETERMINISTIC,
+        rationale=f"Accepted task could not be finalized: {error}",
+        risks=["Accepted work remains in the task worktree or branch."],
+        follow_up_tasks=["Inspect finalization.yaml and conflict_repair.yaml if present."],
+    )
 
 
 def _report(progress: Callable[[str], None] | None, message: str) -> None:

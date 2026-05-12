@@ -50,9 +50,12 @@ def run_release(
     merge_on_accept: bool = False,
     push_on_accept: bool = False,
     stop_on_failure: bool = True,
+    execution_mode: str = "sequential",
     now: datetime | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> ReleaseRunResult:
+    if execution_mode not in {"sequential", "parallel"}:
+        raise ValueError(f"unsupported execution mode: {execution_mode}")
     config = load_project_config(project_id, config_dir, validate_repo=True)
     run_id = make_release_run_id(release_id, now)
     selected_contracts = _select_contracts(
@@ -66,16 +69,20 @@ def run_release(
         raise ValueError(f"no contracts found for release {release_id}")
     selected_tasks = [load_yaml_model(path, TaskContract) for path in selected_contracts]
     overlap_report = analyze_contract_overlaps(selected_tasks)
-    if overlap_report.has_blocking_findings:
+    if overlap_report.has_blocking_findings or (
+        execution_mode == "parallel" and overlap_report.has_parallel_blockers
+    ):
         details = "; ".join(
             f"{finding.first_task_id}/{finding.second_task_id}: {finding.pattern}"
             for finding in overlap_report.findings
-            if finding.severity == "blocking"
+            if finding.severity in {"broad", "blocking"}
         )
-        raise ValueError(f"release contracts have overlapping allowed files: {details}")
+        raise ValueError(f"release contracts are unsafe for {execution_mode} execution: {details}")
 
     _report(progress, f"release_run_id={run_id}")
-    _report(progress, f"release={release_id} tasks={len(selected_contracts)}")
+    _report(progress, f"release={release_id} tasks={len(selected_contracts)} mode={execution_mode}")
+    if overlap_report.findings:
+        _report(progress, f"overlap_findings={len(overlap_report.findings)} sequential_only=true")
 
     task_results: list[TaskRunResult] = []
     for index, (contract_path, task) in enumerate(zip(selected_contracts, selected_tasks), start=1):
@@ -203,16 +210,27 @@ def analyze_contract_overlaps(tasks: list[TaskContract]) -> ReleaseOverlapReport
         for second in tasks[index + 1 :]:
             for first_pattern in first.allowed_files:
                 for second_pattern in second.allowed_files:
-                    if _patterns_overlap(first_pattern, second_pattern):
+                    severity = _overlap_severity(first_pattern, second_pattern)
+                    if severity is not None:
                         findings.append(
                             OverlapFinding(
                                 first_task_id=first.task_id,
                                 second_task_id=second.task_id,
                                 pattern=f"{first_pattern} <-> {second_pattern}",
-                                severity="blocking",
+                                severity=severity,
                             )
                         )
     return ReleaseOverlapReport(findings=findings)
+
+
+def _overlap_severity(first: str, second: str) -> str | None:
+    if not _patterns_overlap(first, second):
+        return None
+    if _is_broad_pattern(first) or _is_broad_pattern(second):
+        return "broad"
+    if not _has_glob(first) and not _has_glob(second) and first == second:
+        return "blocking"
+    return "minor"
 
 
 def _patterns_overlap(first: str, second: str) -> bool:
@@ -232,6 +250,23 @@ def _glob_prefix(pattern: str) -> str:
     if wildcard_index < 0:
         return pattern
     return pattern[:wildcard_index].rstrip("/")
+
+
+def _has_glob(pattern: str) -> bool:
+    return "*" in pattern or "?" in pattern
+
+
+def _is_broad_pattern(pattern: str) -> bool:
+    normalized = pattern.strip().rstrip("/")
+    if normalized in {"*", "**", "**/*"}:
+        return True
+    if normalized.endswith("/**"):
+        prefix = normalized.removesuffix("/**")
+        return "/" not in prefix
+    if normalized.endswith("/**/*"):
+        prefix = normalized.removesuffix("/**/*")
+        return "/" not in prefix
+    return False
 
 
 def _report(progress: Callable[[str], None] | None, message: str) -> None:

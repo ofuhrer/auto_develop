@@ -291,7 +291,7 @@ By default, the command does not merge changes or create a pull request. Autonom
 - `--merge-on-accept`: commit accepted task changes and merge the task branch into the base branch.
 - `--push-on-accept`: commit, merge, and push the base branch to `origin`.
 
-Merge conflicts currently stop the command and leave the base repository in Git's conflict state for follow-up resolution.
+Finalization conflicts are captured in evidence. Contract-contained rebase conflicts get one bounded autonomous repair attempt; unresolved conflicts escalate.
 
 ### `run-release` Flow
 
@@ -299,7 +299,7 @@ Merge conflicts currently stop the command and leave the base repository in Git'
 
 1. Load and validate `ProjectConfig`.
 2. Resolve an ordered contract queue from explicit `--contract` arguments or `repo_state/<project>/release_plan.yaml`.
-3. Reject queues whose `allowed_files` scopes overlap.
+3. Classify `allowed_files` overlap.
 4. Run each contract through the existing `run-task` state machine.
 5. Stop after the first non-accepted task unless `--continue-on-failure` is set.
 6. Persist `runs/<release-run-id>/release_summary.json`.
@@ -330,7 +330,15 @@ Accepted-task finalization:
 5. Merges the task branch into base.
 6. Pushes base when requested.
 
-Rebase and merge conflicts are persisted through `finalization.yaml` and an escalated decision. Automated semantic repair is not implemented yet.
+Contract-contained rebase conflicts:
+
+1. Write `conflict_repair_prompt.md`.
+2. Run one bounded repair worker attempt against conflicted files only.
+3. Rerun verification.
+4. Continue the rebase.
+5. Retry finalization once.
+
+Unresolved rebase conflicts and merge conflicts are persisted through `conflict_repair.yaml`, `finalization.yaml`, and an escalated decision.
 
 `agent-loop status` reads existing evidence bundles and prints recent run summaries with run ID, task ID, decision, and bundle path.
 

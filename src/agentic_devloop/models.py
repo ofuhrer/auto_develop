@@ -269,6 +269,15 @@ class EvidenceBundle(StrictModel):
     finalization_path: Path | None = None
 
 
+class ConflictRepairResult(StrictModel):
+    attempted: bool = False
+    conflicted_files: list[str] = Field(default_factory=list)
+    prompt_path: Path | None = None
+    executor_exit_code: int | None = None
+    verification_exit_codes: list[int] = Field(default_factory=list)
+    resolved: bool = False
+
+
 class Decision(StrEnum):
     ACCEPTED = "accepted"
     NEEDS_REVISION = "needs_revision"
@@ -322,3 +331,7 @@ class ReleaseOverlapReport(StrictModel):
     @property
     def has_blocking_findings(self) -> bool:
         return any(finding.severity == "blocking" for finding in self.findings)
+
+    @property
+    def has_parallel_blockers(self) -> bool:
+        return any(finding.severity in {"broad", "blocking"} for finding in self.findings)

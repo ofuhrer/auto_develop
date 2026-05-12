@@ -94,12 +94,13 @@ Current implementation status:
 - Evidence bundles persist `model_call_metadata.json` with prompt/output character counts.
 - `agent-loop status` reads existing evidence bundles and reports recent run summaries.
 - `agent-loop run-release` executes an ordered set of existing contracts from explicit `--contract` arguments or `repo_state/<project>/release_plan.yaml`.
-- Release queues are rejected when allowed-file scopes overlap.
+- Release queues classify allowed-file overlap; minor overlap is sequential-only, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected.
 - Project configs support `model_roles` and `model_routing` for cheap-worker and stronger-model task execution routing.
 - Executor roles support `fallback_models`; attempts are bounded by `budget.max_executor_attempts_per_task`.
 - Executor failure evidence includes `executor_attempts.json` and deterministic `failure_diagnosis.yaml`.
 - `agent-loop plan-release` writes deterministic contract planning scaffolds from release objectives and can reserve strong-model planning budget while writing a planner prompt.
 - Accepted-task finalization uses a local merge lock and rebases the worktree onto latest base before merging.
+- Contract-contained rebase conflicts get one bounded autonomous repair attempt before escalation.
 - Strong-model call accounting and model-based repeated-failure diagnosis are not yet implemented.
 
 ## Phase 3: Scientific Verification and Distributed Execution

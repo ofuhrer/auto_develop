@@ -8,7 +8,9 @@ from agentic_devloop.process import run_process
 
 
 class GitFinalizeError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, step: str = "git") -> None:
+        super().__init__(message)
+        self.step = step
 
 
 @dataclass(frozen=True)
@@ -33,7 +35,7 @@ def commit_worktree_changes(worktree_path: Path, message: str) -> str | None:
 
 def merge_branch(repo_path: Path, branch: str) -> None:
     _ensure_clean(repo_path)
-    _git(repo_path, ["merge", "--no-edit", branch])
+    _git(repo_path, ["merge", "--no-edit", branch], step="merge")
 
 
 def push_branch(repo_path: Path, branch: str, remote: str = "origin") -> None:
@@ -83,7 +85,7 @@ def _has_changes(repo_path: Path) -> bool:
 
 def _ensure_clean(repo_path: Path) -> None:
     if _has_changes(repo_path):
-        raise GitFinalizeError(f"repository has uncommitted changes: {repo_path}")
+        raise GitFinalizeError(f"repository has uncommitted changes: {repo_path}", step="clean-check")
 
 
 def _ensure_base_branch(repo_path: Path, base_branch: str) -> None:
@@ -104,7 +106,7 @@ def _rebase_worktree_onto(worktree_path: Path, base_branch: str) -> None:
             upstream = remote_ref
         except GitFinalizeError:
             upstream = base_branch
-    _git(worktree_path, ["rebase", upstream])
+    _git(worktree_path, ["rebase", upstream], step="rebase")
 
 
 def _has_remote(repo_path: Path, remote: str) -> bool:
@@ -125,7 +127,7 @@ class _merge_lock:
             self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.write(self.fd, f"pid={os.getpid()}\n".encode())
         except FileExistsError as error:
-            raise GitFinalizeError(f"merge lock already held: {self.path}") from error
+            raise GitFinalizeError(f"merge lock already held: {self.path}", step="lock") from error
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> None:
@@ -137,9 +139,17 @@ class _merge_lock:
             pass
 
 
-def _git(repo_path: Path, args: list[str]) -> str:
+def abort_rebase(worktree_path: Path) -> None:
+    run_process(["git", "rebase", "--abort"], cwd=worktree_path, timeout_seconds=120)
+
+
+def continue_rebase(worktree_path: Path) -> None:
+    _git(worktree_path, ["-c", "core.editor=true", "rebase", "--continue"], step="rebase-continue")
+
+
+def _git(repo_path: Path, args: list[str], *, step: str = "git") -> str:
     result = run_process(["git", *args], cwd=repo_path, timeout_seconds=120)
     if result.exit_code != 0:
         message = result.stderr.strip() or result.stdout.strip()
-        raise GitFinalizeError(message)
+        raise GitFinalizeError(message, step=step)
     return result.stdout

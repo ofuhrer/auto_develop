@@ -75,7 +75,7 @@ agent-loop run-release \
 
 `run-release` executes existing task contracts in order. If no `--contract` arguments are provided, it reads `current_tasks` from `repo_state/<project>/release_plan.yaml` and maps each task ID to `contracts/<task-id>.yaml`. It stops after the first non-accepted task by default and writes `release_summary.json` under `runs/`.
 
-Before running tasks, `run-release` checks for overlapping `allowed_files` patterns and rejects queues that would let workers edit the same file scope.
+Before running tasks, `run-release` classifies overlapping `allowed_files` patterns. Minor overlap is allowed in sequential mode, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected.
 
 Create a conservative release contract plan:
 
@@ -122,6 +122,8 @@ Scientific and benchmark contracts can set `task_type`, use named verification p
 Project configs may define `model_roles` and `model_routing` so low-risk tasks use cheap workers while large or release-preparation tasks route to stronger models. Executor roles can also define `fallback_models`; retries and fallback attempts are persisted in `executor_attempts.json`, and executor failures write `failure_diagnosis.yaml`.
 
 Accepted-task finalization uses a local `.git/agent-main.lock`, rebases the task worktree onto the latest base branch available locally or through `origin/<base>`, then merges and pushes when requested.
+
+If a rebase conflict is limited to files allowed by the task contract, the orchestrator writes a bounded conflict-repair prompt, runs one repair worker attempt, reruns verification, and retries finalization once. Unresolved conflicts are escalated with `conflict_repair.yaml` and `finalization.yaml` evidence.
 
 Show recent run summaries:
 
