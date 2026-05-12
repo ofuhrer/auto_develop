@@ -1,0 +1,34 @@
+task_id: contract-normalization-models
+release_id: governor-log-and-contract-normalization
+title: Add typed contract normalization evidence models
+task_type: code_only
+budget_class: S
+objective: Introduce small typed models for contract normalization requests, decisions,
+  before/after evidence, refusal reasons, and artifact path references without wiring
+  them into release execution yet.
+allowed_files:
+- src/agentic_devloop/contracts.py
+- src/agentic_devloop/models.py
+- tests/test_contract_normalization.py
+forbidden_changes:
+- Do not change CLI command behavior.
+- Do not change release orchestration flow.
+- Do not weaken existing contract validation requirements.
+- Do not modify example contracts, configs, objectives, or runtime evidence under runs/.
+required_evidence:
+- git diff
+- changed-files list
+- Tests proving the new normalization evidence models validate required fields and
+  reject unknown fields.
+- Tests proving normalized and refused decisions serialize with before/after snapshots,
+  rationale, changed fields, refusal reasons, and artifact path references.
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_contract_normalization.py
+  - git diff --check
+stop_conditions:
+- Stop if existing contract schema location is ambiguous enough that adding models
+  would duplicate an existing type system.
+- Stop if implementing the models requires changing current admission semantics.
+- Stop if verification requires a live Git repository or generated runtime artifacts.
+

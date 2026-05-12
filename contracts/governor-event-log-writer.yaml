@@ -1,0 +1,33 @@
+task_id: governor-event-log-writer
+release_id: governor-log-and-contract-normalization
+title: Add parent governor event log writer
+task_type: code_only
+budget_class: S
+objective: Create a small append-only governor run logger that writes governor.log,
+  governor.raw.log, and events.jsonl records with stable event types and child artifact
+  links.
+allowed_files:
+- src/agentic_devloop/governor_log.py
+- src/agentic_devloop/paths.py
+- tests/test_governor_log.py
+forbidden_changes:
+- Do not alter existing release log format.
+- Do not modify cleanup deletion behavior.
+- Do not write under runs/ during tests except inside pytest temporary directories.
+- Do not add logging dependencies beyond the standard library unless already used in
+  the project.
+required_evidence:
+- git diff
+- changed-files list
+- Tests proving governor.log, governor.raw.log, and events.jsonl are emitted.
+- Tests proving JSONL records are valid and preserve artifact links.
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_governor_log.py
+  - git diff --check
+stop_conditions:
+- Stop if there is already an equivalent parent governor logger and the task would
+  duplicate it.
+- Stop if path helpers cannot create run directories safely in temporary test repositories.
+- Stop if adding the logger requires changing unrelated release summary schemas.
+

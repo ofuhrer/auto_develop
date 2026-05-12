@@ -1,0 +1,44 @@
+task_id: wire-governor-log-artifact-links
+release_id: governor-log-and-contract-normalization
+title: Wire parent governor logging into release lifecycle
+task_type: code_only
+budget_class: M
+objective: Emit parent governor log events and artifact links across backlog planning,
+  objective generation or reuse, contract planning, normalization, release execution,
+  repair or resume, finalization, and repo-state refresh proposal steps.
+allowed_files:
+- src/agentic_devloop/cli.py
+- src/agentic_devloop/orchestrator.py
+- src/agentic_devloop/release.py
+- src/agentic_devloop/governor_log.py
+- tests/test_cli.py
+- tests/test_release.py
+- tests/test_governor_log.py
+forbidden_changes:
+- Do not change default integration branch behavior for run-release.
+- Do not delete or relocate existing release evidence artifacts.
+- Do not make cleanup remove governor logs unless cleanup behavior is explicitly covered
+  by existing cleanup rules.
+- Do not make CLI output non-JSON where it is currently JSON.
+- Do not require external services for logging.
+required_evidence:
+- git diff
+- changed-files list
+- Tests proving lifecycle event emission and artifact linking in temporary repositories.
+- CLI help output proving run-release remains available.
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_cli.py tests/test_release.py tests/test_governor_log.py
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop --help
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop run-release --help
+  - git diff --check
+stop_conditions:
+- Stop if lifecycle phases are not represented by stable code paths and would require
+  broad orchestration refactoring.
+- Stop if parent logging would change existing release artifact locations in a backward-
+  incompatible way.
+- Stop if tests cannot assert artifact links deterministically without depending on
+  local Git state or weakening verification.
+depends_on:
+- governor-event-log-writer
+- wire-normalization-into-contract-planning

@@ -1,0 +1,39 @@
+task_id: wire-normalization-into-contract-planning
+release_id: governor-log-and-contract-normalization
+title: Wire normalization into contract planning admission path
+task_type: code_only
+budget_class: M
+objective: Invoke deterministic normalization for planner-generated contracts that fail
+  admission for repairable reasons, persist before/after evidence, and admit only the
+  normalized contract after deterministic validation succeeds.
+allowed_files:
+- src/agentic_devloop/planning.py
+- src/agentic_devloop/contracts.py
+- src/agentic_devloop/orchestrator.py
+- tests/test_planning.py
+- tests/test_orchestrator.py
+forbidden_changes:
+- Do not change task branch naming.
+- Do not change run-task isolated worktree behavior.
+- Do not allow normalized contracts to skip admission.
+- Do not broaden planner-generated allowed_files or remove forbidden_changes.
+- Do not weaken release dependency handling or file-overlap behavior.
+required_evidence:
+- git diff
+- changed-files list
+- Tests proving successful normalization and admission rerun at the planning boundary.
+- Tests proving hard-stop refusal for unsafe or meaning-changing normalization.
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_planning.py tests/test_orchestrator.py tests/test_contract_normalization.py
+  - git diff --check
+stop_conditions:
+- Stop if admission failures are not currently structured enough to safely classify
+  repairable cases.
+- Stop if wiring normalization would require changing accepted contract meaning or
+  weakening verification.
+- Stop if orchestration tests reveal normalized contracts can proceed without a second
+  admission check.
+depends_on:
+- contract-normalization-rules
+
