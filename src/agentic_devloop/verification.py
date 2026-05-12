@@ -1,0 +1,57 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from agentic_devloop.models import CommandResult
+from agentic_devloop.process import run_process
+
+
+class VerificationRunner:
+    def __init__(self, *, timeout_seconds: int = 600) -> None:
+        self.timeout_seconds = timeout_seconds
+
+    def run(
+        self,
+        *,
+        commands: list[str],
+        worktree_path: Path,
+        output_dir: Path,
+        stop_on_failure: bool = True,
+    ) -> list[CommandResult]:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        results: list[CommandResult] = []
+        log_lines: list[str] = []
+
+        for index, command in enumerate(commands, start=1):
+            result = run_process(
+                command,
+                cwd=worktree_path,
+                timeout_seconds=self.timeout_seconds,
+                shell=True,
+            )
+            stdout_path = output_dir / f"verification_{index}_stdout.log"
+            stderr_path = output_dir / f"verification_{index}_stderr.log"
+            stdout_path.write_text(result.stdout, encoding="utf-8")
+            stderr_path.write_text(result.stderr, encoding="utf-8")
+
+            command_result = CommandResult(
+                command=command,
+                exit_code=result.exit_code,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                duration_seconds=result.duration_seconds,
+                timed_out=result.timed_out,
+            )
+            results.append(command_result)
+            log_lines.append(
+                f"[{index}] {command}\n"
+                f"exit_code={result.exit_code}\n"
+                f"timed_out={result.timed_out}\n"
+                f"duration_seconds={result.duration_seconds:.3f}\n"
+            )
+
+            if stop_on_failure and result.exit_code != 0:
+                break
+
+        (output_dir / "verification.log").write_text("\n".join(log_lines), encoding="utf-8")
+        return results

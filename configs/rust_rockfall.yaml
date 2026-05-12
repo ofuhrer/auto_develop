@@ -1,0 +1,22 @@
+project_id: rust_rockfall
+repo_path: /path/to/rust_rockfall
+default_base_branch: main
+worktree_root: /path/to/worktrees/rust_rockfall
+
+executor:
+  type: codex_cli
+  model: gpt-5.3-codex-spark
+  max_walltime_minutes: 25
+
+verification_profiles:
+  default:
+    commands:
+      - cargo fmt --check
+      - cargo clippy --all-targets --all-features -- -D warnings
+      - cargo test --all-targets --all-features
+
+budget:
+  max_executor_attempts_per_task: 2
+  max_strong_model_calls_per_release: 10
+  max_changed_files_per_task: 8
+  max_diff_lines_per_task: 600

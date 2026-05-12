@@ -12,7 +12,10 @@ license = { text = "MIT" }
 authors = [
   { name = "Auto Develop Contributors" }
 ]
-dependencies = []
+dependencies = [
+  "pydantic>=2.7",
+  "pyyaml>=6.0",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -25,6 +28,9 @@ agent-loop = "agentic_devloop.cli:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentic_devloop"]
 
 [tool.ruff]
 line-length = 100
