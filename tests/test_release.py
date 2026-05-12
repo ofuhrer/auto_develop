@@ -73,6 +73,63 @@ class SlowFakeExecutor(FakeExecutor):
                 self._active -= 1
 
 
+class FlakyVerificationExecutor(FakeExecutor):
+    def __init__(self) -> None:
+        self._attempts: dict[str, int] = {}
+
+    def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        prompt_text = prompt_path.read_text(encoding="utf-8")
+        task_id = "unknown"
+        if "task_id: demo-0001" in prompt_text:
+            task_id = "demo-0001"
+        attempts = self._attempts.get(task_id, 0) + 1
+        self._attempts[task_id] = attempts
+
+        docs_dir = worktree_path / "docs"
+        if attempts == 1:
+            if docs_dir.exists():
+                for child in docs_dir.iterdir():
+                    child.unlink()
+                docs_dir.rmdir()
+        else:
+            output_file = docs_dir / f"{task_id}.md"
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            output_file.write_text(f"# {task_id}\n", encoding="utf-8")
+
+        stdout_path = output_dir / "executor_stdout.log"
+        stderr_path = output_dir / "executor_stderr.log"
+        stdout_path.write_text(f"flaky verification executor attempt={attempts}\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return ExecutorResult(
+            command=["flaky-verification-executor"],
+            exit_code=0,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            duration_seconds=0.01,
+            backend="fake",
+            model=None,
+        )
+
+
+class FailingExecutor:
+    def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        stdout_path = output_dir / "executor_stdout.log"
+        stderr_path = output_dir / "executor_stderr.log"
+        stdout_path.write_text("executor failed intentionally\n", encoding="utf-8")
+        stderr_path.write_text("fatal executor error\n", encoding="utf-8")
+        return ExecutorResult(
+            command=["failing-executor"],
+            exit_code=1,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            duration_seconds=0.01,
+            backend="fake",
+            model=None,
+        )
+
+
 def test_executor_config_for_task_uses_budget_then_task_type_roles() -> None:
     config = ProjectConfig.model_validate(
         {
@@ -439,6 +496,76 @@ def test_run_release_writes_metrics_and_final_log_summary(tmp_path) -> None:
     assert str(result.budget_path) in log
     assert str(result.tuning_path) in log
     assert "Good luck, future humans. 🧑‍🚀🛠️🍀" in log
+
+
+def test_run_release_supervisor_repairs_verification_and_resumes(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FlakyVerificationExecutor(),
+        merge_on_accept=True,
+    )
+
+    assert result.decision == Decision.ACCEPTED
+    supervisor_dir = tmp_path / "runs" / result.run_id / "runtime_supervisor"
+    repair_path = supervisor_dir / "repair_demo-0001.json"
+    assert repair_path.exists()
+    repair = json.loads(repair_path.read_text(encoding="utf-8"))
+    assert repair["final_result"]["decision"] == Decision.ACCEPTED
+    assert len(repair["attempts"]) == 1
+    attempt = repair["attempts"][0]
+    assert attempt["decision"] == "retry"
+    assert attempt["classification"] == "release_resumable"
+    assert attempt["action_kind"] == "release_resume"
+    assert attempt["applier_applied"] is True
+    assert attempt["applier_stop_evidence"] is None
+    assert "event=repair_succeeded task=demo-0001 attempt=1" in result.log_path.read_text(encoding="utf-8")
+    assert result.task_results[0].run_id.endswith("_retry2")
+
+
+def test_run_release_supervisor_stops_on_unsafe_repair(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FailingExecutor(),
+    )
+
+    assert result.decision == Decision.ESCALATED
+    supervisor_dir = tmp_path / "runs" / result.run_id / "runtime_supervisor"
+    repair_path = supervisor_dir / "repair_demo-0001.json"
+    assert repair_path.exists()
+    repair = json.loads(repair_path.read_text(encoding="utf-8"))
+    assert repair["final_result"] is None
+    assert len(repair["attempts"]) == 1
+    attempt = repair["attempts"][0]
+    assert attempt["decision"] == "stop"
+    assert attempt["classification"] == "unsafe_policy_expansion"
+    assert attempt["stop_reason"] == "unsafe_policy_expansion"
+    assert "event=repair_stopped task=demo-0001" in result.log_path.read_text(encoding="utf-8")
 
 
 def test_run_release_fails_when_release_budget_is_exceeded(tmp_path) -> None:

@@ -74,6 +74,21 @@ def make_run_id(release_id: str, task_id: str, now: datetime | None = None) -> s
     return f"{timestamp}_{release_id}_{task_id}"
 
 
+def _unique_run_id(
+    *,
+    base_run_id: str,
+    runs_dir: Path,
+    worktree_root: Path,
+    task_id: str,
+) -> str:
+    run_id = base_run_id
+    suffix = 2
+    while (runs_dir / run_id / task_id).exists() or (worktree_root / run_id).exists():
+        run_id = f"{base_run_id}_retry{suffix}"
+        suffix += 1
+    return run_id
+
+
 def branch_name(release_id: str, task_id: str) -> str:
     return f"agent/{release_id}/{task_id}"
 
@@ -99,7 +114,12 @@ def run_task(
     config = load_project_config(project_id, config_dir, validate_repo=True)
     task = load_yaml_model(contract_path, TaskContract)
     diagnosis_backend = failure_diagnosis_backend or DeterministicFailureDiagnosisBackend()
-    run_id = make_run_id(task.release_id, task.task_id, now)
+    run_id = _unique_run_id(
+        base_run_id=make_run_id(task.release_id, task.task_id, now),
+        runs_dir=runs_dir,
+        worktree_root=config.worktree_root,
+        task_id=task.task_id,
+    )
     branch = branch_name(task.release_id, task.task_id)
     worktree_path = config.worktree_root / run_id
     run_root = runs_dir / run_id / task.task_id
