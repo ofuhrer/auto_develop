@@ -129,7 +129,22 @@ def run_release(
         _report(progress, f"event=overlap_findings count={len(overlap_report.findings)}")
 
     task_inputs = list(zip(selected_contracts, selected_tasks))
-    dependencies = _release_dependency_map(selected_tasks, overlap_report)
+    completed_task_ids = _completed_release_task_ids(
+        runs_dir=runs_dir,
+        release_id=release_id,
+        integration_branch=feature_branch,
+    )
+    dependencies = _release_dependency_map(
+        selected_tasks,
+        overlap_report,
+        completed_task_ids=completed_task_ids,
+    )
+    if completed_task_ids:
+        _report(
+            progress,
+            "event=completed_release_dependencies tasks="
+            + json.dumps(sorted(completed_task_ids), sort_keys=True),
+        )
     if dependencies:
         _report(progress, "event=execution_dag dependencies=" + json.dumps(dependencies, sort_keys=True))
     if execution_mode == "parallel":
@@ -141,6 +156,7 @@ def run_release(
             task_base_branch=feature_branch,
             task_inputs=task_inputs,
             dependencies=dependencies,
+            completed_task_ids=completed_task_ids,
             executor=executor,
             verification_timeout_seconds=verification_timeout_seconds,
             allow_dirty=allow_dirty,
@@ -349,6 +365,7 @@ def _run_release_parallel(
     task_base_branch: str,
     task_inputs: list[tuple[Path, TaskContract]],
     dependencies: dict[str, list[str]],
+    completed_task_ids: set[str],
     executor: ExecutorProtocol | None,
     verification_timeout_seconds: int,
     allow_dirty: bool,
@@ -361,7 +378,7 @@ def _run_release_parallel(
 ) -> list[TaskRunResult]:
     by_task_id = {task.task_id: (path, task) for path, task in task_inputs}
     pending = set(by_task_id)
-    completed: set[str] = set()
+    completed: set[str] = set(completed_task_ids)
     failed = False
     task_results_by_id: dict[str, TaskRunResult] = {}
     futures: dict[Future[TaskRunResult], str] = {}
@@ -964,14 +981,46 @@ def analyze_contract_overlaps(tasks: list[TaskContract]) -> ReleaseOverlapReport
     return ReleaseOverlapReport(findings=findings)
 
 
+def _completed_release_task_ids(
+    *,
+    runs_dir: Path,
+    release_id: str,
+    integration_branch: str,
+) -> set[str]:
+    completed: set[str] = set()
+    for summary_path in sorted(runs_dir.glob(f"*_{release_id}_release/release_summary.json")):
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if summary.get("release_id") != release_id:
+            continue
+        if summary.get("integration_branch") != integration_branch:
+            continue
+        for task in summary.get("tasks", []):
+            if not isinstance(task, dict):
+                continue
+            if task.get("decision") != Decision.ACCEPTED:
+                continue
+            if not task.get("merged"):
+                continue
+            task_id = task.get("task_id")
+            if isinstance(task_id, str) and task_id:
+                completed.add(task_id)
+    return completed
+
+
 def _release_dependency_map(
     tasks: list[TaskContract],
     overlap_report: ReleaseOverlapReport,
+    *,
+    completed_task_ids: set[str] | None = None,
 ) -> dict[str, list[str]]:
     task_ids = {task.task_id for task in tasks}
+    completed_task_ids = completed_task_ids or set()
     dependencies: dict[str, set[str]] = {task.task_id: set(task.depends_on) for task in tasks}
     for task in tasks:
-        unknown = sorted(set(task.depends_on) - task_ids)
+        unknown = sorted(set(task.depends_on) - task_ids - completed_task_ids)
         if unknown:
             raise ValueError(
                 f"task {task.task_id} depends on unknown release task(s): {', '.join(unknown)}"
@@ -980,9 +1029,9 @@ def _release_dependency_map(
         if finding.severity in {"minor", "broad"}:
             dependencies[finding.second_task_id].add(finding.first_task_id)
     return {
-        task_id: sorted(values)
+        task_id: sorted(values - completed_task_ids)
         for task_id, values in dependencies.items()
-        if values
+        if values - completed_task_ids
     }
 
 
