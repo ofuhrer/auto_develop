@@ -16,6 +16,7 @@ from agentic_devloop.evidence import (
     write_finalization_result,
     write_review_decision,
     write_scientific_outputs,
+    write_task_soft_gate_decision,
 )
 from agentic_devloop.executor import CodexExecutor
 from agentic_devloop.failure_diagnosis import (
@@ -43,6 +44,10 @@ from agentic_devloop.models import (
     ProjectConfig,
     Reviewer,
     ReviewDecision,
+    SoftGateDecision,
+    SoftGateDecisionOutcome,
+    SoftGateSeverity,
+    TaskSoftGateDecisionRecord,
     TaskContract,
     TaskRun,
     TaskState,
@@ -289,6 +294,10 @@ def run_task(
         verification_exit_codes=[result.exit_code for result in verification_results],
         scientific_review=scientific_review,
     )
+    decision, bundle = _apply_budget_soft_gate_decision(
+        decision=decision,
+        bundle=bundle,
+    )
     bundle = write_scientific_outputs(bundle, task, scientific_review)
     if any(result.exit_code != 0 for result in verification_results):
         bundle = _diagnose_failure(
@@ -421,6 +430,64 @@ def _executor_for_config(
         executor_config,
         stream_callback=stream_callback,
         heartbeat_callback=heartbeat_callback,
+    )
+
+
+def _apply_budget_soft_gate_decision(
+    *,
+    decision: ReviewDecision,
+    bundle: EvidenceBundle,
+) -> tuple[ReviewDecision, EvidenceBundle]:
+    if not decision.soft_gate_findings:
+        return decision, bundle
+
+    severe_threshold = {SoftGateSeverity.HIGH, SoftGateSeverity.CRITICAL}
+    severe = any(finding.severity in severe_threshold for finding in decision.soft_gate_findings)
+    finding = decision.soft_gate_findings[0].model_copy(
+        update={
+            "evidence_paths": [
+                bundle.changed_files_path,
+                bundle.git_diff_path,
+                bundle.run_state_path,
+                bundle.verification_log_path,
+            ]
+        }
+    )
+    if severe:
+        outcome = SoftGateDecisionOutcome.REJECT
+        final_decision = Decision.NEEDS_REVISION
+        rationale = "Budget overage severity is high; task must be split before acceptance."
+        fallback_plan = "Split the task scope and rerun verification."
+    else:
+        outcome = SoftGateDecisionOutcome.ACCEPT_WITH_MITIGATION
+        final_decision = Decision.ACCEPTED
+        rationale = "Minor budget overage accepted because hard invariants and verification passed."
+        fallback_plan = "Escalate to task split if overage repeats in the next attempt."
+
+    bundle = write_task_soft_gate_decision(
+        bundle,
+        TaskSoftGateDecisionRecord(
+            task_id=decision.task_id,
+            finding=finding,
+            decision=SoftGateDecision(
+                finding_id=finding.finding_id,
+                decision=outcome,
+                rationale=rationale,
+                fallback_plan=fallback_plan,
+                validators_rerun=["verification", "allowed_files", "scientific_review"],
+                evidence_paths=[bundle.verification_log_path, bundle.run_state_path],
+            ),
+        ),
+    )
+    return (
+        decision.model_copy(
+            update={
+                "decision": final_decision,
+                "rationale": rationale,
+                "reviewer": Reviewer.HYBRID,
+            }
+        ),
+        bundle,
     )
 
 

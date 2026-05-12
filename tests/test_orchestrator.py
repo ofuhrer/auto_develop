@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -101,6 +102,51 @@ class TimedOutExecutor:
             timed_out=True,
             backend="fake",
             model="gpt-5.4-mini",
+        )
+
+
+class SizedDocsExecutor:
+    def __init__(self, *, line_count: int) -> None:
+        self.line_count = line_count
+
+    def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = worktree_path / "docs" / "result.md"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text("\n".join(f"line-{index}" for index in range(self.line_count)) + "\n", encoding="utf-8")
+        stdout_path = output_dir / "executor_stdout.log"
+        stderr_path = output_dir / "executor_stderr.log"
+        stdout_path.write_text(f"used prompt {prompt_path}\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return ExecutorResult(
+            command=["fake-executor"],
+            exit_code=0,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            duration_seconds=0.01,
+            backend="fake",
+            model=None,
+        )
+
+
+class DisallowedFileExecutor:
+    def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = worktree_path / "src" / "bad.py"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text("print('bad')\n", encoding="utf-8")
+        stdout_path = output_dir / "executor_stdout.log"
+        stderr_path = output_dir / "executor_stderr.log"
+        stdout_path.write_text(f"used prompt {prompt_path}\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return ExecutorResult(
+            command=["fake-executor"],
+            exit_code=0,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            duration_seconds=0.01,
+            backend="fake",
+            model=None,
         )
 
 
@@ -1001,6 +1047,241 @@ def test_run_task_records_runtime_supervisor_model_escalation_stop_when_budget_e
     assert runtime_supervisor["model_escalation"]["applied"] is False
     assert runtime_supervisor["model_escalation"]["available_models"] == ["gpt-5.5"]
     assert runtime_supervisor["model_escalation"]["stop_kind"] == "exceeds_retry_budget"
+
+
+def test_run_task_accepts_minor_budget_overage_with_soft_gate_artifact(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            "verification_profiles": {"default": {"commands": ["test -f docs/result.md"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 20,
+            },
+        },
+    )
+    contract_path = tmp_path / "contract.yaml"
+    _write_yaml(
+        contract_path,
+        {
+            "task_id": "demo-0010",
+            "release_id": "v0.1.0",
+            "title": "Minor overage",
+            "budget_class": "S",
+            "objective": "Create docs result with slight diff overage.",
+            "allowed_files": ["docs/**"],
+            "forbidden_changes": [],
+            "required_evidence": ["git diff", "changed-files list"],
+            "verification": {"commands": ["test -f docs/result.md"]},
+            "stop_conditions": ["Verification fails twice."],
+        },
+    )
+    result = run_task(
+        project_id="demo",
+        contract_path=contract_path,
+        config_dir=config_dir,
+        runs_dir=tmp_path / "runs",
+        executor=SizedDocsExecutor(line_count=20),
+        now=datetime(2026, 5, 12, 12, 10, tzinfo=UTC),
+    )
+
+    assert result.decision.decision == "accepted"
+    assert result.decision.reviewer == "hybrid"
+    payload = json.loads((result.bundle_path / "soft_gate_decision.json").read_text(encoding="utf-8"))
+    assert payload["finding"]["severity"] == "low"
+    assert payload["decision"]["decision"] == "accept_with_mitigation"
+    assert payload["decision"]["validators_rerun"] == ["verification", "allowed_files", "scientific_review"]
+
+
+def test_run_task_rejects_severe_budget_overage_with_soft_gate_artifact(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            "verification_profiles": {"default": {"commands": ["test -f docs/result.md"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 20,
+            },
+        },
+    )
+    contract_path = tmp_path / "contract.yaml"
+    _write_yaml(
+        contract_path,
+        {
+            "task_id": "demo-0011",
+            "release_id": "v0.1.0",
+            "title": "Severe overage",
+            "budget_class": "S",
+            "objective": "Create docs result with severe diff overage.",
+            "allowed_files": ["docs/**"],
+            "forbidden_changes": [],
+            "required_evidence": ["git diff", "changed-files list"],
+            "verification": {"commands": ["test -f docs/result.md"]},
+            "stop_conditions": ["Verification fails twice."],
+        },
+    )
+    result = run_task(
+        project_id="demo",
+        contract_path=contract_path,
+        config_dir=config_dir,
+        runs_dir=tmp_path / "runs",
+        executor=SizedDocsExecutor(line_count=30),
+        now=datetime(2026, 5, 12, 12, 11, tzinfo=UTC),
+    )
+
+    assert result.decision.decision == "needs_revision"
+    payload = json.loads((result.bundle_path / "soft_gate_decision.json").read_text(encoding="utf-8"))
+    assert payload["finding"]["severity"] == "high"
+    assert payload["decision"]["decision"] == "reject"
+
+
+def test_run_task_keeps_verification_failure_hard_failed_without_soft_bypass(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            "verification_profiles": {"default": {"commands": ["false"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 20,
+            },
+        },
+    )
+    contract_path = tmp_path / "contract.yaml"
+    _write_yaml(
+        contract_path,
+        {
+            "task_id": "demo-0012",
+            "release_id": "v0.1.0",
+            "title": "Verification failure",
+            "budget_class": "S",
+            "objective": "Fail verification even if over budget.",
+            "allowed_files": ["docs/**"],
+            "forbidden_changes": [],
+            "required_evidence": ["git diff", "changed-files list"],
+            "verification": {"commands": ["false"]},
+            "stop_conditions": ["Verification fails twice."],
+        },
+    )
+    result = run_task(
+        project_id="demo",
+        contract_path=contract_path,
+        config_dir=config_dir,
+        runs_dir=tmp_path / "runs",
+        executor=SizedDocsExecutor(line_count=30),
+        now=datetime(2026, 5, 12, 12, 12, tzinfo=UTC),
+    )
+
+    assert result.decision.decision == "failed"
+    assert not (result.bundle_path / "soft_gate_decision.json").exists()
+
+
+def test_run_task_keeps_disallowed_files_hard_needs_revision_without_soft_acceptance(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            "verification_profiles": {"default": {"commands": ["test -f src/bad.py"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 1,
+            },
+        },
+    )
+    contract_path = tmp_path / "contract.yaml"
+    _write_yaml(
+        contract_path,
+        {
+            "task_id": "demo-0013",
+            "release_id": "v0.1.0",
+            "title": "Disallowed file",
+            "budget_class": "S",
+            "objective": "Write outside allowed files.",
+            "allowed_files": ["docs/**"],
+            "forbidden_changes": [],
+            "required_evidence": ["git diff", "changed-files list"],
+            "verification": {"commands": ["test -f src/bad.py"]},
+            "stop_conditions": ["Verification fails twice."],
+        },
+    )
+    result = run_task(
+        project_id="demo",
+        contract_path=contract_path,
+        config_dir=config_dir,
+        runs_dir=tmp_path / "runs",
+        executor=DisallowedFileExecutor(),
+        now=datetime(2026, 5, 12, 12, 13, tzinfo=UTC),
+    )
+
+    assert result.decision.decision == "needs_revision"
+    assert "outside allowed paths" in result.decision.rationale
+    assert not (result.bundle_path / "soft_gate_decision.json").exists()
 
 
 def _write_yaml(path: Path, data: dict) -> None:

@@ -420,6 +420,7 @@ class ReviewDecision(StrictModel):
     rationale: str = Field(min_length=1)
     risks: list[str] = Field(default_factory=list)
     follow_up_tasks: list[str] = Field(default_factory=list)
+    soft_gate_findings: list["SoftGateFinding"] = Field(default_factory=list)
 
 
 class SoftGateSeverity(StrEnum):
