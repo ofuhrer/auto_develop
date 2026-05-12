@@ -6,12 +6,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from pydantic import ValidationError
-
 from agentic_devloop.budget import reserve_strong_model_call
 from agentic_devloop.config import load_project_config
 from agentic_devloop.models import ContractPlan, GeneratedContract, ProjectConfig, ReleaseObjective, TaskContract
 from agentic_devloop.planner_backend import PlannerBackendResult
+from agentic_devloop.runtime_supervisor import RuntimeSupervisor, RuntimeSupervisorApplierStopKind
 from agentic_devloop.yaml_io import load_yaml_model, write_yaml_model
 
 
@@ -21,6 +20,18 @@ class ContractPlanResult:
     plan_path: Path
     plan: ContractPlan
     written_contract_paths: list[Path] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class PlannerNormalizationStopEvidence:
+    kind: RuntimeSupervisorApplierStopKind
+    reason: str
+
+
+class PlannerNormalizationError(ValueError):
+    def __init__(self, message: str, *, stop_evidence: PlannerNormalizationStopEvidence) -> None:
+        super().__init__(message)
+        self.stop_evidence = stop_evidence
 
 
 class PlannerBackend(Protocol):
@@ -96,7 +107,12 @@ def plan_release_contracts(
             )
             backend_paths = _planner_backend_paths(backend_output)
             raw_output = backend_output.raw_output if isinstance(backend_output, PlannerBackendResult) else backend_output
-            plan = parse_planner_output(raw_output, release_id=objective.release_id, planner=mode)
+            plan = parse_planner_output(
+                raw_output,
+                release_id=objective.release_id,
+                planner=mode,
+                project_config=config,
+            )
             plan = plan.model_copy(
                 update={
                     "budget_ledger_path": budget_ledger_path,
@@ -246,6 +262,7 @@ def parse_planner_output(
     *,
     release_id: str,
     planner: str,
+    project_config: ProjectConfig | None = None,
 ) -> ContractPlan:
     if isinstance(raw_output, str):
         raw_output = _extract_json_object(raw_output)
@@ -253,16 +270,51 @@ def parse_planner_output(
             raw_output = json.loads(raw_output)
         except json.JSONDecodeError as error:
             raise ValueError("planner output must be valid JSON") from error
-    try:
-        plan = ContractPlan.model_validate(raw_output)
-    except ValidationError as error:
-        raise ValueError("planner output did not match the contract plan schema") from error
+    supervisor = RuntimeSupervisor()
+    normalization = supervisor.apply_planner_contract_normalization(
+        source_evidence_paths=(),
+        candidate_plan=raw_output,
+    )
+    if not normalization.applied or normalization.proposal is None:
+        reason = (
+            normalization.stop_evidence.reason
+            if normalization.stop_evidence is not None
+            else "Planner normalization failed ContractPlan/TaskContract validation."
+        )
+        raise PlannerNormalizationError(
+            "planner output did not match the contract plan schema",
+            stop_evidence=PlannerNormalizationStopEvidence(
+                kind=RuntimeSupervisorApplierStopKind.BYPASSES_HARD_GATE,
+                reason=reason,
+            ),
+        )
+    plan = normalization.proposal.normalized_plan
     if plan.release_id != release_id:
         raise ValueError(
             f"planner output release_id {plan.release_id!r} did not match expected {release_id!r}"
         )
     plan = plan.model_copy(update={"planner": planner})
-    validate_generated_contracts(plan)
+    try:
+        validate_generated_contracts(plan, project_config=project_config)
+    except ValueError as error:
+        message = str(error)
+        if "unsafe whole-repo allowed_files patterns" in message:
+            raise PlannerNormalizationError(
+                message,
+                stop_evidence=PlannerNormalizationStopEvidence(
+                    kind=RuntimeSupervisorApplierStopKind.BROADENS_ALLOWED_FILES,
+                    reason=message,
+                ),
+            ) from error
+        if "allowed_files count exceeds project budget" in message:
+            raise PlannerNormalizationError(
+                message,
+                stop_evidence=PlannerNormalizationStopEvidence(
+                    kind=RuntimeSupervisorApplierStopKind.EXCEEDS_TASK_BUDGET,
+                    reason=message,
+                ),
+            ) from error
+        raise
     return plan
 
 

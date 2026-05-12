@@ -92,6 +92,7 @@ class RuntimeSupervisorStopReason(StrEnum):
 
 class RuntimeSupervisorApplierStopKind(StrEnum):
     BROADENS_ALLOWED_FILES = "broadens_allowed_files"
+    EXCEEDS_TASK_BUDGET = "exceeds_task_budget"
     EXCEEDS_RETRY_BUDGET = "exceeds_retry_budget"
     BYPASSES_HARD_GATE = "bypasses_hard_gate"
     OUTSIDE_TEMP_EVIDENCE_PATH = "outside_temp_evidence_path"

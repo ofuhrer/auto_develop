@@ -9,11 +9,13 @@ import yaml
 from agentic_devloop.models import ContractPlan, GeneratedContract, TaskContract
 from agentic_devloop.planner_backend import PlannerBackendResult
 from agentic_devloop.planning import (
+    PlannerNormalizationError,
     parse_planner_output,
     plan_release_contracts,
     validate_generated_contracts,
     write_generated_contracts,
 )
+from agentic_devloop.runtime_supervisor import RuntimeSupervisorApplierStopKind
 from agentic_devloop.yaml_io import load_yaml_model
 
 
@@ -184,7 +186,7 @@ def test_parse_planner_output_accepts_fenced_json() -> None:
 
 
 def test_parse_planner_output_rejects_invalid_schema() -> None:
-    with pytest.raises(ValueError, match="planner output did not match"):
+    with pytest.raises(PlannerNormalizationError, match="planner output did not match"):
         parse_planner_output(
             {
                 "release_id": "v0.3.0",
@@ -194,6 +196,123 @@ def test_parse_planner_output_rejects_invalid_schema() -> None:
             release_id="v0.3.0",
             planner="strong-model",
         )
+
+
+def test_parse_planner_output_normalizes_supported_schema_drift_once() -> None:
+    plan = parse_planner_output(
+        {
+            "release_id": "v0.3.2",
+            "planner": "deterministic",
+            "generated_contracts": [
+                {
+                    "task_id": "v0.3.2-0001",
+                    "title": "Normalize",
+                    "objective": "Normalize planner payload.",
+                    "rationale": "Covers one criterion.",
+                    "suggested_contract": {
+                        "task_id": "v0.3.2-0001",
+                        "release_id": "v0.3.2",
+                        "title": "Normalize",
+                        "task_type": "code_only",
+                        "budget_class": "S",
+                        "objective": "Normalize planner payload.",
+                        "allowed_files": ["src/agentic_devloop/planning.py"],
+                        "forbidden_changes": ["Do not touch release flow."],
+                        "required_evidence": ["git diff"],
+                        "verification": {"commands": ["true"]},
+                        "stop_conditions": ["Stop when scope expands."],
+                    },
+                }
+            ],
+            "warnings": [],
+        },
+        release_id="v0.3.2",
+        planner="strong-model",
+    )
+
+    assert plan.release_id == "v0.3.2"
+    assert plan.planner == "strong-model"
+    assert plan.generated_contracts[0].task_id == "v0.3.2-0001"
+
+
+def test_parse_planner_output_stops_with_structured_evidence_for_overbroad_allowed_files() -> None:
+    with pytest.raises(PlannerNormalizationError) as exc:
+        parse_planner_output(
+            {
+                "release_id": "v0.3.3",
+                "planner": "strong-model",
+                "generated_contracts": [
+                    {
+                        "task_id": "v0.3.3-0001",
+                        "title": "Unsafe scope",
+                        "objective": "Unsafe scope",
+                        "rationale": "Unsafe scope",
+                        "suggested_contract": {
+                            "task_id": "v0.3.3-0001",
+                            "release_id": "v0.3.3",
+                            "title": "Unsafe scope",
+                            "task_type": "code_only",
+                            "budget_class": "S",
+                            "objective": "Unsafe scope",
+                            "allowed_files": ["**"],
+                            "forbidden_changes": ["Do not touch release flow."],
+                            "required_evidence": ["git diff"],
+                            "verification": {"commands": ["true"]},
+                            "stop_conditions": ["Stop when scope expands."],
+                        },
+                    }
+                ],
+                "warnings": [],
+            },
+            release_id="v0.3.3",
+            planner="strong-model",
+        )
+
+    assert exc.value.stop_evidence.kind == RuntimeSupervisorApplierStopKind.BROADENS_ALLOWED_FILES
+    assert "unsafe whole-repo" in exc.value.stop_evidence.reason
+
+
+def test_parse_planner_output_stops_with_structured_evidence_for_budget_exceeded_generated_work(tmp_path) -> None:
+    config = _project_config(
+        tmp_path,
+        verification_profiles={"default": {"commands": ["true"]}},
+        max_changed_files_per_task=1,
+    )
+    with pytest.raises(PlannerNormalizationError) as exc:
+        parse_planner_output(
+            {
+                "release_id": "v0.3.4",
+                "planner": "strong-model",
+                "generated_contracts": [
+                    {
+                        "task_id": "v0.3.4-0001",
+                        "title": "Budget scope",
+                        "objective": "Budget scope",
+                        "rationale": "Budget scope",
+                        "suggested_contract": {
+                            "task_id": "v0.3.4-0001",
+                            "release_id": "v0.3.4",
+                            "title": "Budget scope",
+                            "task_type": "code_only",
+                            "budget_class": "S",
+                            "objective": "Budget scope",
+                            "allowed_files": ["src/one.py", "src/two.py"],
+                            "forbidden_changes": ["Do not touch release flow."],
+                            "required_evidence": ["git diff"],
+                            "verification": {"profile": "default"},
+                            "stop_conditions": ["Stop when scope expands."],
+                        },
+                    }
+                ],
+                "warnings": [],
+            },
+            release_id="v0.3.4",
+            planner="strong-model",
+            project_config=config,
+        )
+
+    assert exc.value.stop_evidence.kind == RuntimeSupervisorApplierStopKind.EXCEEDS_TASK_BUDGET
+    assert "allowed_files count exceeds project budget" in exc.value.stop_evidence.reason
 
 
 def test_validate_generated_contracts_rejects_task_id_mismatch() -> None:
