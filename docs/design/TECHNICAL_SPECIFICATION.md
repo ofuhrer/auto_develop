@@ -456,10 +456,10 @@ Deterministic review must distinguish hard invariants from soft policy findings.
 Hard invariants are enforced by code and cannot be bypassed by an agent:
 
 - changes outside `allowed_files`;
-- forbidden paths or generated runtime artifacts;
+- forbidden paths, generated runtime artifacts, or out-of-scope files;
 - destructive operations outside delegated policy;
-- missing evidence required for auditability;
-- verification commands that cannot be run or repaired under configured environment policy;
+- missing required evidence for auditability;
+- verification failures that remain unrepaired under configured environment policy;
 - unsafe finalization target or unresolved merge conflict;
 - credential, network, or remote-execution use not allowed by project policy.
 
@@ -477,10 +477,13 @@ An agent override for a soft finding must persist:
 1. the finding and severity;
 2. affected files/tasks;
 3. risk assessment;
-4. decision;
-5. rationale;
-6. fallback or rollback plan;
-7. validators rerun after the decision.
+4. evidence paths;
+5. decision;
+6. rationale;
+7. fallback or rollback plan;
+8. validators rerun after the decision.
+
+Current implementation persists task-level soft decisions in `runs/<run-id>/<task-id>/evidence/soft_gate_decision.json` and release-level budget exceptions in `runs/<run-id>/soft_gate_decisions.json`. Each record includes `finding_id`, `severity`, `risk`, `recommended_actions`, `evidence_paths`, `decision`, `rationale`, `fallback_plan`, and `validators_rerun`. Small budget overages that pass hard validation become soft findings instead of automatic failures, and normal source-file overlap is treated as a soft scheduling risk unless a configured unsafe overlap path, generated artifact, lockfile, migration, or out-of-scope file makes it a hard stop.
 
 This keeps the system autonomous without letting model judgment bypass hard safety constraints.
 

@@ -47,6 +47,7 @@ Implemented capabilities include:
 - `run-backlog` for chaining backlog planning into objective and release execution;
 - release-level feature branch integration through `feature/<release>`;
 - dynamic release DAG scheduling from `depends_on` and file-overlap analysis, currently conservative and targeted to evolve into governor-owned overlap risk decisions;
+- soft-gate decision artifacts for accepted exceptions, including task-level `soft_gate_decision.json` and release-level `soft_gate_decisions.json`, each carrying the finding, severity, risk, evidence paths, recommended actions, decision, rationale, fallback plan, and validators to rerun;
 - structured `runtime_supervisor/` evidence during repair/resume runs, including release events, retry budgets, repair evidence, and release-summary references;
 - human-cockpit `release.log`, raw audit `release.raw.log`, `release_metrics.json`, `release_budget.json`, and `release_tuning.md`;
 - default cleanup of merged task worktrees and branches;
@@ -61,6 +62,7 @@ Important remaining gaps:
 - shared verification-runtime policy so isolated worktrees can run tests without per-worktree virtual environments;
 - executor liveness classification from process, output, heartbeat, and file/diff activity rather than elapsed time alone;
 - target-artifact ownership: external targets should keep durable `.auto_develop/repo_state`, objectives, contracts, and compact outcome history in the target repo or a dedicated control repo, not in the `auto_develop` source checkout;
+- broader multi-epic governor automation remains planned;
 - stronger model-based repeated-failure diagnosis backend;
 - richer semantic merge-conflict repair and broader repair strategies;
 - automated pull-request creation;

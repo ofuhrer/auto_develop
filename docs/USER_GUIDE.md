@@ -486,6 +486,8 @@ After the run, inspect `release_metrics.json`, `release_budget.json`, and `relea
 
 If the report shows routing pressure, reduce task size or adjust `model_routing` and `budget.max_changed_files_per_task`, `budget.max_diff_lines_per_task`, or `budget.max_context_chars_per_task` before launching the next release. Small budget overages should be treated as review findings rather than automatic waste: a reviewer/supervisor agent should decide whether a cohesive verified diff is acceptable, whether to split follow-up work, or whether to rerun with a narrower contract.
 
+Soft-gate decisions are written next to the evidence they describe. Task-level exceptions land in `runs/<run-id>/<task-id>/evidence/soft_gate_decision.json`; release-level budget exceptions land in `runs/<run-id>/soft_gate_decisions.json`. Each record stores `finding_id`, `severity`, `risk`, `recommended_actions`, `evidence_paths`, `decision`, `rationale`, `fallback_plan`, and `validators_rerun`. The rerun list is the audit trail for which checks the reviewer or supervisor should repeat or re-read before treating the soft exception as durable. Hard validation still runs first; soft findings only decide how to handle already-passed hard gates.
+
 Common release modes:
 
 ```bash
@@ -1064,6 +1066,7 @@ Current important limits:
 
 - The strongest workflow still depends on well-written objectives and contracts.
 - Fully dynamic model-driven orchestration is still evolving.
+- The broader multi-epic governor loop remains planned.
 - Pull request creation is not yet automated by the CLI.
 - Remote execution adapters, such as cluster or SLURM execution, are still project-specific work.
 - Human review is still recommended before merging significant work into `main`.

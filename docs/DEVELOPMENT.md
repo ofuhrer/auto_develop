@@ -98,6 +98,8 @@ agent-loop run-release \
 
 Review `runs/<release-run-id>/release.log`, `release.raw.log`, `release_summary.json`, `release_metrics.json`, `release_budget.json`, `release_tuning.md`, and `release_review.md`. Treat `release.log` as the human cockpit and `release.raw.log` as the complete audit stream.
 
+Soft-gate exceptions are recorded in the evidence bundle or release root, not hidden in logs. Task-level findings live at `runs/<run-id>/<task-id>/evidence/soft_gate_decision.json`; release-level budget exceptions live at `runs/<run-id>/soft_gate_decisions.json`. Each record includes the finding identifier, severity, risk, recommended actions, evidence paths, decision, rationale, fallback plan, and `validators_rerun`. The rerun list is the reviewer/supervisor checklist for repeating or re-reading the relevant validators before the soft exception is treated as durable. Hard validation still comes first.
+
 ## Documentation Rules
 
 Update documentation when behavior changes:
