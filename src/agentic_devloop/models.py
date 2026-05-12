@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -306,7 +304,7 @@ class GeneratedContract(StrictModel):
     title: str = Field(min_length=1)
     objective: str = Field(min_length=1)
     rationale: str = Field(min_length=1)
-    suggested_contract: dict[str, Any] = Field(default_factory=dict)
+    suggested_contract: TaskContract
 
 
 class ContractPlan(StrictModel):

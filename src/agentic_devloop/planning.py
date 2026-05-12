@@ -4,6 +4,9 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, Protocol
+
+from pydantic import ValidationError
 
 from agentic_devloop.budget import reserve_strong_model_call
 from agentic_devloop.config import load_project_config
@@ -16,6 +19,18 @@ class ContractPlanResult:
     release_id: str
     plan_path: Path
     plan: ContractPlan
+
+
+class PlannerBackend(Protocol):
+    def generate(
+        self,
+        *,
+        prompt: str,
+        objective: ReleaseObjective,
+        existing_contracts: list[TaskContract],
+        model: str,
+    ) -> str | dict[str, Any] | ContractPlan:
+        ...
 
 
 def make_plan_id(release_id: str, now: datetime | None = None) -> str:
@@ -31,6 +46,7 @@ def plan_release_contracts(
     mode: str = "deterministic",
     project_id: str | None = None,
     config_dir: Path = Path("configs"),
+    planner_backend: PlannerBackend | None = None,
     now: datetime | None = None,
 ) -> ContractPlanResult:
     objective = load_yaml_model(objective_path, ReleaseObjective)
@@ -47,6 +63,7 @@ def plan_release_contracts(
             raise ValueError("strong-model planning requires --project")
         config = load_project_config(project_id, config_dir, validate_repo=True)
         planner = config.model_roles.get("planner", config.executor)
+        planner_prompt = _planner_prompt(objective, existing_contracts)
         budget_ledger_path = reserve_strong_model_call(
             runs_dir=runs_dir,
             release_id=objective.release_id,
@@ -58,6 +75,29 @@ def plan_release_contracts(
         warnings.append(
             "Strong-model planning backend is not implemented; budget was reserved and a planner prompt was written."
         )
+
+    plan_dir = runs_dir / make_plan_id(objective.release_id, now)
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    if mode == "strong-model":
+        planner_prompt_path = plan_dir / "planner_prompt.md"
+        planner_prompt_path.write_text(planner_prompt, encoding="utf-8")
+        if planner_backend is not None:
+            backend_output = planner_backend.generate(
+                prompt=planner_prompt,
+                objective=objective,
+                existing_contracts=existing_contracts,
+                model=planner.model,
+            )
+            plan = parse_planner_output(backend_output, release_id=objective.release_id, planner=mode)
+            plan = plan.model_copy(
+                update={
+                    "budget_ledger_path": budget_ledger_path,
+                    "planner_prompt_path": planner_prompt_path,
+                }
+            )
+            plan_path = plan_dir / "contract_plan.json"
+            plan_path.write_text(json.dumps(plan.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8")
+            return ContractPlanResult(release_id=objective.release_id, plan_path=plan_path, plan=plan)
 
     if not existing_contracts:
         warnings.append(
@@ -74,7 +114,7 @@ def plan_release_contracts(
                     title=f"Validate criterion: {criterion[:60]}",
                     objective=f"Confirm release contracts cover acceptance criterion: {criterion}",
                     rationale=f"Current contracts for {objective.release_id}: {', '.join(sorted(covered))}",
-                    suggested_contract={},
+                    suggested_contract=_criterion_review_contract(objective, index, criterion, covered),
                 )
             )
 
@@ -84,13 +124,12 @@ def plan_release_contracts(
         generated_contracts=generated_contracts,
         warnings=warnings,
         budget_ledger_path=budget_ledger_path,
+        planner_prompt_path=planner_prompt_path,
     )
-    plan_dir = runs_dir / make_plan_id(objective.release_id, now)
-    plan_dir.mkdir(parents=True, exist_ok=True)
     if mode == "strong-model":
-        planner_prompt_path = plan_dir / "planner_prompt.md"
-        planner_prompt_path.write_text(_planner_prompt(objective, existing_contracts), encoding="utf-8")
         plan = plan.model_copy(update={"planner_prompt_path": planner_prompt_path})
+    if mode != "strong-model" or planner_backend is None:
+        plan = plan.model_copy(update={"generated_contracts": generated_contracts, "warnings": warnings})
     plan_path = plan_dir / "contract_plan.json"
     plan_path.write_text(json.dumps(plan.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8")
     return ContractPlanResult(release_id=objective.release_id, plan_path=plan_path, plan=plan)
@@ -125,8 +164,59 @@ def _draft_release_preparation_contract(objective: ReleaseObjective) -> Generate
         title=suggested["title"],
         objective=suggested["objective"],
         rationale="No contracts exist yet; start with a planning-only release-preparation task.",
-        suggested_contract=suggested,
+        suggested_contract=TaskContract.model_validate(suggested),
     )
+
+
+def _criterion_review_contract(
+    objective: ReleaseObjective,
+    index: int,
+    criterion: str,
+    covered: set[str],
+) -> TaskContract:
+    return TaskContract.model_validate(
+        {
+            "task_id": f"criterion-review-{index:04d}",
+            "release_id": objective.release_id,
+            "title": f"Validate criterion: {criterion[:60]}",
+            "task_type": "documentation",
+            "budget_class": "S",
+            "objective": f"Confirm release contracts cover acceptance criterion: {criterion}",
+            "allowed_files": ["contracts/**"],
+            "forbidden_changes": [
+                "Do not modify source code while validating release coverage.",
+            ],
+            "required_evidence": [
+                f"Coverage note for {criterion}",
+            ],
+            "verification": {"profile": "documentation"},
+            "stop_conditions": [
+                f"Acceptance criterion is not covered by current contracts: {', '.join(sorted(covered))}",
+            ],
+        }
+    )
+
+
+def parse_planner_output(
+    raw_output: str | dict[str, Any] | ContractPlan,
+    *,
+    release_id: str,
+    planner: str,
+) -> ContractPlan:
+    if isinstance(raw_output, str):
+        try:
+            raw_output = json.loads(raw_output)
+        except json.JSONDecodeError as error:
+            raise ValueError("planner output must be valid JSON") from error
+    try:
+        plan = ContractPlan.model_validate(raw_output)
+    except ValidationError as error:
+        raise ValueError("planner output did not match the contract plan schema") from error
+    if plan.release_id != release_id:
+        raise ValueError(
+            f"planner output release_id {plan.release_id!r} did not match expected {release_id!r}"
+        )
+    return plan.model_copy(update={"planner": planner})
 
 
 def _planner_prompt(objective: ReleaseObjective, contracts: list[TaskContract]) -> str:
