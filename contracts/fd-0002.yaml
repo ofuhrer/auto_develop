@@ -10,18 +10,17 @@ objective: >
   Add a replaceable failure-diagnosis backend seam that can build a bounded
   diagnosis prompt from executor attempts, verification results, logs, changed
   files, and contract metadata. Provide a deterministic backend implementation
-  and an injectable fake backend path for tests. Do not call real models in
-  tests.
+  and focused unit tests. Do not call real models in tests.
 
 allowed_files:
   - src/agentic_devloop/failure_diagnosis.py
-  - src/agentic_devloop/models.py
   - tests/test_failure_diagnosis.py
 
 forbidden_changes:
   - Do not invoke Codex or any external model directly from tests.
   - Do not add network dependencies.
   - Do not alter run-task or run-release orchestration in this task.
+  - Do not edit src/agentic_devloop/models.py; fd-0001 owns shared models.
   - Do not weaken existing deterministic failure categorization.
 
 required_evidence:
@@ -35,7 +34,7 @@ verification:
   profile: code_only
 
 stop_conditions:
-  - More than 3 files changed.
+  - More than 2 files changed.
   - More than 500 diff lines.
   - The backend interface cannot be tested without a real model call.
   - The task requires changes to CLI commands.
