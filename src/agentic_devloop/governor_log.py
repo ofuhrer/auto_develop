@@ -13,10 +13,15 @@ from agentic_devloop.paths import GovernorRunPaths, governor_run_paths
 
 class GovernorEventType(StrEnum):
     GOVERNOR_STARTED = "governor_started"
+    BACKLOG_PLANNING_COMPLETED = "backlog_planning_completed"
     EPIC_SELECTED = "epic_selected"
+    OBJECTIVE_READY = "objective_ready"
+    CONTRACT_PLAN_COMPLETED = "contract_plan_completed"
+    CONTRACT_NORMALIZATION = "contract_normalization"
     RELEASE_STARTED = "release_started"
     RELEASE_COMPLETED = "release_completed"
     REPAIR_DECISION = "repair_decision"
+    FINALIZATION_COMPLETED = "finalization_completed"
     STATE_REFRESHED = "state_refreshed"
     GOVERNOR_COMPLETED = "governor_completed"
 

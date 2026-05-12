@@ -241,11 +241,17 @@ def test_run_backlog_wires_selected_epic_and_release_flags(monkeypatch, capsys, 
         selected_epic_id="run-backlog",
         plan_path=tmp_path / "runs" / "backlog_plan.json",
         objective_path=tmp_path / "objectives" / "run-backlog.yaml",
+        contract_plan_path=tmp_path / "runs" / "contract_plan.json",
+        plan=SimpleNamespace(repo_state_updates=[], roadmap_updates=[]),
         release=SimpleNamespace(
             release_id="run-backlog-20260512",
             run_id="run-1",
             summary_path=tmp_path / "runs" / "summary.json",
             log_path=tmp_path / "runs" / "release.log",
+            review_path=tmp_path / "runs" / "review.md",
+            metrics_path=tmp_path / "runs" / "metrics.json",
+            budget_path=tmp_path / "runs" / "budget.json",
+            tuning_path=tmp_path / "runs" / "tuning.md",
             decision="accepted",
             task_results=[],
         ),
@@ -290,11 +296,17 @@ def test_run_backlog_uses_planner_selected_epic_when_epic_id_is_omitted(monkeypa
         selected_epic_id="planner-selected",
         plan_path=tmp_path / "runs" / "backlog_plan.json",
         objective_path=tmp_path / "objectives" / "planner-selected.yaml",
+        contract_plan_path=tmp_path / "runs" / "contract_plan.json",
+        plan=SimpleNamespace(repo_state_updates=[], roadmap_updates=[]),
         release=SimpleNamespace(
             release_id="planner-selected-20260512",
             run_id="run-1",
             summary_path=tmp_path / "runs" / "summary.json",
             log_path=tmp_path / "runs" / "release.log",
+            review_path=tmp_path / "runs" / "review.md",
+            metrics_path=tmp_path / "runs" / "metrics.json",
+            budget_path=tmp_path / "runs" / "budget.json",
+            tuning_path=tmp_path / "runs" / "tuning.md",
             decision="accepted",
             task_results=[],
         ),
@@ -323,6 +335,74 @@ def test_run_backlog_uses_planner_selected_epic_when_epic_id_is_omitted(monkeypa
     assert exit_code == 0
     assert seen_kwargs["selected_epic_id"] is None
     assert '"selected_epic_id": "planner-selected"' in captured.out
+
+
+def test_run_backlog_writes_governor_lifecycle_events_with_artifacts(monkeypatch, capsys, tmp_path) -> None:
+    run_id = "20260513T000000Z_demo_governor"
+    release_result = SimpleNamespace(
+        release_id="demo-20260513",
+        run_id="run-1",
+        summary_path=tmp_path / "runs" / "summary.json",
+        log_path=tmp_path / "runs" / "release.log",
+        review_path=tmp_path / "runs" / "review.md",
+        metrics_path=tmp_path / "runs" / "metrics.json",
+        budget_path=tmp_path / "runs" / "budget.json",
+        tuning_path=tmp_path / "runs" / "tuning.md",
+        decision="accepted",
+        task_results=[],
+    )
+    result = SimpleNamespace(
+        selected_epic_id="epic-1",
+        plan_path=tmp_path / "runs" / "backlog_plan.json",
+        objective_path=tmp_path / "objectives" / "demo-20260513.yaml",
+        contract_plan_path=tmp_path / "runs" / "contract_plan.json",
+        plan=SimpleNamespace(repo_state_updates=["refresh backlog_state notes"], roadmap_updates=[]),
+        release=release_result,
+    )
+
+    def fake_run_backlog(**kwargs):
+        kwargs["progress"]("event=release_started run_id=run-1 release=demo-20260513 tasks=1 mode=sequential")
+        kwargs["progress"]("event=repair_decision task=demo-1 attempt=1 decision=retry action=release_resume")
+        kwargs["progress"]("event=task_resumed task=demo-1 attempt=1")
+        kwargs["progress"]("event=repair_decision task=demo-1 attempt=2 decision=retry action=planner_contract_normalization")
+        kwargs["progress"]("event=release_merged target=main")
+        return result
+
+    monkeypatch.setattr(cli_module, "_make_governor_run_id", lambda **_kwargs: run_id)
+    monkeypatch.setattr(cli_module, "run_backlog", fake_run_backlog)
+    monkeypatch.setattr(cli_module, "_codex_backlog_planner_backend", lambda **kwargs: object())
+
+    exit_code = main(
+        [
+            "run-backlog",
+            "--project",
+            "demo",
+            "--goal",
+            "Run one epic with lifecycle logging",
+            "--execute-planner",
+            "--runs-dir",
+            str(tmp_path / "runs"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert '"selected_epic_id": "epic-1"' in captured.out
+    events_path = tmp_path / "runs" / run_id / "events.jsonl"
+    assert events_path.exists()
+    events_text = events_path.read_text(encoding="utf-8")
+    assert '"event_type": "backlog_planning_completed"' in events_text
+    assert '"event_type": "objective_ready"' in events_text
+    assert '"event_type": "contract_plan_completed"' in events_text
+    assert '"event_type": "contract_normalization"' in events_text
+    assert '"event_type": "repair_decision"' in events_text
+    assert '"event_type": "release_completed"' in events_text
+    assert '"event_type": "finalization_completed"' in events_text
+    assert '"event_type": "state_refreshed"' in events_text
+    assert str(result.plan_path) in events_text
+    assert str(result.contract_plan_path) in events_text
+    assert str(release_result.summary_path) in events_text
 
 
 def test_run_backlog_requires_execute_planner(capsys) -> None:

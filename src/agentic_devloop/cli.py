@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from agentic_devloop import __version__
@@ -14,6 +15,7 @@ from agentic_devloop.objective import run_objective
 from agentic_devloop.orchestrator import run_task
 from agentic_devloop.planning import plan_release_contracts
 from agentic_devloop.planner_backend import CodexPlannerBackend
+from agentic_devloop.governor_log import GovernorEventType, build_governor_event_log_writer
 from agentic_devloop.release import run_release
 from agentic_devloop.status import load_run_summaries
 
@@ -511,6 +513,37 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "run-backlog":
+        governor_run_id = _make_governor_run_id(project_id=args.project)
+        governor_writer = build_governor_event_log_writer(
+            runs_dir=Path(args.runs_dir),
+            run_id=governor_run_id,
+        )
+        observed: dict[str, bool] = {
+            "release_started": False,
+            "repair_or_resume": False,
+            "normalization": False,
+            "finalized": False,
+        }
+
+        def backlog_progress(message: str) -> None:
+            _print_progress(message)
+            if "event=release_started" in message:
+                observed["release_started"] = True
+            if (
+                "event=repair_" in message
+                or "event=task_resumed" in message
+                or "event=conflict_repair_started" in message
+            ):
+                observed["repair_or_resume"] = True
+            if "planner_contract_normalization" in message or "event=normalized_contract_plan" in message:
+                observed["normalization"] = True
+            if "event=release_merged" in message or "event=release_pushed" in message:
+                observed["finalized"] = True
+
+        governor_writer.write(
+            event_type=GovernorEventType.GOVERNOR_STARTED,
+            message=f"project={args.project} run-backlog started goal={json.dumps(args.goal)}",
+        )
         try:
             if not args.execute_planner:
                 raise ValueError("run-backlog requires --execute-planner")
@@ -539,12 +572,74 @@ def main(argv: list[str] | None = None) -> int:
                 stop_on_failure=not args.continue_on_failure,
                 execution_mode=args.execution_mode,
                 debug_keep_artifacts=args.debug_keep_artifacts,
-                progress=_print_progress,
+                progress=backlog_progress,
             )
         except KeyboardInterrupt:
             parser.exit(130, "\ninterrupted: run-backlog stopped before completion\n")
         except Exception as error:
             parser.exit(2, f"error: {error}\n")
+
+        governor_writer.write(
+            event_type=GovernorEventType.BACKLOG_PLANNING_COMPLETED,
+            message=f"selected_epic_id={result.selected_epic_id}",
+            artifacts=[result.plan_path],
+        )
+        governor_writer.write(
+            event_type=GovernorEventType.EPIC_SELECTED,
+            message=f"selected_epic_id={result.selected_epic_id}",
+            artifacts=[result.plan_path],
+        )
+        governor_writer.write(
+            event_type=GovernorEventType.OBJECTIVE_READY,
+            message=f"objective_path={result.objective_path}",
+            artifacts=[result.objective_path],
+        )
+        governor_writer.write(
+            event_type=GovernorEventType.CONTRACT_PLAN_COMPLETED,
+            message=f"contract_plan_path={result.contract_plan_path}",
+            artifacts=[result.contract_plan_path],
+        )
+        if observed["release_started"]:
+            governor_writer.write(
+                event_type=GovernorEventType.RELEASE_STARTED,
+                message=f"release_id={result.release.release_id}",
+                artifacts=[result.release.log_path],
+            )
+        if observed["normalization"]:
+            governor_writer.write(
+                event_type=GovernorEventType.CONTRACT_NORMALIZATION,
+                message=f"release_id={result.release.release_id} planner contract normalization applied",
+                artifacts=[result.contract_plan_path, result.release.log_path],
+            )
+        if observed["repair_or_resume"]:
+            governor_writer.write(
+                event_type=GovernorEventType.REPAIR_DECISION,
+                message=f"release_id={result.release.release_id} repair or resume observed",
+                artifacts=[result.release.summary_path, result.release.log_path],
+            )
+        governor_writer.write(
+            event_type=GovernorEventType.RELEASE_COMPLETED,
+            message=f"release_id={result.release.release_id} decision={result.release.decision}",
+            artifacts=_release_artifact_links(result.release),
+        )
+        if observed["finalized"] or args.release_finalize != "none":
+            governor_writer.write(
+                event_type=GovernorEventType.FINALIZATION_COMPLETED,
+                message=f"release_id={result.release.release_id} mode={args.release_finalize}",
+                artifacts=[result.release.summary_path],
+            )
+        plan_warnings = getattr(result.plan, "repo_state_updates", None) or getattr(result.plan, "roadmap_updates", None)
+        if plan_warnings:
+            governor_writer.write(
+                event_type=GovernorEventType.STATE_REFRESHED,
+                message="repo-state refresh proposal captured in backlog plan",
+                artifacts=[result.plan_path],
+            )
+        governor_writer.write(
+            event_type=GovernorEventType.GOVERNOR_COMPLETED,
+            message=f"selected_epic_id={result.selected_epic_id} release_id={result.release.release_id}",
+            artifacts=[result.plan_path, result.release.summary_path],
+        )
 
         print(json.dumps(_backlog_run_result(result), indent=2))
         return 0
@@ -711,3 +806,17 @@ def _codex_backlog_planner_backend(*, project_id: str, config_dir: Path) -> Code
 
 def _print_progress(message: str) -> None:
     print(f"[agent-loop] {message}", file=sys.stderr, flush=True)
+
+
+def _make_governor_run_id(*, project_id: str, now: datetime | None = None) -> str:
+    timestamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%SZ")
+    return f"{timestamp}_{project_id}_governor"
+
+
+def _release_artifact_links(release_result) -> list[Path]:
+    artifacts: list[Path] = [release_result.summary_path, release_result.log_path]
+    for attr in ("review_path", "metrics_path", "budget_path", "tuning_path"):
+        value = getattr(release_result, attr, None)
+        if value is not None:
+            artifacts.append(value)
+    return artifacts
