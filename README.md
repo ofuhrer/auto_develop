@@ -41,6 +41,14 @@ agent-loop --help
 agent-loop --version
 ```
 
+Run the local CLI smoke checks:
+
+```bash
+PYTHONPATH=src uv run agent-loop --help
+PYTHONPATH=src uv run agent-loop --version
+PYTHONPATH=src uv run agent-loop config --project rust_rockfall
+```
+
 Load a project config:
 
 ```bash
