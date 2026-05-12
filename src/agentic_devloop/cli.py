@@ -450,6 +450,7 @@ def _release_run_result(result) -> dict[str, object]:
         "summary_path": str(result.summary_path),
         "log_path": str(result.log_path),
         "review_path": str(result.review_path) if getattr(result, "review_path", None) else None,
+        "metrics_path": str(result.metrics_path) if getattr(result, "metrics_path", None) else None,
         "integration_branch": getattr(result, "integration_branch", None),
         "decision": result.decision,
         "tasks": [_task_run_result(task_result) for task_result in result.task_results],

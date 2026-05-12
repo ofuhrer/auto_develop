@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -106,8 +107,8 @@ def run_task(
     bundle_path = run_root / "evidence"
     task_base_branch = base_branch or config.default_base_branch
 
-    _report(progress, f"run_id={run_id}")
-    _report(progress, f"creating worktree: {worktree_path}")
+    _report(progress, f"event=task_run_created task={task.task_id} run_id={run_id}")
+    _report(progress, f"event=worktree_created task={task.task_id} path={worktree_path}")
     started_at = datetime.now(UTC)
     create_worktree(
         repo_path=config.repo_path,
@@ -117,10 +118,10 @@ def run_task(
         allow_dirty=allow_dirty,
     )
 
-    _report(progress, "writing executor prompt")
+    _report(progress, f"event=prompt_build_started task={task.task_id}")
     context = load_context_bundle(config, task)
     enforce_context_budget(context, config.budget.max_context_chars_per_task)
-    _report(progress, f"context sections={len(context.sections)} chars={context.total_chars}")
+    _report(progress, f"event=context_loaded task={task.task_id} sections={len(context.sections)} chars={context.total_chars}")
     prompt_path = write_executor_prompt(task, scratch_dir / "executor_prompt.md", context)
     task_run = TaskRun(
         task_id=task.task_id,
@@ -146,7 +147,7 @@ def run_task(
         scratch_dir=scratch_dir,
         progress=progress,
     )
-    _report(progress, f"executor exit_code={executor_result.exit_code}")
+    _report(progress, f"event=executor_finished task={task.task_id} exit_code={executor_result.exit_code}")
     if executor_result.exit_code != 0:
         verification_log_path = scratch_dir / "verification.log"
         verification_log_path.write_text(
@@ -192,7 +193,7 @@ def run_task(
             progress=progress,
         )
         write_review_decision(bundle, decision)
-        _report(progress, f"decision={decision.decision}")
+        _report(progress, f"event=review_decision task={task.task_id} decision={decision.decision} rationale={json.dumps(decision.rationale)}")
 
         return TaskRunResult(
             run_id=run_id,
@@ -202,7 +203,7 @@ def run_task(
         )
 
     verification_commands = _verification_commands(config, task)
-    _report(progress, f"running verification: {len(verification_commands)} command(s)")
+    _report(progress, f"event=verification_started task={task.task_id} commands={len(verification_commands)}")
     verification_results = VerificationRunner(timeout_seconds=verification_timeout_seconds).run(
         commands=verification_commands,
         worktree_path=worktree_path,
@@ -210,11 +211,11 @@ def run_task(
     )
     _report(
         progress,
-        "verification exit_codes="
+        f"event=verification_finished task={task.task_id} exit_codes="
         + ",".join(str(result.exit_code) for result in verification_results),
     )
 
-    _report(progress, "collecting evidence")
+    _report(progress, f"event=evidence_collection_started task={task.task_id}")
     current_diff = diff_patch(worktree_path)
     current_changed_files = git_changed_files(worktree_path)
     scientific_review = analyze_scientific_changes(
@@ -264,7 +265,7 @@ def run_task(
             progress=progress,
         )
     write_review_decision(bundle, decision)
-    _report(progress, f"decision={decision.decision}")
+    _report(progress, f"event=review_decision task={task.task_id} decision={decision.decision} rationale={json.dumps(decision.rationale)}")
     finalize_result = None
     if decision.decision == Decision.ACCEPTED and (
         commit_on_accept or merge_on_accept or push_on_accept
@@ -272,7 +273,7 @@ def run_task(
         should_merge = merge_on_accept or push_on_accept
         should_push = push_on_accept
         message = commit_message or f"{task.task_id}: {task.title}"
-        _report(progress, "committing accepted task changes")
+        _report(progress, f"event=task_finalization_started task={task.task_id}")
         try:
             finalize_result = finalize_accepted_task(
                 repo_path=config.repo_path,
@@ -284,13 +285,13 @@ def run_task(
                 push=should_push,
             )
             if finalize_result.commit_hash:
-                _report(progress, f"commit={finalize_result.commit_hash}")
+                _report(progress, f"event=task_committed task={task.task_id} commit={finalize_result.commit_hash}")
             if finalize_result.merged:
-                _report(progress, f"merged_into={task_base_branch}")
+                _report(progress, f"event=task_merged task={task.task_id} target={task_base_branch}")
             if finalize_result.pushed:
-                _report(progress, f"pushed=origin/{task_base_branch}")
+                _report(progress, f"event=task_pushed task={task.task_id} branch=origin/{task_base_branch}")
         except GitFinalizeError as error:
-            _report(progress, f"finalization_failed={error}")
+            _report(progress, f"event=task_finalization_failed task={task.task_id} error={json.dumps(str(error))}")
             repair_result = _attempt_conflict_repair(
                 error=error,
                 task=task,
@@ -406,8 +407,8 @@ def _run_executor_attempts(
         )
         _report(
             progress,
-            f"running executor attempt {attempt_number}/{len(attempt_configs)}: "
-            f"{executor_config.type} model={executor_config.model}",
+            f"event=executor_attempt_started task={task_id} attempt={attempt_number} "
+            f"total={len(attempt_configs)} backend={executor_config.type} model={executor_config.model}",
         )
         result = selected_executor.run(
             prompt_path=prompt_path,
@@ -417,7 +418,7 @@ def _run_executor_attempts(
         result = _normalize_executor_metadata(result, prompt_path)
         attempts.append(_executor_attempt(attempt_number, result))
         last_result = result
-        _report(progress, f"executor attempt {attempt_number} exit_code={result.exit_code}")
+        _report(progress, f"event=executor_attempt_finished task={task_id} attempt={attempt_number} exit_code={result.exit_code}")
         if result.exit_code == 0:
             return result.model_copy(update={"attempts": attempts})
 
@@ -474,7 +475,7 @@ def _diagnose_failure(
             verification_log_path=verification_log_path,
         )
     )
-    _report(progress, f"failure_diagnosis category={diagnosis_result.diagnosis.category}")
+    _report(progress, f"event=failure_diagnosis task={task.task_id} category={diagnosis_result.diagnosis.category}")
     return write_failure_diagnosis(
         bundle,
         _failure_diagnosis_payload(diagnosis_result.diagnosis),
@@ -510,7 +511,7 @@ def _attempt_conflict_repair(
     if any(not _path_allowed(path, task.allowed_files) for path in conflicted):
         return ConflictRepairResult(attempted=False, conflicted_files=conflicted)
 
-    _report(progress, f"attempting_conflict_repair files={len(conflicted)}")
+    _report(progress, f"event=conflict_repair_started task={task.task_id} files={len(conflicted)}")
     prompt_path = write_conflict_repair_prompt(
         path=scratch_dir / "conflict_repair_prompt.md",
         task=task,

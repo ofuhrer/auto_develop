@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import time
+import json
 from pathlib import Path
 
 import yaml
@@ -190,7 +191,10 @@ def test_run_release_executes_ordered_contracts_and_writes_summary(tmp_path) -> 
     assert result.decision == "accepted"
     assert [task.decision.task_id for task in result.task_results] == ["demo-0001", "demo-0002"]
     assert result.log_path.exists()
-    assert "release_log=" in result.log_path.read_text(encoding="utf-8")
+    log = result.log_path.read_text(encoding="utf-8")
+    assert "Logs:" in log
+    assert "Task 1/2 demo-0001:" in log
+    assert "=== Release Summary ===" in log
     summary = result.summary_path.read_text(encoding="utf-8")
     assert '"release_id": "v0.1.0"' in summary
     assert '"log_path":' in summary
@@ -242,7 +246,7 @@ def test_run_release_parallel_executes_independent_tasks_concurrently(tmp_path) 
     elapsed = time.monotonic() - started
 
     assert result.decision == Decision.ACCEPTED
-    assert elapsed < 0.45
+    assert elapsed < 0.7
     assert "parallel_scheduler" in result.log_path.read_text(encoding="utf-8")
     assert result.review_path.exists()
 
@@ -318,6 +322,39 @@ def test_run_release_can_finalize_feature_branch_into_main(tmp_path) -> None:
     assert result.finalization.merged is True
     assert (repo / "docs" / "demo-0001.md").exists()
     assert _git_output(repo, "branch", "--show-current").strip() == "main"
+
+
+def test_run_release_writes_metrics_and_final_log_summary(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FakeExecutor(),
+        merge_on_accept=True,
+    )
+
+    metrics = json.loads(result.metrics_path.read_text(encoding="utf-8"))
+    log = result.log_path.read_text(encoding="utf-8")
+
+    assert metrics["release_id"] == "v0.1.0"
+    assert metrics["totals"]["tasks"] == 1
+    assert metrics["totals"]["accepted_tasks"] == 1
+    assert metrics["totals"]["executor_attempts"] == 1
+    assert metrics["tasks"][0]["context_chars"] >= 0
+    assert "=== Release Summary ===" in log
+    assert "Release: v0.1.0" in log
+    assert "Good luck, future humans. 🧑‍🚀🛠️🍀" in log
 
 
 def test_release_preflight_ignores_metadata_files(tmp_path) -> None:

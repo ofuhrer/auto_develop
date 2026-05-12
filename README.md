@@ -42,7 +42,7 @@ Run tests:
 3. Write or generate bounded task contracts in `contracts/`.
 4. Run one contract with `agent-loop run-task`, or run a release queue with `agent-loop run-release`.
 5. Monitor `runs/<release-run-id>/release.log`.
-6. Review evidence under `runs/`, including `failure_diagnosis.yaml` and `executor_attempts.json` for failed tasks.
+6. Review evidence under `runs/`, including `release_metrics.json` plus `failure_diagnosis.yaml` and `executor_attempts.json` for failed tasks.
 7. Push the feature branch or merge to `main` only when the project policy allows it.
 
 Example:

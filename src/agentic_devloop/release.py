@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import threading
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
@@ -39,6 +40,7 @@ class ReleaseRunResult:
     summary_path: Path
     log_path: Path
     review_path: Path
+    metrics_path: Path
     task_results: list[TaskRunResult]
     decision: Decision
     integration_branch: str | None = None
@@ -115,20 +117,18 @@ def run_release(
         )
         raise ValueError(f"release contracts are unsafe for {execution_mode} execution: {details}")
 
-    _report(progress, f"release_run_id={run_id}")
-    _report(progress, f"release_log={log_path}")
-    _report(progress, f"release_raw_log={raw_log_path}")
-    _report(progress, f"release={release_id} tasks={len(selected_contracts)} mode={execution_mode}")
+    _report(progress, f"event=release_started run_id={run_id} release={release_id} tasks={len(selected_contracts)} mode={execution_mode}")
+    _report(progress, f"event=release_logs log={log_path} raw_log={raw_log_path}")
     feature_branch = integration_branch or feature_branch_name(release_id)
     ensure_branch_from_base(config.repo_path, feature_branch, config.default_base_branch)
-    _report(progress, f"integration_branch={feature_branch}")
+    _report(progress, f"event=integration_branch branch={feature_branch} base={config.default_base_branch}")
     if overlap_report.findings:
-        _report(progress, f"overlap_findings={len(overlap_report.findings)}")
+        _report(progress, f"event=overlap_findings count={len(overlap_report.findings)}")
 
     task_inputs = list(zip(selected_contracts, selected_tasks))
     dependencies = _release_dependency_map(selected_tasks, overlap_report)
     if dependencies:
-        _report(progress, "execution_dag=" + json.dumps(dependencies, sort_keys=True))
+        _report(progress, "event=execution_dag dependencies=" + json.dumps(dependencies, sort_keys=True))
     if execution_mode == "parallel":
         task_results = _run_release_parallel(
             project_id=project_id,
@@ -187,6 +187,14 @@ def run_release(
         integration_branch=feature_branch,
         finalization=finalization,
     )
+    metrics_path = _write_release_metrics(
+        runs_dir=runs_dir,
+        run_id=run_id,
+        release_id=release_id,
+        decision=decision,
+        task_results=task_results,
+        raw_log_path=raw_log_path,
+    )
     review_path = _write_release_review(
         runs_dir=runs_dir,
         run_id=run_id,
@@ -196,8 +204,18 @@ def run_release(
         integration_branch=feature_branch,
         finalization=finalization,
     )
-    _report(progress, f"release_decision={decision}")
-    _report(progress, f"release_review={review_path}")
+    _report(progress, f"event=release_decision decision={decision}")
+    _report(progress, f"event=release_review path={review_path}")
+    _report(progress, f"event=release_metrics path={metrics_path}")
+    _write_release_log_summary(
+        log_path=log_path,
+        raw_log_path=raw_log_path,
+        release_id=release_id,
+        decision=decision,
+        task_results=task_results,
+        metrics_path=metrics_path,
+        review_path=review_path,
+    )
 
     return ReleaseRunResult(
         release_id=release_id,
@@ -205,6 +223,7 @@ def run_release(
         summary_path=summary_path,
         log_path=log_path,
         review_path=review_path,
+        metrics_path=metrics_path,
         task_results=task_results,
         decision=decision,
         integration_branch=feature_branch,
@@ -255,7 +274,13 @@ def _run_release_sequential(
 ) -> list[TaskRunResult]:
     task_results: list[TaskRunResult] = []
     for index, (contract_path, task) in enumerate(task_inputs, start=1):
-        _report(progress, f"task {index}/{len(task_inputs)} {task.task_id}")
+        _report(
+            progress,
+            f"event=task_started index={index} total={len(task_inputs)} task={task.task_id} "
+            f"title={json.dumps(task.title)} budget={task.budget_class} type={task.task_type}",
+        )
+        _report(progress, f"event=task_objective task={task.task_id} objective={json.dumps(task.objective)}")
+        _report(progress, f"event=task_scope task={task.task_id} allowed={json.dumps(task.allowed_files)}")
         result = _run_one_release_task(
             project_id=project_id,
             config_repo_path=config_repo_path,
@@ -306,7 +331,7 @@ def _run_release_parallel(
     task_results_by_id: dict[str, TaskRunResult] = {}
     futures: dict[Future[TaskRunResult], str] = {}
     max_workers = max(1, len(task_inputs))
-    _report(progress, f"parallel_scheduler max_workers={max_workers}")
+    _report(progress, f"event=parallel_scheduler max_workers={max_workers}")
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         while pending or futures:
             ready = sorted(
@@ -318,7 +343,13 @@ def _run_release_parallel(
             for task_id in ready:
                 contract_path, task = by_task_id[task_id]
                 pending.remove(task_id)
-                _report(progress, f"submitting task={task_id}")
+                _report(
+                    progress,
+                    f"event=task_submitted task={task_id} title={json.dumps(task.title)} "
+                    f"budget={task.budget_class} type={task.task_type}",
+                )
+                _report(progress, f"event=task_objective task={task_id} objective={json.dumps(task.objective)}")
+                _report(progress, f"event=task_scope task={task_id} allowed={json.dumps(task.allowed_files)}")
                 futures[
                     pool.submit(
                         _run_one_release_task,
@@ -343,7 +374,7 @@ def _run_release_parallel(
             if not futures:
                 blocked = ", ".join(sorted(pending))
                 if failed and stop_on_failure:
-                    _report(progress, f"parallel_scheduler stopped_pending={blocked}")
+                    _report(progress, f"event=parallel_scheduler_stopped pending={json.dumps(blocked)}")
                     break
                 raise ValueError(f"release execution DAG has unsatisfied dependencies: {blocked}")
 
@@ -353,7 +384,7 @@ def _run_release_parallel(
                 result = future.result()
                 task_results_by_id[task_id] = result
                 completed.add(task_id)
-                _report(progress, f"completed task={task_id} decision={result.decision.decision}")
+                _report(progress, f"event=task_completed task={task_id} decision={result.decision.decision}")
                 if result.decision.decision != Decision.ACCEPTED:
                     failed = True
 
@@ -434,7 +465,7 @@ def _finalize_release(
     try:
         if mode == "push-feature":
             push_branch(repo_path, integration_branch)
-            _report(progress, f"pushed=origin/{integration_branch}")
+            _report(progress, f"event=release_pushed branch=origin/{integration_branch}")
             return FinalizeResult(pushed=True)
         if mode in {"merge-main", "push-main"}:
             result = merge_integration_branch_to_base(
@@ -443,12 +474,12 @@ def _finalize_release(
                 base_branch=base_branch,
                 push=mode == "push-main",
             )
-            _report(progress, f"release_merged_into={base_branch}")
+            _report(progress, f"event=release_merged target={base_branch}")
             if result.pushed:
-                _report(progress, f"pushed=origin/{base_branch}")
+                _report(progress, f"event=release_pushed branch=origin/{base_branch}")
             return result
     except GitFinalizeError as error:
-        _report(progress, f"release_finalization_failed={error}")
+        _report(progress, f"event=release_finalization_failed error={json.dumps(str(error))}")
         return FinalizeResult(failed_step=error.step, error=str(error))
     raise ValueError(f"unsupported release finalization mode: {mode}")
 
@@ -624,6 +655,193 @@ def _write_release_review(
     return review_path
 
 
+def _write_release_metrics(
+    *,
+    runs_dir: Path,
+    run_id: str,
+    release_id: str,
+    decision: Decision,
+    task_results: list[TaskRunResult],
+    raw_log_path: Path,
+) -> Path:
+    metrics_path = runs_dir / run_id / "release_metrics.json"
+    task_metrics = [_task_metrics(result, raw_log_path) for result in task_results]
+    model_attempts: dict[str, dict[str, object]] = {}
+    for task in task_metrics:
+        for attempt in task["executor_attempts"]:
+            model = str(attempt.get("model") or "<none>")
+            entry = model_attempts.setdefault(
+                model,
+                {
+                    "attempts": 0,
+                    "successful_attempts": 0,
+                    "failed_attempts": 0,
+                    "duration_seconds": 0.0,
+                    "prompt_chars": 0,
+                    "stdout_chars": 0,
+                    "stderr_chars": 0,
+                },
+            )
+            entry["attempts"] = int(entry["attempts"]) + 1
+            if int(attempt.get("exit_code", 1)) == 0:
+                entry["successful_attempts"] = int(entry["successful_attempts"]) + 1
+            else:
+                entry["failed_attempts"] = int(entry["failed_attempts"]) + 1
+            entry["duration_seconds"] = float(entry["duration_seconds"]) + float(attempt.get("duration_seconds", 0.0))
+            entry["prompt_chars"] = int(entry["prompt_chars"]) + int(attempt.get("prompt_chars", 0))
+            entry["stdout_chars"] = int(entry["stdout_chars"]) + int(attempt.get("stdout_chars", 0))
+            entry["stderr_chars"] = int(entry["stderr_chars"]) + int(attempt.get("stderr_chars", 0))
+
+    totals = {
+        "tasks": len(task_metrics),
+        "accepted_tasks": sum(1 for task in task_metrics if task["decision"] == Decision.ACCEPTED),
+        "executor_attempts": sum(len(task["executor_attempts"]) for task in task_metrics),
+        "prompt_chars": sum(int(task["prompt_chars"]) for task in task_metrics),
+        "context_chars": sum(int(task["context_chars"]) for task in task_metrics),
+        "stdout_chars": sum(int(task["stdout_chars"]) for task in task_metrics),
+        "stderr_chars": sum(int(task["stderr_chars"]) for task in task_metrics),
+        "diff_lines": sum(int(task["diff_lines"]) for task in task_metrics),
+        "changed_files": sum(int(task["changed_file_count"]) for task in task_metrics),
+        "verification_duration_seconds": round(
+            sum(float(task["verification_duration_seconds"]) for task in task_metrics),
+            3,
+        ),
+        "executor_duration_seconds": round(
+            sum(float(attempt.get("duration_seconds", 0.0)) for task in task_metrics for attempt in task["executor_attempts"]),
+            3,
+        ),
+    }
+    metrics = {
+        "run_id": run_id,
+        "release_id": release_id,
+        "decision": decision,
+        "totals": totals,
+        "model_attempts": model_attempts,
+        "tasks": task_metrics,
+        "notes": [
+            "Character counts are local proxies for cost analysis; token counts require provider usage metadata.",
+            "prompt_chars includes the full executor prompt, while context_chars tracks only context bundle content reported by orchestration.",
+        ],
+    }
+    metrics_path.write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
+    return metrics_path
+
+
+def _write_release_log_summary(
+    *,
+    log_path: Path,
+    raw_log_path: Path,
+    release_id: str,
+    decision: Decision,
+    task_results: list[TaskRunResult],
+    metrics_path: Path,
+    review_path: Path,
+) -> None:
+    task_lines = []
+    for result in task_results:
+        finalize = result.finalize
+        commit = finalize.commit_hash[:12] if finalize and finalize.commit_hash else "none"
+        merged = bool(finalize and finalize.merged)
+        task_lines.append(
+            f"- {result.decision.task_id}: {result.decision.decision} "
+            f"(commit={commit}, merged={merged})"
+        )
+    summary_lines = [
+        "",
+        "=== Release Summary ===",
+        f"Release: {release_id}",
+        f"Decision: {decision}",
+        f"Tasks completed: {len(task_results)}",
+        *task_lines,
+        f"Review: {review_path}",
+        f"Metrics: {metrics_path}",
+        "Good luck, future humans. 🧑‍🚀🛠️🍀",
+    ]
+    timestamp = datetime.now(UTC).isoformat()
+    payload = "".join(f"{timestamp} {line}\n" if line else "\n" for line in summary_lines)
+    with log_path.open("a", encoding="utf-8") as file:
+        file.write(payload)
+    with raw_log_path.open("a", encoding="utf-8") as file:
+        file.write(payload)
+
+
+def _task_metrics(result: TaskRunResult, raw_log_path: Path) -> dict[str, object]:
+    bundle_path = result.bundle_path
+    attempts = _read_json_list(bundle_path / "executor_attempts.json")
+    run_state = _read_json_object(bundle_path / "run_state.json")
+    prompt_chars = _text_len(bundle_path / "executor_prompt.md")
+    changed_files = _read_lines(bundle_path / "changed_files.txt")
+    verification_results = run_state.get("verification_results", [])
+    return {
+        "task_id": result.decision.task_id,
+        "run_id": result.run_id,
+        "decision": result.decision.decision,
+        "rationale": result.decision.rationale,
+        "bundle_path": str(bundle_path),
+        "commit_hash": result.finalize.commit_hash if result.finalize else None,
+        "merged": result.finalize.merged if result.finalize else False,
+        "pushed": result.finalize.pushed if result.finalize else False,
+        "context_chars": _context_chars_for_task(raw_log_path, result.decision.task_id),
+        "prompt_chars": prompt_chars,
+        "stdout_chars": sum(int(attempt.get("stdout_chars", 0)) for attempt in attempts),
+        "stderr_chars": sum(int(attempt.get("stderr_chars", 0)) for attempt in attempts),
+        "diff_lines": int(run_state.get("diff_lines", 0)),
+        "changed_file_count": len(changed_files),
+        "changed_files": changed_files,
+        "verification_command_count": len(verification_results),
+        "verification_duration_seconds": round(
+            sum(float(item.get("duration_seconds", 0.0)) for item in verification_results),
+            3,
+        ),
+        "executor_attempts": attempts,
+        "failure_diagnosis_path": str(bundle_path / "failure_diagnosis.yaml")
+        if (bundle_path / "failure_diagnosis.yaml").exists()
+        else None,
+    }
+
+
+def _read_json_object(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data if isinstance(data, dict) else {}
+
+
+def _read_json_list(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data if isinstance(data, list) else []
+
+
+def _read_lines(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+    return [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _text_len(path: Path) -> int:
+    if not path.exists():
+        return 0
+    return len(path.read_text(encoding="utf-8"))
+
+
+def _context_chars_for_task(raw_log_path: Path, task_id: str) -> int:
+    if not raw_log_path.exists():
+        return 0
+    marker = f"event=context_loaded task={task_id} "
+    for line in raw_log_path.read_text(encoding="utf-8").splitlines():
+        if marker not in line:
+            continue
+        for part in line.split():
+            if part.startswith("chars="):
+                try:
+                    return int(part.removeprefix("chars="))
+                except ValueError:
+                    return 0
+    return 0
+
+
 def analyze_contract_overlaps(tasks: list[TaskContract]) -> ReleaseOverlapReport:
     findings: list[OverlapFinding] = []
     for index, first in enumerate(tasks):
@@ -755,26 +973,97 @@ def _multiplexed_progress(
 
 
 def _display_progress_message(message: str) -> str | None:
+    if message.startswith("event="):
+        return _display_event_message(message)
     if not message.startswith("agent "):
         return message
     if " stream=stdout | " in message:
         return _truncate_log_line(message)
     if "ERROR:" in message or "usage limit" in message.lower():
         return _truncate_log_line(message)
-    useful_fragments = [
-        " | codex",
-        " | exec",
-        " | apply patch",
-        " | patch: completed",
-        " | succeeded",
-        " | failed",
-        " | Changed files:",
-        " | Verification result:",
-        " | Risks / follow-up:",
-    ]
-    if any(fragment in message for fragment in useful_fragments):
-        return _truncate_log_line(message)
     return None
+
+
+def _display_event_message(message: str) -> str:
+    event = _event_fields(message)
+    name = event.get("event", "event")
+    if name == "release_started":
+        return f"Release {event.get('release')} started: {event.get('tasks')} task(s), mode={event.get('mode')}, run={event.get('run_id')}"
+    if name == "release_logs":
+        return f"Logs: {event.get('log')} (raw: {event.get('raw_log')})"
+    if name == "integration_branch":
+        return f"Integration branch ready: {event.get('branch')} from {event.get('base')}"
+    if name == "execution_dag":
+        return f"Execution DAG: {event.get('dependencies')}"
+    if name == "task_started":
+        return f"Task {event.get('index')}/{event.get('total')} {event.get('task')}: {event.get('title')} [{event.get('type')}, budget {event.get('budget')}]"
+    if name == "task_submitted":
+        return f"Task submitted {event.get('task')}: {event.get('title')} [{event.get('type')}, budget {event.get('budget')}]"
+    if name == "task_objective":
+        return f"Task {event.get('task')} objective: {event.get('objective')}"
+    if name == "task_scope":
+        return f"Task {event.get('task')} scope: {event.get('allowed')}"
+    if name == "task_run_created":
+        return f"Task {event.get('task')} run created: {event.get('run_id')}"
+    if name == "worktree_created":
+        return f"Task {event.get('task')} worktree: {event.get('path')}"
+    if name == "prompt_build_started":
+        return f"Task {event.get('task')} building executor prompt"
+    if name == "context_loaded":
+        return f"Task {event.get('task')} context loaded: {event.get('sections')} section(s), {event.get('chars')} chars"
+    if name == "executor_attempt_started":
+        return f"Task {event.get('task')} executor attempt {event.get('attempt')}/{event.get('total')}: {event.get('backend')} model={event.get('model')}"
+    if name == "executor_attempt_finished":
+        return f"Task {event.get('task')} executor attempt {event.get('attempt')} finished: exit={event.get('exit_code')}"
+    if name == "executor_finished":
+        return f"Task {event.get('task')} executor finished: exit={event.get('exit_code')}"
+    if name == "verification_started":
+        return f"Task {event.get('task')} verification started: {event.get('commands')} command(s)"
+    if name == "verification_finished":
+        return f"Task {event.get('task')} verification finished: exit_codes={event.get('exit_codes')}"
+    if name == "evidence_collection_started":
+        return f"Task {event.get('task')} collecting evidence"
+    if name == "review_decision":
+        return f"Task {event.get('task')} review: {event.get('decision')} - {event.get('rationale')}"
+    if name == "task_finalization_started":
+        return f"Task {event.get('task')} finalizing accepted changes"
+    if name == "task_committed":
+        return f"Task {event.get('task')} committed: {event.get('commit')}"
+    if name == "task_merged":
+        return f"Task {event.get('task')} merged into {event.get('target')}"
+    if name == "task_pushed":
+        return f"Task {event.get('task')} pushed: {event.get('branch')}"
+    if name == "task_completed":
+        return f"Task {event.get('task')} completed: {event.get('decision')}"
+    if name == "failure_diagnosis":
+        return f"Task {event.get('task')} failure diagnosis: {event.get('category')}"
+    if name == "conflict_repair_started":
+        return f"Task {event.get('task')} conflict repair started: {event.get('files')} file(s)"
+    if name == "release_decision":
+        return f"Release decision: {event.get('decision')}"
+    if name == "release_review":
+        return f"Release review: {event.get('path')}"
+    if name == "release_metrics":
+        return f"Release metrics: {event.get('path')}"
+    if name == "release_pushed":
+        return f"Release pushed: {event.get('branch')}"
+    if name == "release_merged":
+        return f"Release merged into {event.get('target')}"
+    return message
+
+
+def _event_fields(message: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    try:
+        parts = shlex.split(message)
+    except ValueError:
+        parts = message.split()
+    for part in parts:
+        if "=" not in part:
+            continue
+        key, value = part.split("=", 1)
+        fields[key] = value
+    return fields
 
 
 def _truncate_log_line(message: str, limit: int = 500) -> str:

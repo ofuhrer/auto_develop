@@ -52,15 +52,13 @@ worktree_root: /path/to/worktrees/rust_rockfall
 
 executor:
   type: codex_cli
-  model: gpt-5.3-codex-spark
+  model: gpt-5.4-mini
   max_walltime_minutes: 25
 
 model_roles:
   worker:
     type: codex_cli
-    model: gpt-5.3-codex-spark
-    fallback_models:
-      - gpt-5.4-mini
+    model: gpt-5.4-mini
     max_walltime_minutes: 25
   reviewer:
     type: codex_cli

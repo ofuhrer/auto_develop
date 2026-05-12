@@ -37,7 +37,7 @@ Implemented capabilities include:
 - `run-task`, `run-release`, `plan-release`, `run-objective`, `status`, and `cleanup` commands;
 - release-level feature branch integration through `feature/<release>`;
 - dynamic release DAG scheduling from `depends_on` and file-overlap analysis;
-- multiplexed `release.log` and raw `release.raw.log`;
+- activity-oriented `release.log`, raw `release.raw.log`, and `release_metrics.json`;
 - default cleanup of merged task worktrees and branches;
 - dry-run-first manual cleanup;
 - one bounded conflict-repair attempt for contract-contained rebase conflicts.

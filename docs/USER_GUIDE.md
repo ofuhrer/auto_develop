@@ -99,15 +99,13 @@ repo_state_path: repo_state/my_project
 
 executor:
   type: codex_cli
-  model: gpt-5.3-codex-spark
+  model: gpt-5.4-mini
   max_walltime_minutes: 25
 
 model_roles:
   worker:
     type: codex_cli
-    model: gpt-5.3-codex-spark
-    fallback_models:
-      - gpt-5.4-mini
+    model: gpt-5.4-mini
     max_walltime_minutes: 25
   reviewer:
     type: codex_cli
@@ -394,7 +392,7 @@ Use `push-feature` when you want a feature branch ready for PR review. Use `merg
 At startup, `run-release` prints the release log path:
 
 ```text
-[agent-loop] release_log=runs/<release-run-id>/release.log
+[agent-loop] Logs: runs/<release-run-id>/release.log (raw: runs/<release-run-id>/release.raw.log)
 ```
 
 Monitor it in another terminal:
@@ -403,7 +401,7 @@ Monitor it in another terminal:
 tail -f runs/<release-run-id>/release.log
 ```
 
-The filtered log is intended for live monitoring. Full raw worker stdout and stderr are retained in:
+The filtered log is intended for live monitoring. It reports release-level events, the current task objective and scope, executor attempts and models, verification, review decisions, finalization, and a final release summary. Full raw worker stdout and stderr are retained in:
 
 ```text
 runs/<release-run-id>/release.raw.log
@@ -412,10 +410,13 @@ runs/<release-run-id>/release.raw.log
 Release outputs normally include:
 
 - `release_summary.json`;
+- `release_metrics.json`;
 - `release_review.md`;
 - per-task evidence bundles;
 - filtered `release.log`;
 - raw `release.raw.log`.
+
+Use `release_metrics.json` for cost and routing analysis. It records per-task prompt size, context size, output size, executor attempts, model usage, verification duration, changed-file count, and diff size. These are character-count proxies, not provider-billed token counts, but they are enough to compare task sizes, model routing, context budgets, and wasted fallback attempts.
 
 ## Step 10: Inspect Evidence
 
