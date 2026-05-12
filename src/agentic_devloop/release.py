@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from agentic_devloop.artifacts import cleanup_task_artifacts
+from agentic_devloop.budget import build_budget_ledger, build_tuning_report
 from agentic_devloop.config import load_project_config
 from agentic_devloop.git_finalize import (
     FinalizeResult,
@@ -41,6 +42,8 @@ class ReleaseRunResult:
     log_path: Path
     review_path: Path
     metrics_path: Path
+    budget_path: Path
+    tuning_path: Path
     task_results: list[TaskRunResult]
     decision: Decision
     integration_branch: str | None = None
@@ -167,7 +170,34 @@ def run_release(
             progress=progress,
         )
 
-    decision = _release_decision([result.decision for result in task_results])
+    task_decision = _release_decision([result.decision for result in task_results])
+    release_metrics = _build_release_metrics(
+        run_id=run_id,
+        release_id=release_id,
+        decision=task_decision,
+        task_results=task_results,
+        raw_log_path=raw_log_path,
+        runs_dir=runs_dir,
+    )
+    metrics_path = _write_release_metrics(
+        runs_dir=runs_dir,
+        run_id=run_id,
+        metrics=release_metrics,
+    )
+    budget_ledger = build_budget_ledger(release_metrics=release_metrics, budget=config.budget)
+    budget_path = _write_release_budget(runs_dir=runs_dir, run_id=run_id, ledger=budget_ledger)
+    tuning_path = _write_release_tuning(
+        runs_dir=runs_dir,
+        run_id=run_id,
+        tuning_report=build_tuning_report(ledger=budget_ledger),
+    )
+    budget_violations = _release_budget_violations(budget_ledger)
+    decision = _release_decision_with_budget(task_decision, budget_violations)
+    if decision != task_decision:
+        release_metrics["decision"] = decision
+        release_metrics["budget_violations"] = budget_violations
+        metrics_path = _write_release_metrics(runs_dir=runs_dir, run_id=run_id, metrics=release_metrics)
+        _report(progress, "event=release_budget_exceeded violations=" + json.dumps(budget_violations, sort_keys=True))
     finalization = _finalize_release(
         repo_path=config.repo_path,
         integration_branch=feature_branch,
@@ -186,14 +216,9 @@ def run_release(
         raw_log_path=raw_log_path,
         integration_branch=feature_branch,
         finalization=finalization,
-    )
-    metrics_path = _write_release_metrics(
-        runs_dir=runs_dir,
-        run_id=run_id,
-        release_id=release_id,
-        decision=decision,
-        task_results=task_results,
-        raw_log_path=raw_log_path,
+        budget_path=budget_path,
+        tuning_path=tuning_path,
+        budget_violations=budget_violations,
     )
     review_path = _write_release_review(
         runs_dir=runs_dir,
@@ -203,10 +228,16 @@ def run_release(
         task_results=task_results,
         integration_branch=feature_branch,
         finalization=finalization,
+        metrics_path=metrics_path,
+        budget_path=budget_path,
+        tuning_path=tuning_path,
+        budget_violations=budget_violations,
     )
     _report(progress, f"event=release_decision decision={decision}")
     _report(progress, f"event=release_review path={review_path}")
     _report(progress, f"event=release_metrics path={metrics_path}")
+    _report(progress, f"event=release_budget path={budget_path}")
+    _report(progress, f"event=release_tuning path={tuning_path}")
     _write_release_log_summary(
         log_path=log_path,
         raw_log_path=raw_log_path,
@@ -214,6 +245,8 @@ def run_release(
         decision=decision,
         task_results=task_results,
         metrics_path=metrics_path,
+        budget_path=budget_path,
+        tuning_path=tuning_path,
         review_path=review_path,
     )
 
@@ -224,6 +257,8 @@ def run_release(
         log_path=log_path,
         review_path=review_path,
         metrics_path=metrics_path,
+        budget_path=budget_path,
+        tuning_path=tuning_path,
         task_results=task_results,
         decision=decision,
         integration_branch=feature_branch,
@@ -550,6 +585,9 @@ def _write_release_summary(
     raw_log_path: Path,
     integration_branch: str,
     finalization: FinalizeResult | None,
+    budget_path: Path,
+    tuning_path: Path,
+    budget_violations: list[str],
 ) -> Path:
     summary_dir = runs_dir / run_id
     summary_dir.mkdir(parents=True, exist_ok=True)
@@ -560,6 +598,10 @@ def _write_release_summary(
         "decision": decision,
         "log_path": str(log_path),
         "raw_log_path": str(raw_log_path),
+        "metrics_path": str(summary_dir / "release_metrics.json"),
+        "budget_path": str(budget_path),
+        "tuning_path": str(tuning_path),
+        "budget_violations": budget_violations,
         "integration_branch": integration_branch,
         "finalization": {
             "merged": finalization.merged,
@@ -596,6 +638,10 @@ def _write_release_review(
     task_results: list[TaskRunResult],
     integration_branch: str,
     finalization: FinalizeResult | None,
+    metrics_path: Path,
+    budget_path: Path,
+    tuning_path: Path,
+    budget_violations: list[str],
 ) -> Path:
     review_path = runs_dir / run_id / "release_review.md"
     lines = [
@@ -604,10 +650,22 @@ def _write_release_review(
         f"- Decision: `{decision}`",
         f"- Integration branch: `{integration_branch}`",
         f"- Tasks completed: `{len(task_results)}`",
+        f"- Metrics: `{metrics_path}`",
+        f"- Budget: `{budget_path}`",
+        f"- Tuning: `{tuning_path}`",
+        "",
+        "## Budget",
+        "",
+    ]
+    if budget_violations:
+        lines.extend(f"- Violation: {violation}" for violation in budget_violations)
+    else:
+        lines.append("- No configured release-level budget limits were exceeded.")
+    lines.extend([
         "",
         "## Task Results",
         "",
-    ]
+    ])
     for result in task_results:
         finalize = result.finalize
         lines.extend(
@@ -655,16 +713,15 @@ def _write_release_review(
     return review_path
 
 
-def _write_release_metrics(
+def _build_release_metrics(
     *,
-    runs_dir: Path,
     run_id: str,
     release_id: str,
     decision: Decision,
     task_results: list[TaskRunResult],
     raw_log_path: Path,
-) -> Path:
-    metrics_path = runs_dir / run_id / "release_metrics.json"
+    runs_dir: Path,
+) -> dict[str, object]:
     task_metrics = [_task_metrics(result, raw_log_path) for result in task_results]
     model_attempts: dict[str, dict[str, object]] = {}
     for task in task_metrics:
@@ -716,6 +773,7 @@ def _write_release_metrics(
         "release_id": release_id,
         "decision": decision,
         "totals": totals,
+        "strong_model_calls": _strong_model_calls(runs_dir, release_id),
         "model_attempts": model_attempts,
         "tasks": task_metrics,
         "notes": [
@@ -723,8 +781,44 @@ def _write_release_metrics(
             "prompt_chars includes the full executor prompt, while context_chars tracks only context bundle content reported by orchestration.",
         ],
     }
+    return metrics
+
+
+def _write_release_metrics(
+    *,
+    runs_dir: Path,
+    run_id: str,
+    metrics: dict[str, object],
+) -> Path:
+    metrics_path = runs_dir / run_id / "release_metrics.json"
     metrics_path.write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
     return metrics_path
+
+
+def _write_release_budget(*, runs_dir: Path, run_id: str, ledger) -> Path:
+    budget_path = runs_dir / run_id / "release_budget.json"
+    budget_path.write_text(json.dumps(ledger.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8")
+    return budget_path
+
+
+def _write_release_tuning(*, runs_dir: Path, run_id: str, tuning_report) -> Path:
+    tuning_path = runs_dir / run_id / "release_tuning.md"
+    tuning_path.write_text(tuning_report.render_markdown(), encoding="utf-8")
+    return tuning_path
+
+
+def _release_budget_violations(ledger) -> list[str]:
+    return [
+        f"{entry.name} exceeded budget: actual {entry.actual} {entry.unit} over configured {entry.configured}"
+        for entry in ledger.usage
+        if entry.scope == "release" and entry.over_by is not None and entry.over_by > 0
+    ]
+
+
+def _release_decision_with_budget(decision: Decision, budget_violations: list[str]) -> Decision:
+    if budget_violations and decision == Decision.ACCEPTED:
+        return Decision.FAILED
+    return decision
 
 
 def _write_release_log_summary(
@@ -735,6 +829,8 @@ def _write_release_log_summary(
     decision: Decision,
     task_results: list[TaskRunResult],
     metrics_path: Path,
+    budget_path: Path,
+    tuning_path: Path,
     review_path: Path,
 ) -> None:
     task_lines = []
@@ -755,6 +851,8 @@ def _write_release_log_summary(
         *task_lines,
         f"Review: {review_path}",
         f"Metrics: {metrics_path}",
+        f"Budget: {budget_path}",
+        f"Tuning: {tuning_path}",
         "Good luck, future humans. 🧑‍🚀🛠️🍀",
     ]
     timestamp = datetime.now(UTC).isoformat()
@@ -812,6 +910,11 @@ def _read_json_list(path: Path) -> list[dict]:
         return []
     data = json.loads(path.read_text(encoding="utf-8"))
     return data if isinstance(data, list) else []
+
+
+def _strong_model_calls(runs_dir: Path, release_id: str) -> int:
+    ledger_path = runs_dir / release_id / "budget_ledger.json"
+    return sum(1 for entry in _read_json_list(ledger_path) if entry.get("kind") == "strong_model")
 
 
 def _read_lines(path: Path) -> list[str]:
@@ -1045,6 +1148,12 @@ def _display_event_message(message: str) -> str:
         return f"Release review: {event.get('path')}"
     if name == "release_metrics":
         return f"Release metrics: {event.get('path')}"
+    if name == "release_budget":
+        return f"Release budget: {event.get('path')}"
+    if name == "release_tuning":
+        return f"Release tuning: {event.get('path')}"
+    if name == "release_budget_exceeded":
+        return f"Release budget exceeded: {event.get('violations')}"
     if name == "release_pushed":
         return f"Release pushed: {event.get('branch')}"
     if name == "release_merged":
