@@ -8,6 +8,8 @@ from pathlib import Path
 import yaml
 
 from agentic_devloop.backlog import BacklogPlannerBackendResult, parse_backlog_planner_output, plan_backlog
+from agentic_devloop.backlog import run_backlog
+from agentic_devloop.models import ExecutorResult
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -221,6 +223,142 @@ class FakeBacklogBackend:
             stderr_path=stderr_path,
             metadata_path=metadata_path,
         )
+
+
+class FakeObjectivePlannerBackend:
+    def generate(self, *, prompt: str, objective, existing_contracts, model):
+        assert "Strong Release Planning Prompt" in prompt
+        assert objective.release_id == "demo-agent-selected-governor"
+        assert existing_contracts == []
+        assert model == "planner"
+        return {
+            "release_id": objective.release_id,
+            "planner": "strong-model",
+            "generated_contracts": [
+                {
+                    "task_id": "objective-0001",
+                    "title": "Create objective docs",
+                    "objective": "Create one objective evidence document.",
+                    "rationale": "Covers the objective with one bounded docs task.",
+                    "suggested_contract": {
+                        "task_id": "objective-0001",
+                        "release_id": objective.release_id,
+                        "title": "Create objective docs",
+                        "task_type": "documentation",
+                        "budget_class": "S",
+                        "objective": "Create docs/objective.md.",
+                        "allowed_files": ["docs/objective.md"],
+                        "forbidden_changes": ["Do not edit source files."],
+                        "required_evidence": ["git diff", "test output"],
+                        "verification": {"commands": ["test -f docs/objective.md"]},
+                        "stop_conditions": ["Verification fails."],
+                    },
+                }
+            ],
+            "warnings": [],
+        }
+
+
+class FakeExecutor:
+    def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = worktree_path / "docs" / "objective.md"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text("# Objective\n", encoding="utf-8")
+        stdout_path = output_dir / "executor_stdout.log"
+        stderr_path = output_dir / "executor_stderr.log"
+        stdout_path.write_text(f"used {prompt_path}\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return ExecutorResult(
+            command=["fake-executor"],
+            exit_code=0,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            duration_seconds=0.01,
+            backend="fake",
+            model=None,
+        )
+
+
+def test_run_backlog_selects_one_epic_reuses_objective_and_runs_release(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# demo\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "worker",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {
+                "planner": {
+                    "type": "codex_cli",
+                    "model": "planner",
+                    "max_walltime_minutes": 5,
+                }
+            },
+            "model_routing": {"default_role": "planner"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    roadmap = tmp_path / "ROADMAP.md"
+    roadmap.write_text("# Roadmap\n\nRemaining work:\n\n1. Add run-backlog.\n", encoding="utf-8")
+
+    objectives_dir = tmp_path / "objectives"
+    objectives_dir.mkdir()
+    existing_objective = objectives_dir / "demo-agent-selected-governor.yaml"
+    _write_yaml(
+        existing_objective,
+        {
+            "release_id": "demo-agent-selected-governor",
+            "title": "Existing objective",
+            "objective": "Existing objective body.",
+            "acceptance_criteria": ["Governor objective is generated."],
+        },
+    )
+
+    result = run_backlog(
+        project_id="demo",
+        goal="Let an agent choose the next epic.",
+        roadmap_path=roadmap,
+        selected_epic_id="epic-0001",
+        config_dir=config_dir,
+        contracts_dir=tmp_path / "contracts",
+        runs_dir=tmp_path / "runs",
+        objectives_dir=objectives_dir,
+        mode="strong-model",
+        planner_backend=FakeBacklogBackend(tmp_path),
+        objective_planner_backend=FakeObjectivePlannerBackend(),
+        executor=FakeExecutor(),
+    )
+
+    assert result.selected_epic_id == "epic-0001"
+    assert result.plan_path.exists()
+    assert result.objective_path == existing_objective
+    assert result.objective.release_id == "demo-agent-selected-governor"
+    assert result.release_id == "demo-agent-selected-governor"
+    assert result.release.decision == "accepted"
 
 
 def _write_yaml(path: Path, data: dict[str, object]) -> None:
