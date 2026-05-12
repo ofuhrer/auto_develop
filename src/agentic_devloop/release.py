@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from agentic_devloop.artifacts import cleanup_task_artifacts
+from agentic_devloop.budget import build_budget_ledger, build_tuning_report
 from agentic_devloop.config import load_project_config
 from agentic_devloop.git_finalize import (
     FinalizeResult,
@@ -41,6 +42,8 @@ class ReleaseRunResult:
     log_path: Path
     review_path: Path
     metrics_path: Path
+    budget_path: Path
+    tuning_path: Path
     task_results: list[TaskRunResult]
     decision: Decision
     integration_branch: str | None = None
@@ -167,7 +170,34 @@ def run_release(
             progress=progress,
         )
 
-    decision = _release_decision([result.decision for result in task_results])
+    task_decision = _release_decision([result.decision for result in task_results])
+    release_metrics = _build_release_metrics(
+        run_id=run_id,
+        release_id=release_id,
+        decision=task_decision,
+        task_results=task_results,
+        raw_log_path=raw_log_path,
+        runs_dir=runs_dir,
+    )
+    metrics_path = _write_release_metrics(
+        runs_dir=runs_dir,
+        run_id=run_id,
+        metrics=release_metrics,
+    )
+    budget_ledger = build_budget_ledger(release_metrics=release_metrics, budget=config.budget)
+    budget_path = _write_release_budget(runs_dir=runs_dir, run_id=run_id, ledger=budget_ledger)
+    tuning_path = _write_release_tuning(
+        runs_dir=runs_dir,
+        run_id=run_id,
+        tuning_report=build_tuning_report(ledger=budget_ledger),
+    )
+    budget_violations = _release_budget_violations(budget_ledger)
+    decision = _release_decision_with_budget(task_decision, budget_violations)
+    if decision != task_decision:
+        release_metrics["decision"] = decision
+        release_metrics["budget_violations"] = budget_violations
+        metrics_path = _write_release_metrics(runs_dir=runs_dir, run_id=run_id, metrics=release_metrics)
+        _report(progress, "event=release_budget_exceeded violations=" + json.dumps(budget_violations, sort_keys=True))
     finalization = _finalize_release(
         repo_path=config.repo_path,
         integration_branch=feature_branch,
@@ -186,14 +216,9 @@ def run_release(
         raw_log_path=raw_log_path,
         integration_branch=feature_branch,
         finalization=finalization,
-    )
-    metrics_path = _write_release_metrics(
-        runs_dir=runs_dir,
-        run_id=run_id,
-        release_id=release_id,
-        decision=decision,
-        task_results=task_results,
-        raw_log_path=raw_log_path,
+        budget_path=budget_path,
+        tuning_path=tuning_path,
+        budget_violations=budget_violations,
     )
     review_path = _write_release_review(
         runs_dir=runs_dir,
@@ -203,10 +228,16 @@ def run_release(
         task_results=task_results,
         integration_branch=feature_branch,
         finalization=finalization,
+        metrics_path=metrics_path,
+        budget_path=budget_path,
+        tuning_path=tuning_path,
+        budget_violations=budget_violations,
     )
     _report(progress, f"event=release_decision decision={decision}")
     _report(progress, f"event=release_review path={review_path}")
     _report(progress, f"event=release_metrics path={metrics_path}")
+    _report(progress, f"event=release_budget path={budget_path}")
+    _report(progress, f"event=release_tuning path={tuning_path}")
     _write_release_log_summary(
         log_path=log_path,
         raw_log_path=raw_log_path,
@@ -214,6 +245,8 @@ def run_release(
         decision=decision,
         task_results=task_results,
         metrics_path=metrics_path,
+        budget_path=budget_path,
+        tuning_path=tuning_path,
         review_path=review_path,
     )
 
@@ -224,6 +257,8 @@ def run_release(
         log_path=log_path,
         review_path=review_path,
         metrics_path=metrics_path,
+        budget_path=budget_path,
+        tuning_path=tuning_path,
         task_results=task_results,
         decision=decision,
         integration_branch=feature_branch,
@@ -550,6 +585,9 @@ def _write_release_summary(
     raw_log_path: Path,
     integration_branch: str,
     finalization: FinalizeResult | None,
+    budget_path: Path,
+    tuning_path: Path,
+    budget_violations: list[str],
 ) -> Path:
     summary_dir = runs_dir / run_id
     summary_dir.mkdir(parents=True, exist_ok=True)
@@ -560,6 +598,10 @@ def _write_release_summary(
         "decision": decision,
         "log_path": str(log_path),
         "raw_log_path": str(raw_log_path),
+        "metrics_path": str(summary_dir / "release_metrics.json"),
+        "budget_path": str(budget_path),
+        "tuning_path": str(tuning_path),
+        "budget_violations": budget_violations,
         "integration_branch": integration_branch,
         "finalization": {
             "merged": finalization.merged,
@@ -596,6 +638,10 @@ def _write_release_review(
     task_results: list[TaskRunResult],
     integration_branch: str,
     finalization: FinalizeResult | None,
+    metrics_path: Path,
+    budget_path: Path,
+    tuning_path: Path,
+    budget_violations: list[str],
 ) -> Path:
     review_path = runs_dir / run_id / "release_review.md"
     lines = [
@@ -604,10 +650,22 @@ def _write_release_review(
         f"- Decision: `{decision}`",
         f"- Integration branch: `{integration_branch}`",
         f"- Tasks completed: `{len(task_results)}`",
+        f"- Metrics: `{metrics_path}`",
+        f"- Budget: `{budget_path}`",
+        f"- Tuning: `{tuning_path}`",
+        "",
+        "## Budget",
+        "",
+    ]
+    if budget_violations:
+        lines.extend(f"- Violation: {violation}" for violation in budget_violations)
+    else:
+        lines.append("- No configured release-level budget limits were exceeded.")
+    lines.extend([
         "",
         "## Task Results",
         "",
-    ]
+    ])
     for result in task_results:
         finalize = result.finalize
         lines.extend(
@@ -655,16 +713,15 @@ def _write_release_review(
     return review_path
 
 
-def _write_release_metrics(
+def _build_release_metrics(
     *,
-    runs_dir: Path,
     run_id: str,
     release_id: str,
     decision: Decision,
     task_results: list[TaskRunResult],
     raw_log_path: Path,
-) -> Path:
-    metrics_path = runs_dir / run_id / "release_metrics.json"
+    runs_dir: Path,
+) -> dict[str, object]:
     task_metrics = [_task_metrics(result, raw_log_path) for result in task_results]
     model_attempts: dict[str, dict[str, object]] = {}
     for task in task_metrics:
@@ -716,6 +773,7 @@ def _write_release_metrics(
         "release_id": release_id,
         "decision": decision,
         "totals": totals,
+        "strong_model_calls": _strong_model_calls(runs_dir, release_id),
         "model_attempts": model_attempts,
         "tasks": task_metrics,
         "notes": [
@@ -723,8 +781,44 @@ def _write_release_metrics(
             "prompt_chars includes the full executor prompt, while context_chars tracks only context bundle content reported by orchestration.",
         ],
     }
+    return metrics
+
+
+def _write_release_metrics(
+    *,
+    runs_dir: Path,
+    run_id: str,
+    metrics: dict[str, object],
+) -> Path:
+    metrics_path = runs_dir / run_id / "release_metrics.json"
     metrics_path.write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
     return metrics_path
+
+
+def _write_release_budget(*, runs_dir: Path, run_id: str, ledger) -> Path:
+    budget_path = runs_dir / run_id / "release_budget.json"
+    budget_path.write_text(json.dumps(ledger.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8")
+    return budget_path
+
+
+def _write_release_tuning(*, runs_dir: Path, run_id: str, tuning_report) -> Path:
+    tuning_path = runs_dir / run_id / "release_tuning.md"
+    tuning_path.write_text(tuning_report.render_markdown(), encoding="utf-8")
+    return tuning_path
+
+
+def _release_budget_violations(ledger) -> list[str]:
+    return [
+        f"{entry.name} exceeded budget: actual {entry.actual} {entry.unit} over configured {entry.configured}"
+        for entry in ledger.usage
+        if entry.scope == "release" and entry.over_by is not None and entry.over_by > 0
+    ]
+
+
+def _release_decision_with_budget(decision: Decision, budget_violations: list[str]) -> Decision:
+    if budget_violations and decision == Decision.ACCEPTED:
+        return Decision.FAILED
+    return decision
 
 
 def _write_release_log_summary(
@@ -735,6 +829,8 @@ def _write_release_log_summary(
     decision: Decision,
     task_results: list[TaskRunResult],
     metrics_path: Path,
+    budget_path: Path,
+    tuning_path: Path,
     review_path: Path,
 ) -> None:
     task_lines = []
@@ -748,14 +844,16 @@ def _write_release_log_summary(
         )
     summary_lines = [
         "",
-        "=== Release Summary ===",
-        f"Release: {release_id}",
-        f"Decision: {decision}",
-        f"Tasks completed: {len(task_results)}",
+        _style("🧾 Release Summary", "bold"),
+        f"🚀 Release: {_style(release_id, 'cyan')}",
+        f"{_status_icon(str(decision))} Decision: {_style(str(decision), _decision_style(str(decision)))}",
+        f"📦 Tasks completed: {len(task_results)}",
         *task_lines,
-        f"Review: {review_path}",
-        f"Metrics: {metrics_path}",
-        "Good luck, future humans. 🧑‍🚀🛠️🍀",
+        f"🧑‍⚖️ Review: {_style(str(review_path), 'dim')}",
+        f"📊 Metrics: {_style(str(metrics_path), 'dim')}",
+        f"💰 Budget: {_style(str(budget_path), 'dim')}",
+        f"🛠️ Tuning: {_style(str(tuning_path), 'dim')}",
+        _style("Good luck, future humans. 🧑‍🚀🛠️🍀", "green"),
     ]
     timestamp = datetime.now(UTC).isoformat()
     payload = "".join(f"{timestamp} {line}\n" if line else "\n" for line in summary_lines)
@@ -812,6 +910,11 @@ def _read_json_list(path: Path) -> list[dict]:
         return []
     data = json.loads(path.read_text(encoding="utf-8"))
     return data if isinstance(data, list) else []
+
+
+def _strong_model_calls(runs_dir: Path, release_id: str) -> int:
+    ledger_path = runs_dir / release_id / "budget_ledger.json"
+    return sum(1 for entry in _read_json_list(ledger_path) if entry.get("kind") == "strong_model")
 
 
 def _read_lines(path: Path) -> list[str]:
@@ -954,102 +1057,161 @@ def _multiplexed_progress(
     raw_log_path: Path,
 ) -> Callable[[str], None]:
     lock = threading.Lock()
+    formatter = _HumanLogFormatter()
 
     def report(message: str) -> None:
         timestamp = datetime.now(UTC).isoformat()
         raw_line = f"{timestamp} {message}\n"
-        display_message = _display_progress_message(message)
+        display_messages = formatter.format(message)
         with lock:
             raw_log_path.parent.mkdir(parents=True, exist_ok=True)
             with raw_log_path.open("a", encoding="utf-8") as file:
                 file.write(raw_line)
-            if display_message is not None:
+            if display_messages:
                 with log_path.open("a", encoding="utf-8") as file:
-                    file.write(f"{timestamp} {display_message}\n")
-        if progress is not None and display_message is not None:
-            progress(display_message)
+                    for display_message in display_messages:
+                        file.write(f"{timestamp} {display_message}\n")
+        if progress is not None:
+            for display_message in display_messages:
+                progress(display_message)
 
     return report
 
 
-def _display_progress_message(message: str) -> str | None:
-    if message.startswith("event="):
-        return _display_event_message(message)
-    if not message.startswith("agent "):
-        return message
-    if " stream=stdout | " in message:
-        return _truncate_log_line(message)
-    if "ERROR:" in message or "usage limit" in message.lower():
-        return _truncate_log_line(message)
-    return None
+class _HumanLogFormatter:
+    def __init__(self) -> None:
+        self._active_worker_sections: dict[tuple[str, str], str] = {}
+
+    def format(self, message: str) -> list[str]:
+        if message.startswith("event="):
+            return [_display_event_message(message)]
+        if message.startswith("agent "):
+            return self._format_agent_message(message)
+        return [_style(f"ℹ️  {message}", "dim")]
+
+    def _format_agent_message(self, message: str) -> list[str]:
+        metadata, separator, content = message.partition(" | ")
+        if not separator:
+            return []
+        fields = _agent_fields(metadata)
+        if fields.get("stream") != "stdout":
+            return []
+        task = fields.get("task", "?")
+        attempt = fields.get("attempt", "?")
+        key = (task, attempt)
+        text = _clean_worker_line(content)
+        if not text:
+            return []
+
+        heading = _worker_heading(text)
+        if heading is not None:
+            self._active_worker_sections[key] = heading
+            return [_style(f"📝 {task} worker summary: {heading}", "cyan")]
+
+        section = self._active_worker_sections.get(key)
+        if section is not None:
+            if text.startswith(("-", "*")) or text.startswith("`") or "passed" in text.lower() or "failed" in text.lower():
+                return [f"   {_style(_shorten_worker_paths(text), 'dim')}"]
+            return [f"   {_shorten_worker_paths(text)}"]
+
+        if _looks_like_worker_summary(text):
+            return [_style(f"🤖 {task}: {_truncate_log_line(text, 180)}", "cyan")]
+        return []
 
 
 def _display_event_message(message: str) -> str:
     event = _event_fields(message)
     name = event.get("event", "event")
     if name == "release_started":
-        return f"Release {event.get('release')} started: {event.get('tasks')} task(s), mode={event.get('mode')}, run={event.get('run_id')}"
+        return _style(
+            f"🚀 Release {event.get('release')} started: {event.get('tasks')} task(s), mode={event.get('mode')}, run={event.get('run_id')}",
+            "bold",
+        )
     if name == "release_logs":
-        return f"Logs: {event.get('log')} (raw: {event.get('raw_log')})"
+        return f"📡 Watching: {_style(str(event.get('log')), 'cyan')}  {_style('(raw audit: ' + str(event.get('raw_log')) + ')', 'dim')}"
     if name == "integration_branch":
-        return f"Integration branch ready: {event.get('branch')} from {event.get('base')}"
+        return f"🌿 Integration branch ready: {_style(str(event.get('branch')), 'cyan')} from {event.get('base')}"
     if name == "execution_dag":
-        return f"Execution DAG: {event.get('dependencies')}"
+        return f"🕸️ Execution DAG: {_style(_compact_value(str(event.get('dependencies'))), 'dim')}"
+    if name == "overlap_findings":
+        return f"🧩 Contract overlap findings: {event.get('count')}  {_style('scheduler will serialize risky overlap', 'dim')}"
     if name == "task_started":
-        return f"Task {event.get('index')}/{event.get('total')} {event.get('task')}: {event.get('title')} [{event.get('type')}, budget {event.get('budget')}]"
+        return _style(
+            f"🧭 Task {event.get('index')}/{event.get('total')} {event.get('task')}: {event.get('title')} [{event.get('type')}, budget {event.get('budget')}]",
+            "bold",
+        )
     if name == "task_submitted":
-        return f"Task submitted {event.get('task')}: {event.get('title')} [{event.get('type')}, budget {event.get('budget')}]"
+        return f"🧭 Task submitted {event.get('task')}: {event.get('title')} [{event.get('type')}, budget {event.get('budget')}]"
     if name == "task_objective":
-        return f"Task {event.get('task')} objective: {event.get('objective')}"
+        return f"🎯 {event.get('task')} objective: {_truncate_log_line(str(event.get('objective')), 260)}"
     if name == "task_scope":
-        return f"Task {event.get('task')} scope: {event.get('allowed')}"
+        return f"🗂️ {event.get('task')} scope: {_compact_value(str(event.get('allowed')))}"
     if name == "task_run_created":
-        return f"Task {event.get('task')} run created: {event.get('run_id')}"
+        return f"🧪 {event.get('task')} run: {_style(str(event.get('run_id')), 'dim')}"
     if name == "worktree_created":
-        return f"Task {event.get('task')} worktree: {event.get('path')}"
+        return f"🌱 {event.get('task')} worktree created: {_style(_short_path(str(event.get('path'))), 'dim')}"
     if name == "prompt_build_started":
-        return f"Task {event.get('task')} building executor prompt"
+        return f"🧵 {event.get('task')} building executor prompt"
     if name == "context_loaded":
-        return f"Task {event.get('task')} context loaded: {event.get('sections')} section(s), {event.get('chars')} chars"
+        return f"📚 {event.get('task')} context loaded: {event.get('sections')} section(s), {event.get('chars')} chars"
     if name == "executor_attempt_started":
-        return f"Task {event.get('task')} executor attempt {event.get('attempt')}/{event.get('total')}: {event.get('backend')} model={event.get('model')}"
+        return f"🤖 {event.get('task')} worker started: attempt {event.get('attempt')}/{event.get('total')} on {_style(str(event.get('model')), 'cyan')}"
+    if name == "executor_heartbeat":
+        elapsed = _format_duration(int(event.get("elapsed_seconds", "0")))
+        return _style(
+            f"🤖 {event.get('task')} still working after {elapsed} on {event.get('model')}. Inspect raw log before poking the goblin.",
+            "yellow",
+        )
     if name == "executor_attempt_finished":
-        return f"Task {event.get('task')} executor attempt {event.get('attempt')} finished: exit={event.get('exit_code')}"
+        style = "green" if event.get("exit_code") == "0" else "yellow"
+        return _style(f"{_status_icon(str(event.get('exit_code')))} {event.get('task')} worker attempt {event.get('attempt')} finished: exit={event.get('exit_code')}", style)
     if name == "executor_finished":
-        return f"Task {event.get('task')} executor finished: exit={event.get('exit_code')}"
+        style = "green" if event.get("exit_code") == "0" else "red"
+        return _style(f"{_status_icon(str(event.get('exit_code')))} {event.get('task')} worker finished: exit={event.get('exit_code')}", style)
     if name == "verification_started":
-        return f"Task {event.get('task')} verification started: {event.get('commands')} command(s)"
+        return f"🔎 {event.get('task')} verification started: {event.get('commands')} command(s)"
     if name == "verification_finished":
-        return f"Task {event.get('task')} verification finished: exit_codes={event.get('exit_codes')}"
+        style = "green" if str(event.get("exit_codes", "")).replace(",", "").strip("0") == "" else "red"
+        return _style(f"{_status_icon(str(event.get('exit_codes')))} {event.get('task')} verification finished: exit_codes={event.get('exit_codes')}", style)
     if name == "evidence_collection_started":
-        return f"Task {event.get('task')} collecting evidence"
+        return f"🧾 {event.get('task')} collecting evidence"
     if name == "review_decision":
-        return f"Task {event.get('task')} review: {event.get('decision')} - {event.get('rationale')}"
+        decision = str(event.get("decision"))
+        line = f"{_status_icon(decision)} {event.get('task')} review: {decision} - {event.get('rationale')}"
+        if decision != "accepted":
+            line += _style("  ⚠️ Human should inspect evidence before continuing.", "yellow")
+        return _style(line, _decision_style(decision))
     if name == "task_finalization_started":
-        return f"Task {event.get('task')} finalizing accepted changes"
+        return f"📦 {event.get('task')} finalizing accepted changes"
     if name == "task_committed":
-        return f"Task {event.get('task')} committed: {event.get('commit')}"
+        return _style(f"✅ {event.get('task')} committed: {str(event.get('commit'))[:12]}", "green")
     if name == "task_merged":
-        return f"Task {event.get('task')} merged into {event.get('target')}"
+        return _style(f"🔀 {event.get('task')} merged into {event.get('target')}", "green")
     if name == "task_pushed":
-        return f"Task {event.get('task')} pushed: {event.get('branch')}"
+        return _style(f"📤 {event.get('task')} pushed: {event.get('branch')}", "green")
     if name == "task_completed":
-        return f"Task {event.get('task')} completed: {event.get('decision')}"
+        return _style(f"✅ {event.get('task')} completed: {event.get('decision')}", _decision_style(str(event.get("decision"))))
     if name == "failure_diagnosis":
-        return f"Task {event.get('task')} failure diagnosis: {event.get('category')}"
+        return _style(f"🩺 {event.get('task')} failure diagnosis: {event.get('category')}", "yellow")
     if name == "conflict_repair_started":
-        return f"Task {event.get('task')} conflict repair started: {event.get('files')} file(s)"
+        return _style(f"🧯 {event.get('task')} conflict repair started: {event.get('files')} file(s)", "yellow")
     if name == "release_decision":
-        return f"Release decision: {event.get('decision')}"
+        return _style(f"{_status_icon(str(event.get('decision')))} Release decision: {event.get('decision')}", _decision_style(str(event.get("decision"))))
     if name == "release_review":
-        return f"Release review: {event.get('path')}"
+        return f"🧑‍⚖️ Release review: {_style(str(event.get('path')), 'dim')}"
     if name == "release_metrics":
-        return f"Release metrics: {event.get('path')}"
+        return f"📊 Release metrics: {_style(str(event.get('path')), 'dim')}"
+    if name == "release_budget":
+        return f"💰 Release budget: {_style(str(event.get('path')), 'dim')}"
+    if name == "release_tuning":
+        return f"🛠️ Release tuning: {_style(str(event.get('path')), 'dim')}"
+    if name == "release_budget_exceeded":
+        return _style(f"⚠️ Release budget exceeded: {_compact_value(str(event.get('violations')))}. Stop and inspect budget/tuning artifacts.", "yellow")
     if name == "release_pushed":
-        return f"Release pushed: {event.get('branch')}"
+        return _style(f"📤 Release pushed: {event.get('branch')}", "green")
     if name == "release_merged":
-        return f"Release merged into {event.get('target')}"
-    return message
+        return _style(f"🔀 Release merged into {event.get('target')}", "green")
+    return _style(f"ℹ️  {message}", "dim")
 
 
 def _event_fields(message: str) -> dict[str, str]:
@@ -1064,6 +1226,118 @@ def _event_fields(message: str) -> dict[str, str]:
         key, value = part.split("=", 1)
         fields[key] = value
     return fields
+
+
+def _agent_fields(metadata: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for part in metadata.split():
+        if "=" in part:
+            key, value = part.split("=", 1)
+            fields[key] = value
+    return fields
+
+
+ANSI_STYLES = {
+    "bold": "\033[1m",
+    "cyan": "\033[36m",
+    "dim": "\033[2m",
+    "green": "\033[32m",
+    "red": "\033[31m",
+    "yellow": "\033[33m",
+}
+ANSI_RESET = "\033[0m"
+
+
+def _style(text: str, style: str) -> str:
+    prefix = ANSI_STYLES.get(style)
+    if prefix is None:
+        return text
+    return f"{prefix}{text}{ANSI_RESET}"
+
+
+def _decision_style(value: str) -> str:
+    if value in {"accepted", "0", "None"}:
+        return "green"
+    if value in {"failed", "escalated"}:
+        return "red"
+    return "yellow"
+
+
+def _status_icon(value: str) -> str:
+    normalized = value.lower()
+    if normalized in {"accepted", "0"} or set(normalized.replace(",", "")) <= {"0"}:
+        return "✅"
+    if normalized in {"failed", "escalated"}:
+        return "🛑"
+    if normalized in {"needs_revision", "needs-revision"}:
+        return "⚠️"
+    return "⚠️"
+
+
+def _short_path(value: str) -> str:
+    marker = "/auto_develop/"
+    if marker in value:
+        return "…/auto_develop/" + value.split(marker, 1)[1]
+    return value
+
+
+def _shorten_worker_paths(value: str) -> str:
+    value = value.replace("](/Users/fuhrer/Desktop/auto_develop/worktrees/", "](…/worktrees/")
+    value = value.replace("/Users/fuhrer/Desktop/auto_develop/worktrees/", "…/worktrees/")
+    value = value.replace("/Users/fuhrer/Desktop/auto_develop/main/", "…/main/")
+    return value
+
+
+def _compact_value(value: str, limit: int = 220) -> str:
+    compact = value.replace("\\n", " ").replace("[", "").replace("]", "").replace('"', "")
+    compact = " ".join(compact.split())
+    return _truncate_log_line(compact, limit)
+
+
+def _format_duration(seconds: int) -> str:
+    minutes, remainder = divmod(max(0, seconds), 60)
+    if minutes:
+        return f"{minutes}m {remainder}s"
+    return f"{remainder}s"
+
+
+USEFUL_WORKER_HEADINGS = {
+    "changed files": "Files changed",
+    "files changed": "Files changed",
+    "what changed": "What changed",
+    "result": "Result",
+    "verification": "Verification",
+    "verification commands run": "Verification",
+    "verification result": "Verification result",
+    "risks": "Risks",
+    "risks / follow-up": "Risks / follow-up",
+    "follow-up": "Follow-up",
+    "notes": "Notes",
+    "documentation review summary": "Documentation review summary",
+}
+
+
+def _worker_heading(line: str) -> str | None:
+    normalized = line.strip().strip("*").strip(":").lower()
+    return USEFUL_WORKER_HEADINGS.get(normalized)
+
+
+def _looks_like_worker_summary(line: str) -> bool:
+    lowered = line.lower()
+    return lowered.startswith(("implemented ", "updated ", "added ", "fixed ", "created "))
+
+
+def _clean_worker_line(line: str) -> str:
+    text = line.strip()
+    if not text:
+        return ""
+    if text.startswith("```"):
+        return ""
+    if text.startswith(("exec ", "codex ", "apply patch", "/bin/")):
+        return ""
+    if " WARN codex_" in text or "codex_core_plugins" in text or "codex_core_skills" in text:
+        return ""
+    return text
 
 
 def _truncate_log_line(message: str, limit: int = 500) -> str:

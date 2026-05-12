@@ -392,3 +392,79 @@ class ReleaseOverlapReport(StrictModel):
     @property
     def has_parallel_blockers(self) -> bool:
         return any(finding.severity in {"broad", "blocking"} for finding in self.findings)
+
+
+class BudgetUsageEntry(StrictModel):
+    name: str = Field(min_length=1)
+    scope: str = Field(min_length=1)
+    unit: str = Field(min_length=1)
+    configured: int | float | None = None
+    actual: int | float = Field(ge=0)
+    utilization: float | None = Field(default=None, ge=0)
+    remaining: int | float | None = None
+    over_by: int | float | None = None
+
+
+class BudgetTaskSummary(StrictModel):
+    task_id: str = Field(min_length=1)
+    bundle_path: Path | None = None
+    decision: str = Field(min_length=1)
+    changed_files: int = Field(ge=0)
+    diff_lines: int = Field(ge=0)
+    context_chars: int = Field(ge=0)
+    prompt_chars: int = Field(ge=0)
+    output_chars: int = Field(ge=0)
+    verification_command_count: int = Field(ge=0)
+    verification_duration_seconds: float = Field(ge=0)
+    executor_attempts: int = Field(ge=0)
+
+
+class ModelAttemptSummary(StrictModel):
+    model: str = Field(min_length=1)
+    attempts: int = Field(ge=0)
+    successful_attempts: int = Field(ge=0)
+    failed_attempts: int = Field(ge=0)
+    duration_seconds: float = Field(ge=0)
+    prompt_chars: int = Field(ge=0)
+    stdout_chars: int = Field(ge=0)
+    stderr_chars: int = Field(ge=0)
+
+
+class BudgetFinding(StrictModel):
+    kind: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    metric: str | None = None
+    actual: int | float | None = None
+    configured_limit: int | float | None = None
+    share_of_limit: float | None = Field(default=None, ge=0)
+    primary_model: str | None = None
+    fallback_model: str | None = None
+    verification_command_count: int | None = Field(default=None, ge=0)
+    verification_duration_seconds: float | None = Field(default=None, ge=0)
+
+
+class BudgetLedger(StrictModel):
+    release_id: str = Field(min_length=1)
+    budget: Budget
+    usage: list[BudgetUsageEntry] = Field(default_factory=list)
+    task_summaries: list[BudgetTaskSummary] = Field(default_factory=list)
+    model_attempts: list[ModelAttemptSummary] = Field(default_factory=list)
+    task_size_outliers: list[BudgetFinding] = Field(default_factory=list)
+    verification_bottlenecks: list[BudgetFinding] = Field(default_factory=list)
+    waste_signals: list[BudgetFinding] = Field(default_factory=list)
+
+
+class BudgetTuningReport(StrictModel):
+    release_id: str = Field(min_length=1)
+    headline: str = Field(min_length=1)
+    signals: list[str] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+
+    def render_markdown(self) -> str:
+        lines = [f"# {self.headline}", "", f"Release: `{self.release_id}`", ""]
+        if self.signals:
+            lines.extend(["## Signals", *[f"- {signal}" for signal in self.signals], ""])
+        if self.recommendations:
+            lines.extend(["## Guidance", *[f"- {item}" for item in self.recommendations], ""])
+        return "\n".join(lines).rstrip() + "\n"

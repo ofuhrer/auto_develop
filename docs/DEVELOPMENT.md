@@ -96,7 +96,7 @@ agent-loop run-release \
   --release-finalize push-feature
 ```
 
-Review `runs/<release-run-id>/release.log`, `release.raw.log`, `release_summary.json`, `release_metrics.json`, and `release_review.md`.
+Review `runs/<release-run-id>/release.log`, `release.raw.log`, `release_summary.json`, `release_metrics.json`, `release_budget.json`, `release_tuning.md`, and `release_review.md`. Treat `release.log` as the human cockpit and `release.raw.log` as the complete audit stream.
 
 ## Documentation Rules
 

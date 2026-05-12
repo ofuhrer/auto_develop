@@ -192,9 +192,9 @@ def test_run_release_executes_ordered_contracts_and_writes_summary(tmp_path) -> 
     assert [task.decision.task_id for task in result.task_results] == ["demo-0001", "demo-0002"]
     assert result.log_path.exists()
     log = result.log_path.read_text(encoding="utf-8")
-    assert "Logs:" in log
-    assert "Task 1/2 demo-0001:" in log
-    assert "=== Release Summary ===" in log
+    assert "📡 Watching:" in log
+    assert "🧭 Task 1/2 demo-0001:" in log
+    assert "🧾 Release Summary" in log
     summary = result.summary_path.read_text(encoding="utf-8")
     assert '"release_id": "v0.1.0"' in summary
     assert '"log_path":' in summary
@@ -272,13 +272,23 @@ def test_multiplexed_progress_filters_noisy_agent_lines_and_keeps_raw_log(tmp_pa
     progress("agent task=x phase=executor attempt=1 stream=stderr | 2026 WARN plugin noise")
     progress("agent task=x phase=executor attempt=1 stream=stderr | ERROR: quota")
     progress("agent task=x phase=executor attempt=1 stream=stdout | Changed files:")
+    progress("agent task=x phase=executor attempt=1 stream=stdout | - /Users/fuhrer/Desktop/auto_develop/worktrees/run/src/file.py")
+    progress("agent task=x phase=executor attempt=1 stream=stdout | Result:")
+    progress("agent task=x phase=executor attempt=1 stream=stdout | - Implemented useful behavior")
+    progress("event=executor_heartbeat task=x phase=executor attempt=1 model=gpt-5.4-mini elapsed_seconds=120")
 
-    assert visible == [
-        "agent task=x phase=executor attempt=1 stream=stderr | ERROR: quota",
-        "agent task=x phase=executor attempt=1 stream=stdout | Changed files:",
-    ]
-    assert "plugin noise" not in (tmp_path / "release.log").read_text(encoding="utf-8")
-    assert "plugin noise" in (tmp_path / "raw.log").read_text(encoding="utf-8")
+    log = (tmp_path / "release.log").read_text(encoding="utf-8")
+    raw = (tmp_path / "raw.log").read_text(encoding="utf-8")
+
+    assert not any("ERROR: quota" in line for line in visible)
+    assert "plugin noise" not in log
+    assert "ERROR: quota" not in log
+    assert "📝 x worker summary: Files changed" in log
+    assert "…/worktrees/run/src/file.py" in log
+    assert "📝 x worker summary: Result" in log
+    assert "still working after 2m 0s" in log
+    assert "plugin noise" in raw
+    assert "ERROR: quota" in raw
 
 
 def test_release_preflight_rejects_existing_project_worktrees(tmp_path) -> None:
@@ -345,16 +355,93 @@ def test_run_release_writes_metrics_and_final_log_summary(tmp_path) -> None:
     )
 
     metrics = json.loads(result.metrics_path.read_text(encoding="utf-8"))
+    budget = json.loads(result.budget_path.read_text(encoding="utf-8"))
+    tuning = result.tuning_path.read_text(encoding="utf-8")
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    review = result.review_path.read_text(encoding="utf-8")
     log = result.log_path.read_text(encoding="utf-8")
 
     assert metrics["release_id"] == "v0.1.0"
+    assert metrics["strong_model_calls"] == 0
     assert metrics["totals"]["tasks"] == 1
     assert metrics["totals"]["accepted_tasks"] == 1
     assert metrics["totals"]["executor_attempts"] == 1
     assert metrics["tasks"][0]["context_chars"] >= 0
-    assert "=== Release Summary ===" in log
-    assert "Release: v0.1.0" in log
+    assert budget["release_id"] == "v0.1.0"
+    assert any(entry["name"] == "strong_model_calls_per_release" for entry in budget["usage"])
+    assert "Budget tuning guidance for v0.1.0" in tuning
+    assert summary["metrics_path"] == str(result.metrics_path)
+    assert summary["budget_path"] == str(result.budget_path)
+    assert summary["tuning_path"] == str(result.tuning_path)
+    assert str(result.budget_path) in review
+    assert str(result.tuning_path) in review
+    assert "🧾 Release Summary" in log
+    assert "Release:" in log
+    assert "v0.1.0" in log
+    assert str(result.budget_path) in log
+    assert str(result.tuning_path) in log
     assert "Good luck, future humans. 🧑‍🚀🛠️🍀" in log
+
+
+def test_run_release_fails_when_release_budget_is_exceeded(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, max_strong_model_calls_per_release=1)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+    runs_dir = tmp_path / "runs"
+    ledger_path = runs_dir / "v0.1.0" / "budget_ledger.json"
+    ledger_path.parent.mkdir(parents=True)
+    ledger_path.write_text(
+        json.dumps(
+            [
+                {
+                    "release_id": "v0.1.0",
+                    "kind": "strong_model",
+                    "model": "gpt-5.3-codex-spark",
+                    "reason": "planner",
+                    "created_at": "2026-05-12T00:00:00+00:00",
+                },
+                {
+                    "release_id": "v0.1.0",
+                    "kind": "strong_model",
+                    "model": "gpt-5.3-codex-spark",
+                    "reason": "planner-review",
+                    "created_at": "2026-05-12T00:01:00+00:00",
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=runs_dir,
+        executor=FakeExecutor(),
+        merge_on_accept=True,
+        release_finalize="merge-main",
+    )
+
+    metrics = json.loads(result.metrics_path.read_text(encoding="utf-8"))
+    budget = json.loads(result.budget_path.read_text(encoding="utf-8"))
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    review = result.review_path.read_text(encoding="utf-8")
+
+    assert result.decision == Decision.FAILED
+    assert result.finalization is None
+    assert not _git_object_exists(repo, "main:docs/demo-0001.md")
+    assert metrics["decision"] == Decision.FAILED
+    assert metrics["strong_model_calls"] == 2
+    usage = {entry["name"]: entry for entry in budget["usage"]}
+    assert usage["strong_model_calls_per_release"]["over_by"] == 1
+    assert "strong_model_calls_per_release exceeded budget" in summary["budget_violations"][0]
+    assert "Violation: strong_model_calls_per_release exceeded budget" in review
 
 
 def test_release_preflight_ignores_metadata_files(tmp_path) -> None:
@@ -634,7 +721,12 @@ def _repo_with_initial_commit(repo: Path) -> Path:
     return repo
 
 
-def _write_demo_config(tmp_path: Path, repo: Path) -> Path:
+def _write_demo_config(
+    tmp_path: Path,
+    repo: Path,
+    *,
+    max_strong_model_calls_per_release: int = 10,
+) -> Path:
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
     _write_yaml(
@@ -652,7 +744,7 @@ def _write_demo_config(tmp_path: Path, repo: Path) -> Path:
             "verification_profiles": {"default": {"commands": ["test -d docs"]}},
             "budget": {
                 "max_executor_attempts_per_task": 2,
-                "max_strong_model_calls_per_release": 10,
+                "max_strong_model_calls_per_release": max_strong_model_calls_per_release,
                 "max_changed_files_per_task": 8,
                 "max_diff_lines_per_task": 600,
             },

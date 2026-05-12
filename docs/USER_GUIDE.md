@@ -141,6 +141,7 @@ budget:
   max_strong_model_calls_per_release: 10
   max_changed_files_per_task: 8
   max_diff_lines_per_task: 600
+  max_context_chars_per_task: 30000
 ```
 
 Validate the config:
@@ -162,7 +163,19 @@ Important config fields:
 - `verification_profiles`: named command sets task contracts can reference.
 - `budget`: deterministic limits used during planning and review.
 
-## Step 4: Write An Objective
+## Step 4: Run Doctor
+
+Before planning or launching a governed release, run the preflight diagnostics:
+
+```bash
+agent-loop doctor \
+  --project my_project \
+  --release my-feature-1
+```
+
+`doctor` reports repo cleanliness, stale worktrees, existing integration or task branches for the release, and model-routing warnings. If it flags unsupported routing or a size pressure pattern, update `configs/<project>.yaml` before the next run.
+
+## Step 5: Write An Objective
 
 An objective describes a release-sized goal. Store it under `objectives/`.
 
@@ -186,7 +199,7 @@ acceptance_criteria:
 
 Use objectives for planning. Use contracts for execution.
 
-## Step 5: Create Or Generate Task Contracts
+## Step 6: Create Or Generate Task Contracts
 
 A task contract is the unit of worker execution. It must be narrow enough that an agent can complete it autonomously.
 
@@ -247,7 +260,7 @@ depends_on:
   - my-feature-0001
 ```
 
-## Step 6: Plan A Release
+## Step 7: Plan A Release
 
 Use deterministic planning to inspect objective coverage and planning artifacts without executing workers:
 
@@ -278,7 +291,7 @@ Review generated contracts before execution. Check that:
 - The generated queue does not exceed project budgets.
 - The feature branch remains a coherent review unit.
 
-## Step 7: Run One Task
+## Step 8: Run One Task
 
 Use `run-task` for a single bounded task:
 
@@ -325,7 +338,7 @@ agent-loop run-task \
 
 For normal feature work, prefer `run-release` over repeated direct `run-task` calls because release orchestration gives you one coherent feature branch.
 
-## Step 8: Run A Release
+## Step 9: Run A Release
 
 Run a release from explicit contracts:
 
@@ -359,6 +372,10 @@ agent-loop run-release \
 
 `run-release` defaults to the integration branch `feature/<release>`. Accepted task branches are merged into that feature branch when `--merge-on-accept` or `--push-on-accept` is set.
 
+After the run, inspect `release_metrics.json`, `release_budget.json`, and `release_tuning.md` alongside the release log. The budget ledger records usage, task-size outliers, verification bottlenecks, and waste signals; the tuning report translates those signals into guidance for the next run.
+
+If the report shows routing pressure, reduce task size or adjust `model_routing` and `budget.max_changed_files_per_task`, `budget.max_diff_lines_per_task`, or `budget.max_context_chars_per_task` before launching the next release.
+
 Common release modes:
 
 ```bash
@@ -387,7 +404,7 @@ agent-loop run-release \
 
 Use `push-feature` when you want a feature branch ready for PR review. Use `merge-main` or `push-main` only when automatic integration into `main` is appropriate for the project.
 
-## Step 9: Monitor A Running Release
+## Step 10: Monitor A Running Release
 
 At startup, `run-release` prints the release log path:
 
@@ -401,7 +418,7 @@ Monitor it in another terminal:
 tail -f runs/<release-run-id>/release.log
 ```
 
-The filtered log is intended for live monitoring. It reports release-level events, the current task objective and scope, executor attempts and models, verification, review decisions, finalization, and a final release summary. Full raw worker stdout and stderr are retained in:
+The filtered log is a human cockpit for live monitoring. It uses color and emojis for quick scanning, reports the current task objective and scope, shows selected models and executor attempts, emits periodic "still working" heartbeats for long-running workers, summarizes useful worker-reported sections, and highlights when a human should inspect, steer, or interrupt. Full raw worker stdout and stderr are retained in:
 
 ```text
 runs/<release-run-id>/release.raw.log
@@ -411,14 +428,16 @@ Release outputs normally include:
 
 - `release_summary.json`;
 - `release_metrics.json`;
+- `release_budget.json`;
+- `release_tuning.md`;
 - `release_review.md`;
 - per-task evidence bundles;
-- filtered `release.log`;
-- raw `release.raw.log`.
+- human-facing `release.log`;
+- raw audit `release.raw.log`.
 
 Use `release_metrics.json` for cost and routing analysis. It records per-task prompt size, context size, output size, executor attempts, model usage, verification duration, changed-file count, and diff size. These are character-count proxies, not provider-billed token counts, but they are enough to compare task sizes, model routing, context budgets, and wasted fallback attempts.
 
-## Step 10: Inspect Evidence
+## Step 11: Inspect Evidence
 
 After a run, inspect recent summaries:
 
@@ -450,7 +469,7 @@ Do not treat an accepted decision as a substitute for human review on important 
 
 When a task fails, inspect `failure_diagnosis.yaml` first. It records the failure category, confidence, recommendation, and retry or escalation guidance derived from the same evidence bundle.
 
-## Step 11: Finalize Or Review The Feature Branch
+## Step 12: Finalize Or Review The Feature Branch
 
 If the release used `--merge-on-accept`, inspect the feature branch:
 
@@ -486,7 +505,7 @@ The finalization choices are:
 - `merge-main`: merge `feature/<release>` into the base branch locally.
 - `push-main`: merge `feature/<release>` into the base branch and push it.
 
-## Step 12: Clean Up Artifacts
+## Step 13: Clean Up Artifacts
 
 Normal release runs remove task worktrees and merged task branches unless `--debug-keep-artifacts` is set. Accepted unfinalized work, unmerged accepted branches, and failed-finalization branches are preserved so work remains recoverable.
 

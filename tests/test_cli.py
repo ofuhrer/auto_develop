@@ -39,6 +39,44 @@ def test_config_prints_project_config(capsys) -> None:
     assert '"project_id": "rust_rockfall"' in captured.out
 
 
+def test_doctor_command_is_registered(capsys) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["doctor", "--help"])
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 0
+    assert "--project" in captured.out
+    assert "--release" in captured.out
+
+
+def test_doctor_command_outputs_report(monkeypatch, capsys) -> None:
+    seen_kwargs: dict[str, object] = {}
+
+    class Report:
+        def to_dict(self) -> dict[str, object]:
+            return {
+                "project_id": "demo",
+                "diagnostics": [{"check": "git", "severity": "warning", "message": "example"}],
+            }
+
+    def fake_run_doctor(**kwargs):
+        seen_kwargs.update(kwargs)
+        return Report()
+
+    monkeypatch.setattr(cli_module, "run_doctor", fake_run_doctor)
+
+    exit_code = main(["doctor", "--project", "demo", "--release", "v1.0.0"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert seen_kwargs["project_id"] == "demo"
+    assert seen_kwargs["release_id"] == "v1.0.0"
+    assert '"project_id": "demo"' in captured.out
+    assert '"severity": "warning"' in captured.out
+
+
 def test_run_task_command_is_registered(capsys) -> None:
     with pytest.raises(SystemExit) as error:
         main(["run-task", "--help"])
@@ -61,6 +99,34 @@ def test_run_release_command_is_registered(capsys) -> None:
     assert "--continue-on-failure" in captured.out
     assert "--execution-mode" in captured.out
     assert "--debug-keep-artifacts" in captured.out
+
+
+def test_run_release_command_outputs_budget_artifact_paths(monkeypatch, capsys, tmp_path) -> None:
+    result = SimpleNamespace(
+        release_id="v1.0.0",
+        run_id="run-1",
+        summary_path=tmp_path / "runs" / "release_summary.json",
+        log_path=tmp_path / "runs" / "release.log",
+        review_path=tmp_path / "runs" / "release_review.md",
+        metrics_path=tmp_path / "runs" / "release_metrics.json",
+        budget_path=tmp_path / "runs" / "release_budget.json",
+        tuning_path=tmp_path / "runs" / "release_tuning.md",
+        integration_branch="feature/v1.0.0",
+        decision="accepted",
+        task_results=[],
+    )
+
+    monkeypatch.setattr(cli_module, "run_release", lambda **kwargs: result)
+
+    exit_code = main(["run-release", "--project", "demo", "--release", "v1.0.0"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert '"budget_path":' in captured.out
+    assert "release_budget.json" in captured.out
+    assert '"tuning_path":' in captured.out
+    assert "release_tuning.md" in captured.out
 
 
 def test_plan_release_command_is_registered(capsys) -> None:

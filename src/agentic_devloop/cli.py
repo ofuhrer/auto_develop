@@ -8,6 +8,7 @@ from pathlib import Path
 from agentic_devloop import __version__
 from agentic_devloop.cleanup import cleanup_release_artifacts
 from agentic_devloop.config import ProjectConfigError, load_project_config
+from agentic_devloop.doctor import run_doctor
 from agentic_devloop.objective import run_objective
 from agentic_devloop.orchestrator import run_task
 from agentic_devloop.planning import plan_release_contracts
@@ -40,6 +41,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--validate-repo",
         action="store_true",
         help="Fail if the configured repository path does not exist.",
+    )
+
+    doctor_parser = subparsers.add_parser("doctor", help="Inspect project preflight diagnostics.")
+    doctor_parser.add_argument("--project", required=True, help="Project identifier.")
+    _add_config_dir_argument(doctor_parser)
+    doctor_parser.add_argument(
+        "--release",
+        help="Release identifier to inspect stale release and task branches.",
     )
 
     run_task_parser = subparsers.add_parser("run-task", help="Run one bounded task contract.")
@@ -277,6 +286,19 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(config.model_dump(mode="json"), indent=2))
         return 0
 
+    if args.command == "doctor":
+        try:
+            result = run_doctor(
+                project_id=args.project,
+                config_dir=Path(args.config_dir),
+                release_id=args.release,
+            )
+        except Exception as error:
+            parser.exit(2, f"error: {error}\n")
+
+        print(json.dumps(result.to_dict(), indent=2))
+        return 0
+
     if args.command == "run-task":
         try:
             result = run_task(
@@ -451,6 +473,8 @@ def _release_run_result(result) -> dict[str, object]:
         "log_path": str(result.log_path),
         "review_path": str(result.review_path) if getattr(result, "review_path", None) else None,
         "metrics_path": str(result.metrics_path) if getattr(result, "metrics_path", None) else None,
+        "budget_path": str(result.budget_path) if getattr(result, "budget_path", None) else None,
+        "tuning_path": str(result.tuning_path) if getattr(result, "tuning_path", None) else None,
         "integration_branch": getattr(result, "integration_branch", None),
         "decision": result.decision,
         "tasks": [_task_run_result(task_result) for task_result in result.task_results],

@@ -40,10 +40,11 @@ Run tests:
 1. Configure a target repository in `configs/<project>.yaml`.
 2. Write or generate an objective in `objectives/<release>.yaml`.
 3. Write or generate bounded task contracts in `contracts/`.
-4. Run one contract with `agent-loop run-task`, or run a release queue with `agent-loop run-release`.
-5. Monitor `runs/<release-run-id>/release.log`.
-6. Review evidence under `runs/`, including `release_metrics.json` plus `failure_diagnosis.yaml` and `executor_attempts.json` for failed tasks.
-7. Push the feature branch or merge to `main` only when the project policy allows it.
+4. Run `agent-loop doctor` for preflight diagnostics, then run one contract with `agent-loop run-task` or a release queue with `agent-loop run-release`.
+5. Monitor `runs/<release-run-id>/release.log` while the release is running.
+6. Review evidence under `runs/`, including `release_metrics.json`, `release_budget.json`, `release_tuning.md`, `failure_diagnosis.yaml`, and `executor_attempts.json` for failed tasks.
+7. Use the budget ledger and tuning report to adjust `model_routing` or task size before the next run.
+8. Push the feature branch or merge to `main` only when the project policy allows it.
 
 Example:
 

@@ -28,6 +28,7 @@ Implemented capabilities include:
 - project config and task contract schema validation;
 - isolated Git worktree creation;
 - Codex CLI executor wrapper with bounded attempts and fallback models;
+- `doctor` preflight diagnostics for repo cleanliness, stale worktrees, release-branch collisions, and routing warnings;
 - deterministic verification command execution;
 - evidence bundle collection;
 - deterministic review and persisted decisions;
@@ -37,7 +38,7 @@ Implemented capabilities include:
 - `run-task`, `run-release`, `plan-release`, `run-objective`, `status`, and `cleanup` commands;
 - release-level feature branch integration through `feature/<release>`;
 - dynamic release DAG scheduling from `depends_on` and file-overlap analysis;
-- activity-oriented `release.log`, raw `release.raw.log`, and `release_metrics.json`;
+- human-cockpit `release.log`, raw audit `release.raw.log`, `release_metrics.json`, `release_budget.json`, and `release_tuning.md`;
 - default cleanup of merged task worktrees and branches;
 - dry-run-first manual cleanup;
 - one bounded conflict-repair attempt for contract-contained rebase conflicts.

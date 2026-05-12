@@ -360,10 +360,15 @@ def _executor_for_config(
     executor_config: ExecutorConfig,
     *,
     stream_callback: Callable[[str, str], None] | None = None,
+    heartbeat_callback: Callable[[float], None] | None = None,
 ) -> ExecutorProtocol:
     if executor_config.type != "codex_cli":
         raise ValueError(f"unsupported executor type: {executor_config.type}")
-    return CodexExecutor(executor_config, stream_callback=stream_callback)
+    return CodexExecutor(
+        executor_config,
+        stream_callback=stream_callback,
+        heartbeat_callback=heartbeat_callback,
+    )
 
 
 def _verification_commands(config: ProjectConfig, task: TaskContract) -> list[str]:
@@ -402,6 +407,12 @@ def _run_executor_attempts(
             stream_callback=_executor_stream_callback(
                 task_id=task_id,
                 attempt_number=attempt_number,
+                progress=progress,
+            ),
+            heartbeat_callback=_executor_heartbeat_callback(
+                task_id=task_id,
+                attempt_number=attempt_number,
+                model=executor_config.model,
                 progress=progress,
             ),
         )
@@ -526,6 +537,13 @@ def _attempt_conflict_repair(
             progress=progress,
             phase="conflict_repair",
         ),
+        heartbeat_callback=_executor_heartbeat_callback(
+            task_id=task.task_id,
+            attempt_number=1,
+            model=executor_configs[-1].model,
+            progress=progress,
+            phase="conflict_repair",
+        ),
     )
     repair_output_dir = scratch_dir / "conflict_repair"
     repair_result = repair_executor.run(
@@ -606,6 +624,27 @@ def _executor_stream_callback(
         _report(
             progress,
             f"agent task={task_id} phase={phase} attempt={attempt_number} stream={stream_name} | {line}",
+        )
+
+    return report
+
+
+def _executor_heartbeat_callback(
+    *,
+    task_id: str,
+    attempt_number: int,
+    model: str,
+    progress: Callable[[str], None] | None,
+    phase: str = "executor",
+) -> Callable[[float], None] | None:
+    if progress is None:
+        return None
+
+    def report(elapsed_seconds: float) -> None:
+        _report(
+            progress,
+            f"event=executor_heartbeat task={task_id} phase={phase} "
+            f"attempt={attempt_number} model={model} elapsed_seconds={int(elapsed_seconds)}",
         )
 
     return report
