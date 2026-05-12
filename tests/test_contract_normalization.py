@@ -5,11 +5,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from agentic_devloop.config import discover_safe_verification_runtime
+from agentic_devloop.contracts import normalize_contract_request, normalize_task_contract_payload
 from agentic_devloop.models import (
     ContractNormalizationDecision,
     ContractNormalizationOutcome,
     ContractNormalizationRefusalReason,
     ContractNormalizationRequest,
+    ProjectConfig,
     TaskContract,
 )
 
@@ -164,3 +167,132 @@ def test_contract_normalization_outcome_refusal_reasons_forbid_unknown_values() 
     assert dumped["artifact_paths"]["planner_prompt_path"] == "runs/demo/planner_prompt.md"
     assert dumped["before_snapshot"]["contract"]["allowed_files"] == ["src/demo.py"]
     assert isinstance(Path(dumped["artifact_paths"]["planner_prompt_path"]), Path)
+
+
+def test_normalize_contract_request_adds_missing_diff_and_changed_files_without_scope_change() -> None:
+    contract = _task_contract("demo-1001")
+    contract["required_evidence"] = ["test output log"]
+    request = ContractNormalizationRequest.model_validate(
+        {
+            "release_id": "demo-release",
+            "task_id": "demo-1001",
+            "rationale": "Repair missing evidence.",
+            "before_snapshot": {"contract": contract},
+        }
+    )
+
+    outcome = normalize_contract_request(request)
+
+    assert outcome.decision == ContractNormalizationDecision.NORMALIZED
+    assert outcome.after_snapshot is not None
+    assert outcome.after_snapshot.contract.allowed_files == request.before_snapshot.contract.allowed_files
+    assert outcome.after_snapshot.contract.required_evidence == [
+        "test output log",
+        "git diff",
+        "changed-files list",
+    ]
+    assert [item.path for item in outcome.changed_fields] == ["required_evidence"]
+
+
+def test_normalize_task_contract_payload_repairs_one_to_one_schema_key_and_shape_drift() -> None:
+    contract, changed_fields, refusal = normalize_task_contract_payload(
+        {
+            "task_id": "demo-1002",
+            "release_id": "demo-release",
+            "title": "Schema drift",
+            "budget_class": "S",
+            "objective": "Fix aliases.",
+            "allowedFiles": ["src/demo.py"],
+            "forbiddenChanges": ["Do not widen scope."],
+            "requiredEvidence": ["git diff"],
+            "verification": "pytest -q",
+            "stopConditions": ["Stop if scope widens."],
+        }
+    )
+
+    assert refusal == []
+    assert contract is not None
+    assert contract.allowed_files == ["src/demo.py"]
+    assert contract.required_evidence == ["git diff"]
+    assert contract.verification.commands == ["pytest -q"]
+    assert sorted(field.path for field in changed_fields) == [
+        "allowed_files",
+        "forbidden_changes",
+        "required_evidence",
+        "stop_conditions",
+        "verification",
+    ]
+
+
+def test_normalize_task_contract_payload_refuses_ambiguous_schema_repair() -> None:
+    contract, changed_fields, refusal = normalize_task_contract_payload(
+        {
+            "task_id": "demo-1003",
+            "release_id": "demo-release",
+            "title": "Ambiguous drift",
+            "budget_class": "S",
+            "objective": "Reject conflicting keys.",
+            "allowed_files": ["src/demo.py"],
+            "allowedFiles": ["src/other.py"],
+            "required_evidence": ["git diff"],
+            "verification": {"commands": ["pytest -q"]},
+            "stop_conditions": ["Stop if scope widens."],
+        }
+    )
+
+    assert contract is None
+    assert changed_fields == []
+    assert refusal == [ContractNormalizationRefusalReason.AMBIGUOUS_CONTRACT_SEMANTICS]
+
+
+def test_normalize_contract_request_rewrites_worktree_local_venv_only_with_safe_runtime() -> None:
+    contract = _task_contract("demo-1004")
+    contract["verification"] = {"commands": [".venv/bin/python -m pytest tests/test_contract_normalization.py"]}
+    request = ContractNormalizationRequest.model_validate(
+        {
+            "release_id": "demo-release",
+            "task_id": "demo-1004",
+            "rationale": "Repair runtime command.",
+            "before_snapshot": {"contract": contract},
+        }
+    )
+    config = ProjectConfig.model_validate(
+        {
+            "project_id": "demo",
+            "repo_path": ".",
+            "default_base_branch": "main",
+            "worktree_root": "worktrees",
+            "executor": {"type": "codex_cli", "model": "worker", "max_walltime_minutes": 5},
+            "verification_profiles": {
+                "default": {
+                    "commands": [
+                        "PYTHONPATH=src /shared/.venv/bin/python -m pytest tests/test_contract_normalization.py"
+                    ]
+                }
+            },
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        }
+    )
+
+    assert discover_safe_verification_runtime(config) == "/shared/.venv/bin/python"
+
+    with_runtime = normalize_contract_request(request, project_config=config)
+    without_runtime = normalize_contract_request(request, project_config=None)
+
+    assert with_runtime.after_snapshot is not None
+    assert with_runtime.after_snapshot.contract.verification.commands[0].startswith(
+        "/shared/.venv/bin/python -m pytest"
+    )
+    assert any(field.path == "verification.commands[0]" for field in with_runtime.changed_fields)
+
+    assert without_runtime.after_snapshot is not None
+    assert (
+        without_runtime.after_snapshot.contract.verification.commands[0]
+        == ".venv/bin/python -m pytest tests/test_contract_normalization.py"
+    )
+    assert all(field.path != "verification.commands[0]" for field in without_runtime.changed_fields)
