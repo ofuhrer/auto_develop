@@ -56,8 +56,6 @@ def ensure_branch_from_base(repo_path: Path, branch: str, base_branch: str) -> N
     _ensure_clean(repo_path)
     if _branch_exists(repo_path, branch):
         return
-    # Only verify that the base ref exists here; callers decide whether they also want to
-    # switch the checked-out branch before later merge or finalization steps.
     _require_branch(repo_path, base_branch, step="branch")
     _git(repo_path, ["branch", branch, base_branch])
 
