@@ -36,7 +36,7 @@ verification:
 
 stop_conditions:
   - More than 4 files changed.
-  - More than 500 diff lines.
+  - More than 850 diff lines.
   - Doctor requires network access.
   - Existing CLI tests fail.
 

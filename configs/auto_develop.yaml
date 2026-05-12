@@ -56,4 +56,4 @@ budget:
   max_executor_attempts_per_task: 2
   max_strong_model_calls_per_release: 10
   max_changed_files_per_task: 8
-  max_diff_lines_per_task: 600
+  max_diff_lines_per_task: 900

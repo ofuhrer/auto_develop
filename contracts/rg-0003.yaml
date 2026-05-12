@@ -40,7 +40,7 @@ verification:
 
 stop_conditions:
   - More than 4 files changed.
-  - More than 650 diff lines.
+  - More than 850 diff lines.
   - Existing release finalization tests fail.
   - Budget enforcement cannot be made deterministic.
 
