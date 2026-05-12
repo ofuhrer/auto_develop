@@ -59,6 +59,7 @@ def test_run_release_command_is_registered(capsys) -> None:
     assert "--release" in captured.out
     assert "--continue-on-failure" in captured.out
     assert "--execution-mode" in captured.out
+    assert "--debug-keep-artifacts" in captured.out
 
 
 def test_plan_release_command_is_registered(capsys) -> None:

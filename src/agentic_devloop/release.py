@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable
 
+from agentic_devloop.artifacts import cleanup_task_artifacts
 from agentic_devloop.config import load_project_config
 from fnmatch import fnmatch
 
@@ -26,6 +27,7 @@ class ReleaseRunResult:
     release_id: str
     run_id: str
     summary_path: Path
+    log_path: Path
     task_results: list[TaskRunResult]
     decision: Decision
 
@@ -51,6 +53,7 @@ def run_release(
     push_on_accept: bool = False,
     stop_on_failure: bool = True,
     execution_mode: str = "sequential",
+    debug_keep_artifacts: bool = False,
     now: datetime | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> ReleaseRunResult:
@@ -58,6 +61,10 @@ def run_release(
         raise ValueError(f"unsupported execution mode: {execution_mode}")
     config = load_project_config(project_id, config_dir, validate_repo=True)
     run_id = make_release_run_id(release_id, now)
+    release_root = runs_dir / run_id
+    release_root.mkdir(parents=True, exist_ok=True)
+    log_path = release_root / "release.log"
+    progress = _multiplexed_progress(progress, log_path)
     selected_contracts = _select_contracts(
         release_id=release_id,
         config_repo_path=config.repo_path,
@@ -80,6 +87,7 @@ def run_release(
         raise ValueError(f"release contracts are unsafe for {execution_mode} execution: {details}")
 
     _report(progress, f"release_run_id={run_id}")
+    _report(progress, f"release_log={log_path}")
     _report(progress, f"release={release_id} tasks={len(selected_contracts)} mode={execution_mode}")
     if overlap_report.findings:
         _report(progress, f"overlap_findings={len(overlap_report.findings)} sequential_only=true")
@@ -107,6 +115,17 @@ def run_release(
             progress=progress,
         )
         task_results.append(result)
+        if debug_keep_artifacts:
+            _report(progress, f"debug_keep_artifacts=true worktree={result.worktree_path}")
+        else:
+            for message in cleanup_task_artifacts(
+                repo_path=config.repo_path,
+                worktree_path=result.worktree_path,
+                branch=f"agent/{task.release_id}/{task.task_id}",
+                preserve_worktree=_should_preserve_task_worktree(result),
+                preserve_branch=_should_preserve_task_branch(result),
+            ):
+                _report(progress, message)
         if stop_on_failure and result.decision.decision != Decision.ACCEPTED:
             _report(progress, f"stopping release after {task.task_id}: {result.decision.decision}")
             break
@@ -118,6 +137,7 @@ def run_release(
         release_id=release_id,
         decision=decision,
         task_results=task_results,
+        log_path=log_path,
     )
     _report(progress, f"release_decision={decision}")
 
@@ -125,6 +145,7 @@ def run_release(
         release_id=release_id,
         run_id=run_id,
         summary_path=summary_path,
+        log_path=log_path,
         task_results=task_results,
         decision=decision,
     )
@@ -178,6 +199,7 @@ def _write_release_summary(
     release_id: str,
     decision: Decision,
     task_results: list[TaskRunResult],
+    log_path: Path,
 ) -> Path:
     summary_dir = runs_dir / run_id
     summary_dir.mkdir(parents=True, exist_ok=True)
@@ -186,6 +208,7 @@ def _write_release_summary(
         "run_id": run_id,
         "release_id": release_id,
         "decision": decision,
+        "log_path": str(log_path),
         "tasks": [
             {
                 "task_id": result.decision.task_id,
@@ -272,3 +295,32 @@ def _is_broad_pattern(pattern: str) -> bool:
 def _report(progress: Callable[[str], None] | None, message: str) -> None:
     if progress is not None:
         progress(message)
+
+
+def _should_preserve_task_branch(result: TaskRunResult) -> bool:
+    if result.finalize is None:
+        return result.decision.decision == Decision.ACCEPTED
+    if result.finalize.error is not None:
+        return True
+    return bool(result.finalize.commit_hash and not result.finalize.merged)
+
+
+def _should_preserve_task_worktree(result: TaskRunResult) -> bool:
+    if result.finalize is None:
+        return result.decision.decision == Decision.ACCEPTED
+    return result.finalize.error is not None
+
+
+def _multiplexed_progress(
+    progress: Callable[[str], None] | None,
+    log_path: Path,
+) -> Callable[[str], None]:
+    def report(message: str) -> None:
+        timestamp = datetime.now(UTC).isoformat()
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as file:
+            file.write(f"{timestamp} {message}\n")
+        if progress is not None:
+            progress(message)
+
+    return report

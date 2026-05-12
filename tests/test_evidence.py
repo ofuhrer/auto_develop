@@ -4,8 +4,8 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agentic_devloop.evidence import EvidenceCollector, write_review_decision
-from agentic_devloop.models import ExecutorResult, TaskContract, TaskRun, TaskState
+from agentic_devloop.evidence import EvidenceCollector, write_conflict_repair_result, write_review_decision
+from agentic_devloop.models import ConflictRepairResult, ExecutorResult, TaskContract, TaskRun, TaskState
 from agentic_devloop.review import deterministic_review
 from agentic_devloop.yaml_io import load_yaml_model
 
@@ -94,6 +94,14 @@ def test_evidence_collector_writes_complete_bundle(tmp_path) -> None:
     assert updated_bundle.decision_path.exists()
     assert updated_bundle.review_path is not None
     assert updated_bundle.review_path.exists()
+
+    repair_bundle = write_conflict_repair_result(
+        updated_bundle,
+        ConflictRepairResult(attempted=True, conflicted_files=["README.md"], resolved=False),
+    )
+
+    assert repair_bundle.conflict_repair_path is not None
+    assert repair_bundle.conflict_repair_path.exists()
 
 
 def task_budget():

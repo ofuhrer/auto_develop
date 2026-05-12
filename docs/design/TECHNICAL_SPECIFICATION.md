@@ -302,7 +302,9 @@ Finalization conflicts are captured in evidence. Contract-contained rebase confl
 3. Classify `allowed_files` overlap.
 4. Run each contract through the existing `run-task` state machine.
 5. Stop after the first non-accepted task unless `--continue-on-failure` is set.
-6. Persist `runs/<release-run-id>/release_summary.json`.
+6. Mirror progress to `runs/<release-run-id>/release.log`.
+7. Remove task worktrees and merged task branches unless `--debug-keep-artifacts` is set; preserve accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches.
+8. Persist `runs/<release-run-id>/release_summary.json`.
 
 This command executes already-defined contracts. It does not yet use a strong model to generate contracts from a release objective.
 

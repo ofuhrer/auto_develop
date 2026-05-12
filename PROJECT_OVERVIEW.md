@@ -83,6 +83,8 @@ Implemented:
 - Bounded executor retries using `budget.max_executor_attempts_per_task`.
 - Deterministic executor-failure diagnosis evidence.
 - Release-level summary files for multi-task runs.
+- Multiplexed release logs at `runs/<release-run-id>/release.log`.
+- Default cleanup of finalized task worktrees and merged task branches after release tasks.
 - Conservative deterministic release planning via `agent-loop plan-release`.
 - Strong-planning budget reservation and planner-prompt artifacts.
 - Merge finalization lock plus task-worktree rebase onto latest base branch before merging.

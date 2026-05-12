@@ -159,7 +159,7 @@ def write_finalization_result(bundle: EvidenceBundle, result: FinalizeResult) ->
 def write_conflict_repair_result(bundle: EvidenceBundle, result: ConflictRepairResult) -> EvidenceBundle:
     conflict_repair_path = bundle.bundle_path / "conflict_repair.yaml"
     conflict_repair_path.write_text(_yaml(result.model_dump(mode="json")), encoding="utf-8")
-    return bundle
+    return bundle.model_copy(update={"conflict_repair_path": conflict_repair_path})
 
 
 def write_failure_diagnosis(bundle: EvidenceBundle, diagnosis: dict) -> EvidenceBundle:

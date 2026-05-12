@@ -151,6 +151,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="sequential",
         help="Execution scheduling mode. Parallel mode rejects broad overlaps.",
     )
+    run_release_parser.add_argument(
+        "--debug-keep-artifacts",
+        action="store_true",
+        help="Keep task worktrees and branches after each task for debugging.",
+    )
 
     plan_release_parser = subparsers.add_parser(
         "plan-release",
@@ -276,6 +281,7 @@ def main(argv: list[str] | None = None) -> int:
                 push_on_accept=args.push_on_accept,
                 stop_on_failure=not args.continue_on_failure,
                 execution_mode=args.execution_mode,
+                debug_keep_artifacts=args.debug_keep_artifacts,
                 progress=_print_progress,
             )
         except KeyboardInterrupt:
@@ -343,6 +349,7 @@ def _release_run_result(result) -> dict[str, object]:
         "release_id": result.release_id,
         "run_id": result.run_id,
         "summary_path": str(result.summary_path),
+        "log_path": str(result.log_path),
         "decision": result.decision,
         "tasks": [_task_run_result(task_result) for task_result in result.task_results],
     }

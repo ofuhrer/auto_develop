@@ -5,9 +5,16 @@ from pathlib import Path
 
 import yaml
 
+from agentic_devloop.git_finalize import FinalizeResult
 from agentic_devloop.models import ExecutorResult, ProjectConfig, TaskContract
-from agentic_devloop.orchestrator import executor_config_for_task, executor_configs_for_task
-from agentic_devloop.release import analyze_contract_overlaps, run_release
+from agentic_devloop.models import Decision, Reviewer, ReviewDecision
+from agentic_devloop.orchestrator import TaskRunResult, executor_config_for_task, executor_configs_for_task
+from agentic_devloop.release import (
+    _should_preserve_task_branch,
+    _should_preserve_task_worktree,
+    analyze_contract_overlaps,
+    run_release,
+)
 
 
 class FakeExecutor:
@@ -166,14 +173,175 @@ def test_run_release_executes_ordered_contracts_and_writes_summary(tmp_path) -> 
         contracts_dir=contracts_dir,
         runs_dir=tmp_path / "runs",
         executor=FakeExecutor(),
+        merge_on_accept=True,
     )
 
     assert result.decision == "accepted"
     assert [task.decision.task_id for task in result.task_results] == ["demo-0001", "demo-0002"]
+    assert result.log_path.exists()
+    assert "release_log=" in result.log_path.read_text(encoding="utf-8")
     summary = result.summary_path.read_text(encoding="utf-8")
     assert '"release_id": "v0.1.0"' in summary
+    assert '"log_path":' in summary
     assert '"task_id": "demo-0001"' in summary
     assert '"task_id": "demo-0002"' in summary
+    assert not result.task_results[0].worktree_path.exists()
+    assert not result.task_results[1].worktree_path.exists()
+    branches = subprocess.run(
+        ["git", "branch", "--list", "agent/v0.1.0/*"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert branches.strip() == ""
+
+
+def test_run_release_preserves_accepted_unfinalized_worktree(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FakeExecutor(),
+    )
+
+    task_result = result.task_results[0]
+    assert task_result.decision.decision == Decision.ACCEPTED
+    assert task_result.finalize is None
+    assert task_result.worktree_path.exists()
+    assert (task_result.worktree_path / "docs" / "demo-0001.md").exists()
+    log = result.log_path.read_text(encoding="utf-8")
+    assert f"preserved_worktree={task_result.worktree_path}" in log
+    assert "preserved_branch=agent/v0.1.0/demo-0001" in log
+
+
+def test_run_release_preserves_committed_unmerged_task_branch(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FakeExecutor(),
+        commit_on_accept=True,
+    )
+
+    finalize = result.task_results[0].finalize
+    assert finalize is not None
+    assert finalize.commit_hash is not None
+    assert finalize.merged is False
+    assert not result.task_results[0].worktree_path.exists()
+
+    branch = "agent/v0.1.0/demo-0001"
+    branch_commit = subprocess.run(
+        ["git", "rev-parse", branch],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert branch_commit == finalize.commit_hash
+    assert f"preserved_branch={branch}" in result.log_path.read_text(encoding="utf-8")
+
+
+def test_failed_finalization_preserves_task_branch() -> None:
+    result = TaskRunResult(
+        run_id="run-1",
+        worktree_path=Path("/tmp/worktree"),
+        bundle_path=Path("/tmp/bundle"),
+        decision=ReviewDecision(
+            task_id="demo-0001",
+            decision=Decision.ESCALATED,
+            reviewer=Reviewer.DETERMINISTIC,
+            rationale="finalization failed",
+        ),
+        finalize=FinalizeResult(failed_step="merge", error="conflict"),
+    )
+
+    assert _should_preserve_task_branch(result) is True
+    assert _should_preserve_task_worktree(result) is True
 
 
 def test_analyze_contract_overlaps_classifies_shared_scope_as_minor() -> None:

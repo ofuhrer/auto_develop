@@ -265,6 +265,7 @@ class EvidenceBundle(StrictModel):
     review_path: Path | None = None
     decision_path: Path | None = None
     finalization_path: Path | None = None
+    conflict_repair_path: Path | None = None
 
 
 class ConflictRepairResult(StrictModel):

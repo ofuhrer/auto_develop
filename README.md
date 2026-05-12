@@ -88,6 +88,14 @@ agent-loop run-release \
 
 Before running tasks, `run-release` classifies overlapping `allowed_files` patterns. Minor overlap is allowed in sequential mode, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected.
 
+`run-release` also writes a multiplexed progress log at `runs/<release-run-id>/release.log` and prints that path as `release_log=...` at startup. Monitor a live run with:
+
+```bash
+tail -f runs/<release-run-id>/release.log
+```
+
+Task worktrees and merged task branches are removed after each task by default. Accepted work that was not finalized, unmerged accepted branches, and failed-finalization branches are preserved to keep work reachable. Use `--debug-keep-artifacts` to preserve all task artifacts for inspection.
+
 Create a conservative release contract plan:
 
 ```bash
