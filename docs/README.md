@@ -57,6 +57,8 @@ Implemented capabilities include:
 Important remaining gaps:
 
 - multi-epic governor looping beyond the current one-epic service boundary;
+- top-level governor log stream for monitoring an N-epic run across backlog planning, contract generation, release execution, repair, and state refresh;
+- autonomous planner-output normalization before generated contract admission failures stop execution;
 - always-on state refresh across repeated epic cycles;
 - reduction of deterministic heuristic code once supervisor-backed decisions are available; candidate areas include backlog scoring, contract-normalization heuristics, failure classification, budget-tuning prose, exact-overlap rejection, hard rejection for small budget overages, brittle verification-command assumptions, and cockpit-summary filtering;
 - shared verification-runtime policy so isolated worktrees can run tests without per-worktree virtual environments;

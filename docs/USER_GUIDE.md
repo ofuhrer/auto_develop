@@ -831,6 +831,16 @@ Relationship to nearby commands:
 
 `run-backlog` is intentionally one epic per invocation. A multi-epic governor command is planned but not yet the documented user workflow.
 
+The planned multi-epic governor should expose one parent log stream:
+
+```text
+runs/<governor-run-id>/governor.log
+runs/<governor-run-id>/governor.raw.log
+runs/<governor-run-id>/events.jsonl
+```
+
+Operators should watch `governor.log`, not chase separate child release logs. It should summarize backlog planning, selected epic, contract generation, contract normalization, release progress, repair decisions, finalization, repo-state updates, and next-epic selection. Release-local `release.log` files remain linked child artifacts for deeper inspection.
+
 Run-backlog evidence records artifact paths when produced, including:
 - backlog plan (`backlog_plan.json`);
 - generated objective path (when run-backlog creates a new objective file);
@@ -839,6 +849,8 @@ Run-backlog evidence records artifact paths when produced, including:
 - release metrics (`release_metrics.json`);
 - release budget (`release_budget.json`);
 - release tuning (`release_tuning.md`).
+
+Planner contract generation can still fail deterministic admission today. In the target autonomous path, useful but invalid generated contracts should be normalized once before stopping: add missing required evidence such as `git diff`, normalize worktree-local `.venv` commands to configured shared-runtime commands, preserve scope and intent, then rerun deterministic contract validation.
 
 ### `agent-loop status`
 

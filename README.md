@@ -48,6 +48,8 @@ Run tests:
 
 For external target repositories, keep durable target development memory with the target, not with the `auto_develop` implementation checkout. A good default is `<target>/.auto_develop/repo_state`, `<target>/.auto_develop/objectives`, and `<target>/.auto_develop/contracts` for tracked state, with raw runs ignored or externally archived.
 
+Planned governor behavior includes one parent `governor.log` for watching a full N-epic run and one bounded contract-normalization pass when planner output is useful but fails deterministic admission for repairable issues such as missing required evidence or worktree-local verification commands.
+
 Example:
 
 ```bash

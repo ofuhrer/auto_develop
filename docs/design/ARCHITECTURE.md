@@ -51,6 +51,8 @@ Agents must not stop for routine implementation choices, formatting fixes, local
 
 The deterministic kernel must remain strict about invariants: no skipped verification, no silent policy expansion, no broad file-scope changes, no unapproved destructive operations, and no acceptance based only on worker claims. The runtime supervisor may repair contracts, environment setup, task splits, and retry plans, but repaired artifacts must pass deterministic admission and verification before execution continues.
 
+Planner output repair is part of the autonomous path. If a planner emits a useful but admission-invalid contract package, the system should not stop immediately. The supervisor should receive the planner output, validation errors, objective, config, schema, and repository policy, then apply bounded normalization that does not change task meaning: add required evidence such as `git diff` and changed-files lists, normalize worktree-local `.venv` verification commands to the configured shared runtime, repair schema spelling/shape drift, and preserve objective, allowed scope, forbidden changes, and stop conditions. The repaired package must then pass deterministic contract validation before execution continues. If normalization would broaden scope or change intent, the supervisor must stop with evidence.
+
 Autonomy should reduce code where the code is only approximating judgment. The
 kernel should expose facts and enforce invariants; the runtime supervisor should
 own reasoning-heavy choices such as whether planner output is repairable, how to
@@ -179,6 +181,16 @@ The `doctor` command is the preflight entry point for release governance. It che
 Merge finalization uses a local lock, rebases the task worktree onto the orchestrator-owned integration branch, then merges the accepted task branch into that feature branch. The feature branch, not `main`, is the release integration unit. Release finalization can then merge the feature branch into `main`, push the feature branch for PR review, or merge and push `main`. Contract-contained rebase conflicts get one bounded autonomous repair attempt followed by verification and one finalization retry. Remaining conflicts are surfaced as evidence.
 
 Release runs write a human-cockpit `release.log` for live monitoring and retain full raw agent streams in `release.raw.log`. The cockpit log is curated and styled for `tail -f`: it uses ANSI color plus emojis, reports task objectives, allowed scope, executor attempts and selected models, long-running worker heartbeats, verification, review decisions, finalization, intervention hints, and a final release summary. Arbitrary worker stderr, plugin warnings, code snippets, and test literals stay out of `release.log`; full worker stdout/stderr remains available in the raw log for audit and debugging. Long-running workers should be classified from multiple signals, not elapsed time alone: process liveness, stdout/stderr activity, file/diff activity, executor heartbeat age, wall-clock budget, and tool/model events when available. The runtime supervisor should distinguish active work, quiet-but-alive work, stalled work, hung processes, and environment-blocked execution before deciding to wait, inspect, restart, escalate, or stop. A release refuses to start when the configured project worktree root already contains worktrees or selected task branches already exist. Release cleanup removes task worktrees plus merged task branches by default. Accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches are preserved so accepted work remains reachable. Debug mode can retain all artifacts when post-mortem inspection is needed. Each release also writes `release_review.md`, `release_metrics.json`, `release_budget.json`, and `release_tuning.md`.
+
+The multi-epic governor needs a parent log above release logs:
+
+```text
+runs/<governor-run-id>/governor.log
+runs/<governor-run-id>/governor.raw.log
+runs/<governor-run-id>/events.jsonl
+```
+
+Operators should be able to `tail -f governor.log` while the system selects, plans, normalizes, executes, repairs, finalizes, records learnings, and moves to the next epic. Per-release logs remain child artifacts, but the governor log is the single human-facing cockpit for the whole N-epic run.
 
 `release_metrics.json` is the cost-analysis artifact. It records per-task prompt characters, context characters, output characters, executor attempt count, model attempt totals, verification time, changed-file counts, and diff size. These metrics are deliberately provider-agnostic character-count proxies until model usage metadata is available from the executor backend. `release_budget.json` captures the budget ledger, including usage, task summaries, model attempts, task-size outliers, verification bottlenecks, and waste signals. `release_tuning.md` turns that ledger into next-run guidance for routing and task sizing.
 

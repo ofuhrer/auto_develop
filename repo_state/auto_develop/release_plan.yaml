@@ -13,4 +13,6 @@ next_steps:
   - Keep deterministic gates authoritative for hard invariants; let the supervisor or reviewer agent decide soft findings such as modest budget overage, source-file overlap, model escalation, retry strategy, and environment repair with auditable rationale.
   - Add shared verification-runtime policy so isolated worktrees can run tests without requiring a per-worktree .venv.
   - Add executor liveness classification from process, output, heartbeat, and file/diff activity before declaring workers stuck.
+  - Add bounded planner-output normalization before generated-contract admission stops for repairable issues such as missing required evidence or worktree-local verification commands.
+  - Add a top-level governor log stream so one file can be watched while backlog planning, contract generation, release execution, repair, state refresh, and next-epic selection proceed.
   - Document the shipped runtime supervisor behavior while keeping the multi-epic governor loop planned.

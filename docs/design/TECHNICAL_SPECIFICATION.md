@@ -431,6 +431,31 @@ This command executes already-defined contracts. Objective-level planning and ex
 
 Generated contracts must match the release ID, require diff evidence, include a scope or verification stop condition, and must not request whole-repo file scope. When project config is available, generated contracts must reference existing verification profiles and keep profile/task-type choices consistent. Allowed-file counts, expected diff size, and task-size pressure are admission findings: severe violations remain hard stops, while modest overages should be surfaced for reviewer/supervisor judgment instead of being treated as automatic failure.
 
+In the autonomous governor path, admission-invalid planner output should flow through one bounded normalization attempt before stopping. The normalization input is:
+
+- raw planner output;
+- deterministic validation errors;
+- release objective;
+- project config and contract schema;
+- repository policy and verification-runtime policy.
+
+Allowed normalization:
+
+- add missing required evidence entries such as `git diff` and changed-files list;
+- normalize worktree-local `.venv` verification commands to the configured shared runtime;
+- repair schema shape or spelling drift when meaning is unchanged;
+- preserve task objective, scope, allowed files, forbidden changes, dependencies, and stop conditions.
+
+Forbidden normalization:
+
+- broaden allowed files;
+- change task intent;
+- weaken hard stop conditions;
+- remove required validation;
+- invent implementation scope absent from the planner output.
+
+After normalization, contracts must be revalidated by the same deterministic admission gate. Failure after the bounded normalization attempt is a real stop condition.
+
 ### `run-objective` Flow
 
 `agent-loop run-objective` composes planning and release execution:
@@ -439,6 +464,35 @@ Generated contracts must match the release ID, require diff evidence, include a 
 2. Write validated generated contracts to the configured contracts directory.
 3. Pass those exact written contract paths to `run-release`.
 4. Return both the planning artifact path and release summary.
+
+### Governor Log Flow
+
+`run-backlog` currently records an evidence manifest for one epic. The target multi-epic governor should create a parent run directory:
+
+```text
+runs/<governor-run-id>/
+  governor.log
+  governor.raw.log
+  events.jsonl
+  epics/<epic-id>/...
+```
+
+`governor.log` is the single human-facing stream for a complete "implement the next N epics" run. It should multiplex:
+
+- backlog state loading;
+- selected epic and rationale;
+- objective creation or reuse;
+- contract generation;
+- contract normalization attempts;
+- release start and release log path;
+- worker progress summaries and heartbeats;
+- supervisor repair decisions;
+- verification and finalization;
+- roadmap/repo-state updates;
+- next epic selection;
+- stop reason.
+
+`governor.raw.log` retains raw planner/supervisor/worker streams at the governor level, while release-local `release.raw.log` remains the detailed child audit stream. `events.jsonl` should contain structured events so future tools can render other cockpit views without scraping log prose.
 
 ### Generated Contract Review
 

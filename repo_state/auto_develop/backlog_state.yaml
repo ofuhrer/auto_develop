@@ -10,6 +10,9 @@ completed_epics:
   - runtime-supervisor-repair-loop
 blocked_epics: []
 candidate_epics:
+  - id: governor-log-and-contract-normalization
+    title: Add top-level governor log stream and autonomous contract normalization.
+    rationale: Dogfooding showed useful planner output still required manual repair for missing evidence and worktree-local verification commands, and operators need one log stream across multi-epic execution.
   - id: agent-governed-soft-gates
     title: Move soft review findings from deterministic rejection to supervisor/reviewer judgment.
     rationale: Dogfooding showed that exact overlap and small budget overages are often risk-management decisions, not hard safety violations.
@@ -53,3 +56,5 @@ notes:
   - Hard deterministic gates remain for forbidden paths, generated artifacts, missing required evidence, unsafe finalization, credentials/network policy, destructive operations, and unrepaired verification failures.
   - Soft findings need evidence-backed agent decisions: finding, severity, risk, decision, rationale, fallback plan, and validators rerun.
   - External target projects should keep durable `.auto_develop/repo_state`, objectives, contracts, and compact outcome history in the target repo or a dedicated control repo; raw runs remain local or archived evidence.
+  - Planner-generated contracts that are semantically useful but miss required evidence or use worktree-local .venv commands should become bounded normalization inputs, not manual repair points.
+  - Multi-epic execution needs one parent governor.log/governor.raw.log/events.jsonl stream that links child release logs and exposes selected epic, contract normalization, release execution, repair, finalization, state refresh, and next-epic selection.
