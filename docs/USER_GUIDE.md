@@ -25,7 +25,7 @@ The core objects are:
 - Objective: describes a larger feature or release-level goal.
 - Task contract: describes one bounded implementation task with allowed files, forbidden changes, required evidence, verification, and stop conditions.
 - Release run: executes a queue of task contracts and integrates accepted work into a feature branch.
-- Evidence bundle: stores prompts, executor output, verification output, review decisions, diffs, and finalization metadata.
+- Evidence bundle: stores redacted prompts, executor output, verification output, review decisions, diffs, and finalization metadata.
 
 The default Git model is:
 
@@ -205,7 +205,7 @@ Important config fields:
 - `model_catalog`: advisory model policy with capabilities, budget class, and support status.
 - `model_roles`: named model roles for workers, reviewers, planners, routers, and repair agents.
 - `model_routing`: routing rules from task type or budget class to model role.
-- `verification_profiles`: named command sets task contracts can reference.
+- `verification_profiles`: named command sets task contracts can reference. Strong-model generated contracts must use these named profiles instead of inline commands.
 - `budget`: deterministic limits used during planning and review.
 
 ### Model Policy
@@ -230,7 +230,7 @@ agent-loop doctor \
   --release my-feature-1
 ```
 
-`doctor` reports repo cleanliness, stale worktrees, existing integration or task branches for the release, and model-routing warnings. If it flags unsupported routing or a size pressure pattern, update `configs/<project>.yaml` before the next run.
+`doctor` reports repo cleanliness, stale worktrees, stale merge locks, existing integration or task branches for the release, interrupted runs, and model-routing warnings. If it flags unsupported routing or a size pressure pattern, update `configs/<project>.yaml` before the next run.
 
 ## Step 5: Write An Objective
 
@@ -297,7 +297,7 @@ stop_conditions:
   - Verification fails twice.
   - The task requires changing files outside allowed_files.
 
-scientific_assumptions:
+validation_assumptions:
   - Not applicable; developer tooling task.
 ```
 

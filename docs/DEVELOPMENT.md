@@ -25,6 +25,12 @@ Run the full test suite:
 .venv/bin/python -m pytest
 ```
 
+Run lint checks:
+
+```bash
+python -m ruff check .
+```
+
 Run focused tests:
 
 ```bash
@@ -96,7 +102,7 @@ agent-loop run-release \
   --release-finalize push-feature
 ```
 
-Review `runs/<release-run-id>/release.log`, `release.raw.log`, `release_summary.json`, `release_metrics.json`, `release_budget.json`, `release_tuning.md`, and `release_review.md`. Treat `release.log` as the human cockpit and `release.raw.log` as the complete audit stream.
+Review `runs/<release-run-id>/release.log`, `release.raw.log`, `release_state.json`, task `run_state.json`, `release_summary.json`, `release_metrics.json`, `release_budget.json`, `release_tuning.md`, and `release_review.md`. Treat `release.log` as the human cockpit and `release.raw.log` as the redacted audit stream.
 
 ## Documentation Rules
 
@@ -123,6 +129,7 @@ Documentation should distinguish implemented behavior from planned behavior. Do 
 For most code changes, run:
 
 ```bash
+python -m ruff check .
 git diff --check
 .venv/bin/python -m pytest
 ```

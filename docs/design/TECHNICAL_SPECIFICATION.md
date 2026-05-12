@@ -116,6 +116,7 @@ model_routing:
   default_role: worker
   task_type_roles:
     documentation: router
+    validation: reviewer
     scientific_validation: reviewer
     release_preparation: reviewer
   budget_class_roles:
@@ -169,7 +170,7 @@ A bounded unit of execution.
 task_id: rr-0001
 release_id: v0.8.0
 title: Add regression test for selected validation gate report mismatch
-task_type: scientific_validation
+task_type: validation
 budget_class: M
 
 objective: >
@@ -193,7 +194,7 @@ required_evidence:
   - verifier summary
 
 verification:
-  profile: scientific_validation
+  profile: validation
 
 stop_conditions:
   - More than 8 files changed.
@@ -201,7 +202,7 @@ stop_conditions:
   - Verification fails twice.
   - Agent proposes changing forbidden files.
 
-scientific_assumptions:
+validation_assumptions:
   - No domain behavior changes are expected.
 fixture_changes_allowed: false
 tolerance_changes_allowed: false
@@ -247,6 +248,7 @@ runs/
       changed_files.txt
       verification.log
       scientific_review.yaml
+      validation_review.yaml
       benchmark_delta.json
       remote_dispatch.yaml
       review.md

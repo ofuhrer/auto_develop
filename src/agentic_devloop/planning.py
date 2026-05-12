@@ -193,7 +193,7 @@ def _draft_release_preparation_contract(
         "task_type": "release_preparation",
         "budget_class": "L",
         "objective": "Create bounded implementation contracts for the approved release objective.",
-        "allowed_files": ["contracts/**", f"repo_state/**/release_plan.yaml"],
+        "allowed_files": ["contracts/**", "repo_state/**/release_plan.yaml"],
         "forbidden_changes": ["Do not modify source code while planning contracts."],
         "required_evidence": ["git diff", "contract diff", "release plan diff"],
         "verification": {"profile": verification_profile},

@@ -107,6 +107,44 @@ def test_missing_required_field_fails_clearly() -> None:
     assert errors[0]["type"] == "missing"
 
 
+def test_task_contract_rejects_unsafe_identifiers() -> None:
+    with pytest.raises(ValidationError, match="path separators"):
+        TaskContract.model_validate(
+            {
+                "task_id": "../oops",
+                "release_id": "v1.0.0",
+                "title": "Unsafe task",
+                "budget_class": "S",
+                "objective": "Nope.",
+                "allowed_files": ["docs/**"],
+                "required_evidence": ["git diff"],
+                "verification": {"profile": "default"},
+                "stop_conditions": ["Verification fails."],
+            }
+        )
+
+
+def test_task_contract_aliases_validation_assumptions() -> None:
+    task = TaskContract.model_validate(
+        {
+            "task_id": "demo-0001",
+            "release_id": "v1.0.0",
+            "title": "Validation task",
+            "task_type": "validation",
+            "budget_class": "S",
+            "objective": "Validate docs.",
+            "allowed_files": ["docs/**"],
+            "required_evidence": ["git diff"],
+            "verification": {"profile": "default"},
+            "stop_conditions": ["Verification fails."],
+            "validation_assumptions": ["No behavior changes."],
+        }
+    )
+
+    assert task.validation_assumptions == ["No behavior changes."]
+    assert task.scientific_assumptions == ["No behavior changes."]
+
+
 def test_runtime_state_models_validate() -> None:
     now = datetime.now(timezone.utc)
 

@@ -229,6 +229,39 @@ def test_validate_generated_contracts_rejects_task_id_mismatch() -> None:
         validate_generated_contracts(plan)
 
 
+def test_validate_generated_contracts_rejects_inline_verification_commands() -> None:
+    plan = ContractPlan(
+        release_id="v0.5.0",
+        planner="strong-model",
+        generated_contracts=[
+            GeneratedContract(
+                task_id="v0.5.0-0001",
+                title="Draft API changes",
+                objective="Implement bounded API support.",
+                rationale="Covers one acceptance criterion.",
+                suggested_contract=TaskContract.model_validate(
+                    {
+                        "task_id": "v0.5.0-0001",
+                        "release_id": "v0.5.0",
+                        "title": "Draft API changes",
+                        "task_type": "code_only",
+                        "budget_class": "M",
+                        "objective": "Implement bounded API support.",
+                        "allowed_files": ["src/agentic_devloop/planning.py"],
+                        "forbidden_changes": ["Do not touch release contracts."],
+                        "required_evidence": ["plan diff"],
+                        "verification": {"commands": ["true"]},
+                        "stop_conditions": ["Scope expands beyond the allowed file."],
+                    }
+                ),
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match="approved verification profile"):
+        validate_generated_contracts(plan)
+
+
 def test_validate_generated_contracts_rejects_release_mismatch() -> None:
     plan = _contract_plan_with_allowed_files(
         release_id="v0.5.0",

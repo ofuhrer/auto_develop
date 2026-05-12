@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -123,6 +125,66 @@ def test_run_doctor_reports_repo_git_worktree_release_and_model_risks(tmp_path) 
     assert any("primary model gpt-5.3-codex, which model_catalog marks unsupported" in message for message in messages)
     assert any("primary model gpt-5.3-codex-spark, which model_catalog marks unknown" in message for message in messages)
     assert not any("role worker has no confirmed supported fallback" in message for message in messages)
+
+
+def test_run_doctor_reports_stale_lock_and_interrupted_runs(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# demo\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+    (repo / ".git" / "agent-main.lock").write_text(
+        "pid=999999\ncreated_at=2026-05-12T12:00:00+00:00\n",
+        encoding="utf-8",
+    )
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex",
+                "max_walltime_minutes": 5,
+            },
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 1,
+                "max_strong_model_calls_per_release": 1,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    runs_dir = tmp_path / "runs" / "run-1"
+    runs_dir.mkdir(parents=True)
+    (runs_dir / "release_state.json").write_text(
+        json.dumps(
+            {"release_id": "v1.0.0", "run_id": "run-1", "state": "INTERRUPTED"}
+        ),
+        encoding="utf-8",
+    )
+
+    cwd = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        payload = run_doctor(project_id="demo", config_dir=config_dir, release_id="v1.0.0").to_dict()
+    finally:
+        os.chdir(cwd)
+
+    assert payload["merge_lock"]["stale"] is True
+    assert payload["interrupted_runs"][0]["run_id"] == "run-1"
+    messages = [diagnostic["message"] for diagnostic in payload["diagnostics"]]
+    assert any("stale merge lock detected" in message for message in messages)
+    assert any("interrupted runs are still present" in message for message in messages)
 
 
 def _write_yaml(path: Path, data: dict[str, object]) -> None:

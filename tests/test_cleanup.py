@@ -108,3 +108,29 @@ def test_cleanup_release_artifacts_force_removes_stale_artifacts(tmp_path) -> No
     assert ignored_worktree.exists()
     assert "agent/v1.0.0/demo-0001" not in branches
     assert "feature/v1.0.0" not in branches
+
+
+def test_cleanup_release_artifacts_reports_and_recovers_stale_merge_lock(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    worktree_root = tmp_path / "worktrees"
+    config_dir = tmp_path / "configs"
+    _create_repo(repo)
+    _write_config(config_dir, repo, worktree_root)
+    lock_path = repo / ".git" / "agent-main.lock"
+    lock_path.write_text("pid=999999\ncreated_at=2026-05-12T12:00:00+00:00\n", encoding="utf-8")
+
+    dry_run = cleanup_release_artifacts(
+        project_id="demo",
+        release_id="v1.0.0",
+        config_dir=config_dir,
+    )
+    forced = cleanup_release_artifacts(
+        project_id="demo",
+        release_id="v1.0.0",
+        config_dir=config_dir,
+        force=True,
+    )
+
+    assert dry_run.stale_lock_paths == [lock_path]
+    assert forced.removed_lock_paths == [lock_path]
+    assert not lock_path.exists()

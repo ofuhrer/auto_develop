@@ -147,20 +147,19 @@ The system can support a release-sized objective by decomposing it into bounded 
 
 Current implementation status:
 
-- Task contracts support task types for code, documentation, benchmark, validation, and release preparation work. One current enum value still uses legacy domain-specific naming and should be generalized compatibly.
-- Verification may reference a named project verification profile instead of repeating commands in each contract.
-- Validation and benchmark tasks require explicit assumptions through the existing `scientific_assumptions` field. The field name is now legacy/domain-specific wording and should be generalized in a compatibility-preserving schema cleanup.
-- Deterministic review detects unapproved fixture-like and tolerance-like changes. This is useful beyond scientific code and should be documented as generic validation-hardening behavior.
-- Evidence bundles persist `scientific_review.yaml`. The artifact name is legacy/domain-specific wording and should be generalized in a compatibility-preserving cleanup.
+- Task contracts support task types for code, documentation, benchmark, validation, and release preparation work. The legacy `scientific_validation` value is still accepted as a compatibility alias.
+- Verification may reference a named project verification profile instead of repeating commands in each contract, and strong-model generated contracts are required to use approved profiles.
+- Validation and benchmark tasks require explicit assumptions through `validation_assumptions`; the legacy `scientific_assumptions` field is still accepted as an alias.
+- Deterministic review detects unapproved fixture-like and tolerance-like changes. This is useful beyond scientific code and now uses generic validation-review wording in decisions.
+- Evidence bundles persist both `scientific_review.yaml` and `validation_review.yaml` for compatibility.
 - Benchmark tasks or benchmark-like file changes persist `benchmark_delta.json`.
 - Strong-model planning, release queues, feature-branch integration, task branch cleanup, release review, metrics, budget, and tuning artifacts are implemented.
 - PR automation is not implemented.
 
 Remaining Phase 3 work is now small:
 
-1. Rename or alias domain-specific public terms such as `scientific_validation`, `scientific_assumptions`, and `scientific_review.yaml` to generic validation terminology while preserving backward compatibility.
-2. Make repository instruction ingestion more explicit so target repos can declare when benchmarks, domain validation, remote commands, or PR policies are required.
-3. Add optional PR creation or PR-preparation automation for the final feature branch.
+1. Make repository instruction ingestion more explicit so target repos can declare when benchmarks, domain validation, remote commands, or PR policies are required.
+2. Add optional PR creation or PR-preparation automation for the final feature branch.
 
 ## Critical Path
 
