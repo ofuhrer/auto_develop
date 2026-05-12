@@ -38,6 +38,12 @@ class BacklogRunResult:
     objective: ReleaseObjective
     release_id: str
     release: ReleaseRunResult
+    generated_objective_path: Path | None = None
+    contract_plan_path: Path | None = None
+    release_summary_path: Path | None = None
+    release_metrics_path: Path | None = None
+    release_budget_path: Path | None = None
+    release_tuning_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -284,7 +290,7 @@ def run_backlog(
     )
     plan = plan_result.plan
     epic = _select_epic(plan, selected_epic_id=selected_epic_id)
-    objective, objective_path = _ensure_objective_for_epic(epic, objectives_dir)
+    objective, objective_path, created_objective = _ensure_objective_for_epic(epic, objectives_dir)
 
     objective_planning_mode = "strong-model"
     planner_backend_for_objective = objective_planner_backend
@@ -319,9 +325,15 @@ def run_backlog(
         plan_path=plan_result.plan_path,
         plan=plan,
         objective_path=objective_path,
+        generated_objective_path=objective_path if created_objective else None,
         objective=objective,
+        contract_plan_path=objective_run.planning.plan_path,
         release_id=objective_run.release_id,
         release=objective_run.release,
+        release_summary_path=objective_run.release.summary_path,
+        release_metrics_path=objective_run.release.metrics_path,
+        release_budget_path=objective_run.release.budget_path,
+        release_tuning_path=objective_run.release.tuning_path,
     )
 
 
@@ -335,7 +347,9 @@ def _select_epic(plan: BacklogPlan, *, selected_epic_id: str | None) -> BacklogE
     return epic
 
 
-def _ensure_objective_for_epic(epic: BacklogEpic, objectives_dir: Path) -> tuple[ReleaseObjective, Path]:
+def _ensure_objective_for_epic(
+    epic: BacklogEpic, objectives_dir: Path
+) -> tuple[ReleaseObjective, Path, bool]:
     objectives_dir.mkdir(parents=True, exist_ok=True)
     objective_path = objectives_dir / f"{epic.suggested_release_id}.yaml"
     if objective_path.exists():
@@ -344,7 +358,7 @@ def _ensure_objective_for_epic(epic: BacklogEpic, objectives_dir: Path) -> tuple
             raise ValueError(
                 f"objective release_id {objective.release_id!r} did not match expected {epic.suggested_release_id!r}"
             )
-        return objective, objective_path
+        return objective, objective_path, False
 
     objective = ReleaseObjective(
         release_id=epic.suggested_release_id,
@@ -356,7 +370,7 @@ def _ensure_objective_for_epic(epic: BacklogEpic, objectives_dir: Path) -> tuple
         acceptance_criteria=epic.acceptance_criteria,
     )
     written = write_yaml_model(objective_path, objective)
-    return objective, written
+    return objective, written, True
 
 
 def parse_backlog_planner_output(

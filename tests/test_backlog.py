@@ -356,9 +356,20 @@ def test_run_backlog_selects_one_epic_reuses_objective_and_runs_release(tmp_path
     assert result.selected_epic_id == "epic-0001"
     assert result.plan_path.exists()
     assert result.objective_path == existing_objective
+    assert result.generated_objective_path is None
     assert result.objective.release_id == "demo-agent-selected-governor"
+    assert result.contract_plan_path is not None
+    assert result.contract_plan_path.exists()
     assert result.release_id == "demo-agent-selected-governor"
     assert result.release.decision == "accepted"
+    assert result.release_summary_path == result.release.summary_path
+    assert result.release_metrics_path == result.release.metrics_path
+    assert result.release_budget_path == result.release.budget_path
+    assert result.release_tuning_path == result.release.tuning_path
+    assert result.release_summary_path is not None and result.release_summary_path.exists()
+    assert result.release_metrics_path is not None and result.release_metrics_path.exists()
+    assert result.release_budget_path is not None and result.release_budget_path.exists()
+    assert result.release_tuning_path is not None and result.release_tuning_path.exists()
 
 
 def _write_yaml(path: Path, data: dict[str, object]) -> None:

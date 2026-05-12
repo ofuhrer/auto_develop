@@ -783,6 +783,15 @@ Key options:
 - `--execute-planner`: required; executes planner backend instead of prompt-only output.
 - All relevant `run-release` execution and finalization options.
 
+Run-backlog evidence records artifact paths when produced, including:
+- backlog plan (`backlog_plan.json`);
+- generated objective path (when run-backlog creates a new objective file);
+- contract plan (`contract_plan.json`);
+- release summary (`release_summary.json`);
+- release metrics (`release_metrics.json`);
+- release budget (`release_budget.json`);
+- release tuning (`release_tuning.md`).
+
 ### `agent-loop status`
 
 Shows recent run summaries.
