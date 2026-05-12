@@ -202,7 +202,7 @@ stop_conditions:
   - Agent proposes changing forbidden files.
 
 scientific_assumptions:
-  - No scientific behavior changes are expected.
+  - No domain behavior changes are expected.
 fixture_changes_allowed: false
 tolerance_changes_allowed: false
 benchmark_delta_required: false
@@ -455,16 +455,16 @@ Before retrying or escalating a failed task, inspect:
 
 Use `guidance.retryable` and `guidance.escalate` as the primary control points for deciding whether to rerun the task, narrow scope, or hand the failure to stronger review.
 
-### Scientific Evidence
+### Domain Validation Evidence
 
-For benchmark and scientific validation tasks, deterministic review records:
+For benchmark and domain-validation tasks, deterministic review records:
 
 - Fixture-like file changes.
 - Tolerance-like diff lines.
 - Benchmark-like file changes.
 - Policy violations caused by missing explicit permissions.
 
-`remote_dispatch.yaml` records declared remote dispatch requirements. v1 records the request but does not execute remote jobs.
+`remote_dispatch.yaml` records declared remote dispatch requirements when the target repository's own documentation or task contract requires remote execution. v1 records the request but does not execute remote jobs.
 
 ## Project Adapter Interface
 
@@ -554,12 +554,6 @@ v1 target:
 
 - Local Mac with Apple Silicon as primary orchestrator host.
 
-Optional dispatch:
-
-- CSCS Balfrin for heavy simulation or calibration tasks.
-
-Balfrin is an execution target, not the primary control plane.
-
 ### Worktree Strategy
 
 Each task gets:
@@ -604,20 +598,6 @@ Optional project-specific checks:
 - Schema checks.
 - Fixture consistency checks.
 
-## Balfrin Integration
-
-Balfrin dispatch is optional in v1 and should only be used for tasks that require heavy simulation or calibration.
-
-Risks:
-
-- Preemption.
-- Queue latency.
-- Different filesystem semantics.
-- Non-reproducible runtime environment.
-- More complex evidence collection.
-
-Balfrin integration must be explicit in the task contract.
-
 ## Known Unknowns and Technical Risks
 
 ### Existing Orchestrator Reuse
@@ -634,12 +614,12 @@ Mitigation: track approximate call count, wall time, model identity, prompt size
 
 ### Prompt Compression
 
-Aggressive compression may remove scientific details.
+Aggressive compression may remove domain-specific validation details.
 
 Mitigation: never compress equations, validation rules, numerical tolerances, or benchmark definitions without review.
 
-### Scientific Review
+### Domain Review
 
-Strong models can still approve scientifically invalid changes.
+Strong models can still approve invalid domain changes.
 
 Mitigation: require deterministic evidence, explicit assumptions, and human approval for risky changes.

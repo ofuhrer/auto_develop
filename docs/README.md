@@ -19,7 +19,7 @@ The project prioritizes:
 3. Deterministic verification before trust.
 4. Auditable evidence for every accepted change.
 5. Safe Git integration through isolated worktrees and feature branches.
-6. Scientific conservatism for validation, benchmarks, fixtures, and tolerances.
+6. Domain conservatism for validation, benchmarks, fixtures, and tolerances.
 
 ## Current Implementation
 
@@ -48,7 +48,7 @@ Important remaining gaps:
 - stronger model-based repeated-failure diagnosis backend;
 - richer semantic merge-conflict repair;
 - automated pull-request creation;
-- remote execution adapters, including Balfrin/SLURM artifact collection;
+- repository-instruction-driven remote execution evidence, if a target project requires it;
 - stronger runtime adapters for local/open model roles.
 
 ## Documentation Ownership

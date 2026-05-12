@@ -6,11 +6,11 @@ Build an external control layer around existing coding agents. The orchestrator 
 
 ## Target Use Case
 
-Initial target repositories include scientific software projects such as `rust_rockfall`:
+Initial target repositories include validation-heavy software projects such as `rust_rockfall`:
 
 - Rust project using Cargo.
 - GitHub repository: `github.com/ofuhrer/rust_rockfall`.
-- Requires tests, validation scripts, benchmark awareness, and scientific review gates.
+- Requires tests, validation scripts, benchmark awareness, and domain-specific review gates defined by the target repo.
 
 ## Architecture Pattern
 
@@ -34,7 +34,7 @@ Human stopping points should be rare and meaningful:
 
 - Approving release objectives and task contracts.
 - Resolving scope changes that exceed the contract.
-- Resolving scientific or validation changes.
+- Resolving domain or validation changes that exceed documented repo policy.
 - Reviewing repeated failures after bounded retries.
 - Approving release operations.
 - Approving merge or push operations unless the run was started with explicit autonomous finalization flags.
@@ -162,21 +162,21 @@ repo_state/
 
 Only relevant slices may be injected into task prompts. Compression is allowed for logs and history, but not for equations, validation rules, numerical tolerances, benchmark definitions, or task acceptance criteria.
 
-## Scientific Verification Constraints
+## Repository Validation Constraints
 
-For scientific software repositories:
+For validation-heavy repositories:
 
 - Tests passing is necessary but not sufficient.
 - Documentation must reflect implementation, not justify it retrospectively.
 - Validation fixtures must not be changed unless explicitly allowed.
 - Numerical tolerances must be justified.
-- Benchmark changes must be explained.
-- Scientific assumptions must be recorded in the task contract.
+- Benchmark changes must be explained when benchmarks are part of the target repo workflow.
+- Domain assumptions must be recorded in the task contract when the target repo workflow requires them.
 
 ## Known Weak Points
 
 - The architecture still depends on agent honesty in summaries unless summaries are cross-checked against diffs and logs.
-- The state-machine approach reduces drift but does not eliminate invalid scientific reasoning.
+- The state-machine approach reduces drift but does not eliminate invalid domain reasoning.
 - Filesystem-based state is simple but may become hard to query after many runs.
-- Cost reduction may conflict with scientific rigor if cheaper models are used for judgment tasks.
-- Existing worktree orchestrators may reduce implementation effort but may not provide scientific verification semantics.
+- Cost reduction may conflict with domain rigor if cheaper models are used for judgment tasks.
+- Existing worktree orchestrators may reduce implementation effort but may not provide the target repo's validation semantics.

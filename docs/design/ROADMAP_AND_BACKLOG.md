@@ -27,7 +27,7 @@ Scope:
 - Filesystem state.
 - No database.
 - No web UI.
-- No full Balfrin integration.
+- No project-specific remote execution integration.
 - Autonomous merging only when explicitly requested after deterministic acceptance.
 
 Required capabilities:
@@ -48,7 +48,7 @@ Success criterion:
 The system can complete a small synthetic release objective:
 
 ```text
-Prepare v0.7.1: improve one validation report, add one regression test, update one doc page, no scientific behavior changes.
+Prepare v0.7.1: improve one validation report, add one regression test, update one doc page, no domain behavior changes.
 ```
 
 ## Phase 2: Cost and Context Management
@@ -113,19 +113,18 @@ Current implementation status:
 - Accepted-task finalization uses a local merge lock and rebases the worktree onto latest base before merging.
 - Contract-contained rebase conflicts get one bounded autonomous repair attempt before escalation.
 
-## Phase 3: Scientific Verification and Distributed Execution
+## Phase 3: Repository-Specific Validation and Release Readiness
 
 Goal:
 
-Extend the orchestrator for scientific software workflows involving benchmarks, experimental validation, heavy simulations, and optional Balfrin dispatch.
+Make the orchestrator reliably follow the target repository's own development workflow, validation requirements, and release policy without baking project-specific infrastructure into `auto_develop`.
 
 Scope:
 
 - Validation profiles.
-- Benchmark evidence.
-- Scientific review checklists.
-- Balfrin dispatch.
-- Optional open/local model roles.
+- Repository instruction ingestion.
+- Domain-specific evidence requirements.
+- Validation and benchmark evidence when required by the target repo.
 - Optional PR automation.
 
 Required capabilities:
@@ -134,33 +133,34 @@ Required capabilities:
    - Code-only.
    - Documentation.
    - Benchmark.
-   - Scientific validation.
+   - Domain validation.
    - Release preparation.
-2. Require scientific assumptions in task contracts.
-3. Detect fixture or tolerance changes.
-4. Record benchmark deltas.
-5. Dispatch heavy jobs to Balfrin when explicitly requested.
-6. Collect remote logs and artifacts.
-7. Support optional local or open models for safe low-risk tasks:
-   - Log summarization.
-   - Compiler-error explanation.
-   - Code-location triage.
-   - Low-risk documentation drafts.
+2. Load repository instructions and context that define validation, benchmark, remote execution, and release expectations.
+3. Require task contracts to state domain assumptions when the target repo's workflow requires them.
+4. Detect risky fixture, tolerance, golden-output, or benchmark changes unless explicitly permitted.
+5. Record benchmark or validation deltas as evidence when the task or repo instructions require them.
+6. Prepare a release branch or pull request candidate with complete review, metrics, budget, and evidence artifacts.
 
 Success criterion:
 
-The system can support a release-sized objective such as `v0.7.0` to `v0.8.0` by decomposing it into bounded tasks and maintaining auditable evidence for each accepted change.
+The system can support a release-sized objective by decomposing it into bounded tasks, following the target repository's documented workflow, and maintaining auditable evidence for each accepted change.
 
 Current implementation status:
 
-- Task contracts support task types: code-only, documentation, benchmark, scientific validation, and release preparation.
+- Task contracts support task types for code, documentation, benchmark, validation, and release preparation work. One current enum value still uses legacy domain-specific naming and should be generalized compatibly.
 - Verification may reference a named project verification profile instead of repeating commands in each contract.
-- Scientific validation and benchmark tasks require explicit scientific assumptions.
-- Deterministic review detects unapproved fixture-like and tolerance-like changes.
-- Evidence bundles persist `scientific_review.yaml`.
+- Validation and benchmark tasks require explicit assumptions through the existing `scientific_assumptions` field. The field name is now legacy/domain-specific wording and should be generalized in a compatibility-preserving schema cleanup.
+- Deterministic review detects unapproved fixture-like and tolerance-like changes. This is useful beyond scientific code and should be documented as generic validation-hardening behavior.
+- Evidence bundles persist `scientific_review.yaml`. The artifact name is legacy/domain-specific wording and should be generalized in a compatibility-preserving cleanup.
 - Benchmark tasks or benchmark-like file changes persist `benchmark_delta.json`.
-- Remote dispatch requests persist `remote_dispatch.yaml` with `declared_not_executed` status.
-- Balfrin execution, remote artifact collection, local/open runtime adapters, strong-model planning, and PR automation are not yet implemented.
+- Strong-model planning, release queues, feature-branch integration, task branch cleanup, release review, metrics, budget, and tuning artifacts are implemented.
+- PR automation is not implemented.
+
+Remaining Phase 3 work is now small:
+
+1. Rename or alias domain-specific public terms such as `scientific_validation`, `scientific_assumptions`, and `scientific_review.yaml` to generic validation terminology while preserving backward compatibility.
+2. Make repository instruction ingestion more explicit so target repos can declare when benchmarks, domain validation, remote commands, or PR policies are required.
+3. Add optional PR creation or PR-preparation automation for the final feature branch.
 
 ## Critical Path
 
@@ -202,17 +202,17 @@ Cost control must be built into the first version. Retrofitting cost control lat
 
 ## Edge Cases and Gotchas
 
-### Agent Converts Scientific Task into Test-Passing Task
+### Agent Converts Domain Task into Test-Passing Task
 
 Risk:
 
-The agent weakens scientific meaning while making tests pass.
+The agent weakens domain behavior while making tests pass.
 
 Mitigation:
 
 - Forbid validation weakening.
-- Require scientific assumptions.
-- Require benchmark evidence.
+- Require domain assumptions when the target repo workflow calls for them.
+- Require benchmark or validation evidence when the target repo workflow calls for it.
 - Review fixture changes carefully.
 
 ### Agent Changes Too Many Files
@@ -275,28 +275,16 @@ Mitigation:
 - Batch planning or review where possible.
 - Cache stable context.
 
-### Local or Open Models Add Operational Complexity
+### Alternative Model Backends Add Operational Complexity
 
 Risk:
 
-Serving open models on Balfrin or Mac introduces latency, reproducibility, preemption, and quality variance.
+Serving additional model backends introduces latency, reproducibility, quota, authentication, and quality variance.
 
 Mitigation:
 
 - Exclude open models from Phase 1.
 - Later restrict them to low-risk summarization and triage tasks.
-
-### Balfrin Dispatch Adds Complexity
-
-Risk:
-
-Remote execution introduces queueing, preemption, environment drift, and artifact collection issues.
-
-Mitigation:
-
-- Do not make Balfrin part of the initial control plane.
-- Treat it as an optional execution target.
-- Require explicit task contract fields for remote jobs.
 
 ### Existing Orchestrator Projects May Partially Overlap
 
@@ -314,7 +302,7 @@ Mitigation:
 
 Risk:
 
-Compression can destroy scientific assumptions or numerical constraints.
+Compression can destroy domain assumptions, validation rules, or numerical constraints.
 
 Mitigation:
 
@@ -490,7 +478,7 @@ Use a low-risk task against `rust_rockfall`.
 Example:
 
 ```text
-Add or improve one documentation-only check without scientific behavior changes.
+Add or improve one documentation-only check without domain behavior changes.
 ```
 
 Acceptance:
