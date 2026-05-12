@@ -164,6 +164,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Planning mode.",
     )
     plan_release_parser.add_argument(
+        "--strong-model",
+        dest="mode",
+        action="store_const",
+        const="strong-model",
+        help="Shortcut for --mode strong-model.",
+    )
+    plan_release_parser.add_argument(
         "--project",
         help="Project identifier. Required for strong-model mode.",
     )
@@ -181,6 +188,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--runs-dir",
         default="runs",
         help="Directory where planning output should be written.",
+    )
+    plan_release_parser.add_argument(
+        "--inspect-proposed-contracts",
+        action="store_true",
+        help="Include proposed contract details in the CLI output.",
+    )
+    plan_release_parser.add_argument(
+        "--write-contracts-dir",
+        help="Write validated contract drafts to this directory without running them.",
     )
 
     status_parser = subparsers.add_parser("status", help="Show orchestrator status.")
@@ -276,6 +292,7 @@ def main(argv: list[str] | None = None) -> int:
                 objective_path=Path(args.objective),
                 contracts_dir=Path(args.contracts_dir),
                 runs_dir=Path(args.runs_dir),
+                write_contracts_dir=Path(args.write_contracts_dir) if args.write_contracts_dir else None,
                 mode=args.mode,
                 project_id=args.project,
                 config_dir=Path(args.config_dir),
@@ -285,12 +302,10 @@ def main(argv: list[str] | None = None) -> int:
 
         print(
             json.dumps(
-                {
-                    "release_id": result.release_id,
-                    "plan_path": str(result.plan_path),
-                    "generated_contracts": len(result.plan.generated_contracts),
-                    "warnings": result.plan.warnings,
-                },
+                _plan_release_result(
+                    result,
+                    inspect_proposed_contracts=args.inspect_proposed_contracts,
+                ),
                 indent=2,
             )
         )
@@ -331,6 +346,29 @@ def _release_run_result(result) -> dict[str, object]:
         "decision": result.decision,
         "tasks": [_task_run_result(task_result) for task_result in result.task_results],
     }
+
+
+def _plan_release_result(result, *, inspect_proposed_contracts: bool) -> dict[str, object]:
+    output: dict[str, object] = {
+        "release_id": result.release_id,
+        "plan_path": str(result.plan_path),
+        "generated_contracts": len(result.plan.generated_contracts),
+        "warnings": result.plan.warnings,
+    }
+    if result.written_contract_paths:
+        output["written_contract_paths"] = [str(path) for path in result.written_contract_paths]
+    if inspect_proposed_contracts:
+        output["proposed_contracts"] = [
+            {
+                "task_id": generated_contract.task_id,
+                "title": generated_contract.title,
+                "objective": generated_contract.objective,
+                "rationale": generated_contract.rationale,
+                "suggested_contract": generated_contract.suggested_contract.model_dump(mode="json"),
+            }
+            for generated_contract in result.plan.generated_contracts
+        ]
+    return output
 
 
 def _print_progress(message: str) -> None:
