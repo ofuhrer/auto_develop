@@ -89,6 +89,48 @@ def test_run_objective_command_is_registered(capsys) -> None:
     assert "--merge-on-accept" in captured.out
 
 
+def test_cleanup_command_is_registered(capsys) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["cleanup", "--help"])
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 0
+    assert "--release" in captured.out
+    assert "--force" in captured.out
+    assert "--include-integration-branch" in captured.out
+
+
+def test_cleanup_command_outputs_report(monkeypatch, capsys, tmp_path) -> None:
+    seen_kwargs: dict[str, object] = {}
+    report = SimpleNamespace(
+        project_id="demo",
+        release_id="v1.0.0",
+        dry_run=True,
+        worktree_paths=[tmp_path / "worktrees" / "v1.0.0-task"],
+        task_branches=["agent/v1.0.0/task"],
+        integration_branch=None,
+        removed_worktrees=[],
+        deleted_branches=[],
+        errors=[],
+    )
+
+    def fake_cleanup_release_artifacts(**kwargs):
+        seen_kwargs.update(kwargs)
+        return report
+
+    monkeypatch.setattr(cli_module, "cleanup_release_artifacts", fake_cleanup_release_artifacts)
+
+    exit_code = main(["cleanup", "--project", "demo", "--release", "v1.0.0"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert seen_kwargs["force"] is False
+    assert '"dry_run": true' in captured.out
+    assert '"agent/v1.0.0/task"' in captured.out
+
+
 def test_plan_release_can_request_strong_planning_and_write_contracts(
     monkeypatch,
     capsys,

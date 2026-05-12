@@ -318,6 +318,16 @@ Finalization conflicts are captured in evidence. Contract-contained rebase confl
 13. Remove task worktrees and merged task branches unless `--debug-keep-artifacts` is set; preserve accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches.
 14. Persist `runs/<release-run-id>/release_summary.json` and `release_review.md`.
 
+### Release Cleanup Command
+
+`agent-loop cleanup --project <project> --release <release>` is a dry-run command that reports matching stale release artifacts:
+
+- directories below the configured `worktree_root` whose names contain the release identifier;
+- local task branches matching `agent/<release>/*`;
+- optionally the `feature/<release>` integration branch when `--include-integration-branch` is passed.
+
+`--force` removes the matching worktree directories and deletes the matching branches. The command refuses to remove paths outside the configured worktree root and refuses to delete the currently checked-out branch. The integration branch is preserved unless explicitly requested.
+
 This command executes already-defined contracts. Objective-level planning and execution are composed by `run-objective`.
 
 ### `plan-release` Flow

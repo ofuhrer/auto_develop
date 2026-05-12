@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from agentic_devloop import __version__
+from agentic_devloop.cleanup import cleanup_release_artifacts
 from agentic_devloop.config import ProjectConfigError, load_project_config
 from agentic_devloop.objective import run_objective
 from agentic_devloop.orchestrator import run_task
@@ -113,6 +114,24 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=10,
         help="Maximum number of runs to show.",
+    )
+
+    cleanup_parser = subparsers.add_parser(
+        "cleanup",
+        help="Clean stale release worktrees and task branches.",
+    )
+    cleanup_parser.add_argument("--project", required=True, help="Project identifier.")
+    cleanup_parser.add_argument("--release", required=True, help="Release identifier.")
+    _add_config_dir_argument(cleanup_parser)
+    cleanup_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Actually remove artifacts. Without this flag cleanup only reports candidates.",
+    )
+    cleanup_parser.add_argument(
+        "--include-integration-branch",
+        action="store_true",
+        help="Also delete feature/<release> when it exists and is not checked out.",
     )
 
     return parser
@@ -390,6 +409,21 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps([summary.__dict__ | {"bundle_path": str(summary.bundle_path)} for summary in summaries], indent=2))
         return 0
 
+    if args.command == "cleanup":
+        try:
+            result = cleanup_release_artifacts(
+                project_id=args.project,
+                release_id=args.release,
+                config_dir=Path(args.config_dir),
+                force=args.force,
+                include_integration_branch=args.include_integration_branch,
+            )
+        except Exception as error:
+            parser.exit(2, f"error: {error}\n")
+
+        print(json.dumps(_cleanup_result(result), indent=2))
+        return 0
+
     parser.print_help()
     return 0
 
@@ -451,6 +485,20 @@ def _objective_run_result(result) -> dict[str, object]:
         "plan_path": str(result.planning.plan_path),
         "written_contract_paths": [str(path) for path in result.planning.written_contract_paths],
         "release": _release_run_result(result.release),
+    }
+
+
+def _cleanup_result(result) -> dict[str, object]:
+    return {
+        "project_id": result.project_id,
+        "release_id": result.release_id,
+        "dry_run": result.dry_run,
+        "worktree_paths": [str(path) for path in result.worktree_paths],
+        "task_branches": result.task_branches,
+        "integration_branch": result.integration_branch,
+        "removed_worktrees": [str(path) for path in result.removed_worktrees],
+        "deleted_branches": result.deleted_branches,
+        "errors": result.errors,
     }
 
 

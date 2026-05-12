@@ -101,6 +101,20 @@ tail -f runs/<release-run-id>/release.log
 
 Before starting, `run-release` requires the configured project `worktree_root` to be empty and rejects pre-existing task branches for the release. This prevents stale debug or unmerged task artifacts from contaminating a new release run. Task worktrees and merged task branches are removed after each task by default. Accepted work that was not finalized, unmerged accepted branches, and failed-finalization branches are preserved to keep work reachable. Use `--debug-keep-artifacts` to preserve all task artifacts for inspection.
 
+If a debug run leaves stale release artifacts behind, inspect them first:
+
+```bash
+agent-loop cleanup --project auto_develop --release v1.0.0
+```
+
+Remove matching task worktrees and `agent/<release>/*` branches only after reviewing the dry run:
+
+```bash
+agent-loop cleanup --project auto_develop --release v1.0.0 --force
+```
+
+Add `--include-integration-branch` only when the orchestrator-owned `feature/<release>` branch is no longer needed.
+
 Create a conservative release contract plan:
 
 ```bash

@@ -100,6 +100,7 @@ Current implementation status:
 - Release runs write a `release_review.md` artifact.
 - Release runs fail fast when the configured project worktree root contains stale worktrees or selected task branches already exist.
 - Release task worktrees and merged branches are cleaned up by default unless debug artifact retention is requested; accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches are preserved.
+- Manual recovery is supported by `agent-loop cleanup`, which dry-runs by default and can remove stale release worktrees plus `agent/<release>/*` branches with `--force`.
 - Release queues classify allowed-file overlap; minor overlap becomes a dependency, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected.
 - Project configs support `model_roles` and `model_routing` for cheap-worker and stronger-model task execution routing.
 - Executor roles support `fallback_models`; attempts are bounded by `budget.max_executor_attempts_per_task`.
