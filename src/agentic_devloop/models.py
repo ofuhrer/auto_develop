@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -15,6 +16,14 @@ class ExecutorConfig(StrictModel):
     type: str = Field(min_length=1)
     model: str = Field(min_length=1)
     max_walltime_minutes: int = Field(gt=0)
+    fallback_models: list[str] = Field(default_factory=list)
+
+    @field_validator("fallback_models")
+    @classmethod
+    def fallback_models_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("fallback models must not be empty")
+        return values
 
 
 class VerificationProfile(StrictModel):
@@ -180,6 +189,21 @@ class CommandResult(StrictModel):
     timed_out: bool = False
 
 
+class ExecutorAttempt(StrictModel):
+    attempt: int = Field(gt=0)
+    backend: str = Field(min_length=1)
+    model: str | None = None
+    command: list[str] = Field(min_length=1)
+    exit_code: int
+    stdout_path: Path
+    stderr_path: Path
+    duration_seconds: float = Field(ge=0)
+    timed_out: bool = False
+    prompt_chars: int = Field(default=0, ge=0)
+    stdout_chars: int = Field(default=0, ge=0)
+    stderr_chars: int = Field(default=0, ge=0)
+
+
 class ExecutorResult(StrictModel):
     command: list[str] = Field(min_length=1)
     exit_code: int
@@ -192,6 +216,7 @@ class ExecutorResult(StrictModel):
     prompt_chars: int = Field(default=0, ge=0)
     stdout_chars: int = Field(default=0, ge=0)
     stderr_chars: int = Field(default=0, ge=0)
+    attempts: list[ExecutorAttempt] = Field(default_factory=list)
 
 
 class ContextSection(StrictModel):
@@ -234,6 +259,8 @@ class EvidenceBundle(StrictModel):
     changed_files_path: Path
     verification_log_path: Path
     model_call_metadata_path: Path | None = None
+    executor_attempts_path: Path | None = None
+    failure_diagnosis_path: Path | None = None
     scientific_review_path: Path | None = None
     benchmark_delta_path: Path | None = None
     remote_dispatch_path: Path | None = None
@@ -263,3 +290,18 @@ class ReviewDecision(StrictModel):
     rationale: str = Field(min_length=1)
     risks: list[str] = Field(default_factory=list)
     follow_up_tasks: list[str] = Field(default_factory=list)
+
+
+class GeneratedContract(StrictModel):
+    task_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    objective: str = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+    suggested_contract: dict[str, Any] = Field(default_factory=dict)
+
+
+class ContractPlan(StrictModel):
+    release_id: str = Field(min_length=1)
+    planner: str = Field(default="deterministic")
+    generated_contracts: list[GeneratedContract] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)

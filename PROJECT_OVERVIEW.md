@@ -78,14 +78,18 @@ Implemented:
 - Benchmark and remote-dispatch evidence metadata.
 - Ordered release execution from explicit contracts or `repo_state/<project>/release_plan.yaml`.
 - Role-based executor model routing via `model_roles` and `model_routing`.
+- Fallback executor models with persisted per-attempt evidence.
+- Bounded executor retries using `budget.max_executor_attempts_per_task`.
+- Deterministic executor-failure diagnosis evidence.
 - Release-level summary files for multi-task runs.
+- Conservative deterministic release planning via `agent-loop plan-release`.
 
 Not yet completed:
 
 - Automated merge-conflict repair.
 - Strong-model call accounting.
 - Strong-model release planning and automatic contract generation.
-- Repeated-failure diagnosis beyond deterministic escalation.
+- Model-based repeated-failure diagnosis beyond deterministic classification.
 - Actual Balfrin remote execution and artifact collection.
 - A real synthetic run against `rust_rockfall`.
 - Sprint 0 review based on actual executor evidence.

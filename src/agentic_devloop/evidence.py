@@ -38,6 +38,7 @@ class EvidenceCollector:
         changed_files_path = bundle_path / "changed_files.txt"
         verification_bundle_log_path = bundle_path / "verification.log"
         model_call_metadata_path = bundle_path / "model_call_metadata.json"
+        executor_attempts_path = bundle_path / "executor_attempts.json"
 
         shutil.copyfile(contract_source_path, contract_path)
         shutil.copyfile(executor_prompt_path, prompt_path)
@@ -68,6 +69,20 @@ class EvidenceCollector:
             + "\n",
             encoding="utf-8",
         )
+        executor_attempts_path.write_text(
+            json.dumps(
+                [
+                    {
+                        **attempt.model_dump(mode="json"),
+                        "approx_output_chars": attempt.stdout_chars + attempt.stderr_chars,
+                    }
+                    for attempt in executor_result.attempts
+                ],
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         git_diff_path.write_text(diff_patch(worktree_path), encoding="utf-8")
         changed_files_path.write_text(
             "\n".join(changed_files(worktree_path)) + "\n",
@@ -87,6 +102,7 @@ class EvidenceCollector:
             changed_files_path=changed_files_path,
             verification_log_path=verification_bundle_log_path,
             model_call_metadata_path=model_call_metadata_path,
+            executor_attempts_path=executor_attempts_path,
         )
 
 
@@ -131,6 +147,12 @@ def write_finalization_result(bundle: EvidenceBundle, result: FinalizeResult) ->
         encoding="utf-8",
     )
     return bundle.model_copy(update={"finalization_path": finalization_path})
+
+
+def write_failure_diagnosis(bundle: EvidenceBundle, diagnosis: dict) -> EvidenceBundle:
+    failure_diagnosis_path = bundle.bundle_path / "failure_diagnosis.yaml"
+    failure_diagnosis_path.write_text(_yaml(diagnosis), encoding="utf-8")
+    return bundle.model_copy(update={"failure_diagnosis_path": failure_diagnosis_path})
 
 
 def write_scientific_outputs(

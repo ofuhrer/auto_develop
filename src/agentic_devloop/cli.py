@@ -8,6 +8,7 @@ from pathlib import Path
 from agentic_devloop import __version__
 from agentic_devloop.config import ProjectConfigError, load_project_config
 from agentic_devloop.orchestrator import run_task
+from agentic_devloop.planning import plan_release_contracts
 from agentic_devloop.release import run_release
 from agentic_devloop.status import load_run_summaries
 
@@ -145,6 +146,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Continue running remaining contracts after a task is not accepted.",
     )
 
+    plan_release_parser = subparsers.add_parser(
+        "plan-release",
+        help="Create a conservative release contract plan from an objective.",
+    )
+    plan_release_parser.add_argument("--objective", required=True, help="Release objective YAML file.")
+    plan_release_parser.add_argument(
+        "--contracts-dir",
+        default="contracts",
+        help="Directory containing task contract YAML files.",
+    )
+    plan_release_parser.add_argument(
+        "--runs-dir",
+        default="runs",
+        help="Directory where planning output should be written.",
+    )
+
     status_parser = subparsers.add_parser("status", help="Show orchestrator status.")
     status_parser.add_argument(
         "--runs-dir",
@@ -229,6 +246,29 @@ def main(argv: list[str] | None = None) -> int:
             parser.exit(2, f"error: {error}\n")
 
         print(json.dumps(_release_run_result(result), indent=2))
+        return 0
+
+    if args.command == "plan-release":
+        try:
+            result = plan_release_contracts(
+                objective_path=Path(args.objective),
+                contracts_dir=Path(args.contracts_dir),
+                runs_dir=Path(args.runs_dir),
+            )
+        except Exception as error:
+            parser.exit(2, f"error: {error}\n")
+
+        print(
+            json.dumps(
+                {
+                    "release_id": result.release_id,
+                    "plan_path": str(result.plan_path),
+                    "generated_contracts": len(result.plan.generated_contracts),
+                    "warnings": result.plan.warnings,
+                },
+                indent=2,
+            )
+        )
         return 0
 
     if args.command == "status":

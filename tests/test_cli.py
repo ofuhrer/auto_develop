@@ -53,3 +53,13 @@ def test_run_release_command_is_registered(capsys) -> None:
     assert error.value.code == 0
     assert "--release" in captured.out
     assert "--continue-on-failure" in captured.out
+
+
+def test_plan_release_command_is_registered(capsys) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["plan-release", "--help"])
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 0
+    assert "--objective" in captured.out

@@ -95,7 +95,10 @@ Current implementation status:
 - `agent-loop status` reads existing evidence bundles and reports recent run summaries.
 - `agent-loop run-release` executes an ordered set of existing contracts from explicit `--contract` arguments or `repo_state/<project>/release_plan.yaml`.
 - Project configs support `model_roles` and `model_routing` for cheap-worker and stronger-model task execution routing.
-- Strong-model call accounting and repeated-failure diagnosis are not yet implemented.
+- Executor roles support `fallback_models`; attempts are bounded by `budget.max_executor_attempts_per_task`.
+- Executor failure evidence includes `executor_attempts.json` and deterministic `failure_diagnosis.yaml`.
+- `agent-loop plan-release` writes deterministic contract planning scaffolds from release objectives.
+- Strong-model call accounting and model-based repeated-failure diagnosis are not yet implemented.
 
 ## Phase 3: Scientific Verification and Distributed Execution
 

@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from agentic_devloop.models import ExecutorResult, ProjectConfig, TaskContract
-from agentic_devloop.orchestrator import executor_config_for_task
+from agentic_devloop.orchestrator import executor_config_for_task, executor_configs_for_task
 from agentic_devloop.release import run_release
 
 
@@ -70,6 +70,35 @@ def test_executor_config_for_task_uses_budget_then_task_type_roles() -> None:
     task = _task_contract("demo-0001", budget_class="L")
 
     assert executor_config_for_task(config, task).model == "expensive"
+
+
+def test_executor_configs_for_task_includes_fallback_models() -> None:
+    config = ProjectConfig.model_validate(
+        {
+            "project_id": "demo",
+            "repo_path": "/tmp/demo",
+            "default_base_branch": "main",
+            "worktree_root": "/tmp/worktrees",
+            "executor": {
+                "type": "codex_cli",
+                "model": "fallback",
+                "fallback_models": ["fallback-2"],
+                "max_walltime_minutes": 5,
+            },
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        }
+    )
+
+    assert [executor.model for executor in executor_configs_for_task(config, _task_contract("demo-0001"))] == [
+        "fallback",
+        "fallback-2",
+    ]
 
 
 def test_run_release_executes_ordered_contracts_and_writes_summary(tmp_path) -> None:

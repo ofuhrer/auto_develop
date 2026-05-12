@@ -108,7 +108,7 @@ cheap deterministic checks first
 -> frontier model only for planning, review, or failure diagnosis
 ```
 
-Current implementation supports configurable task execution roles through `model_roles` and `model_routing`. Release-level planning, strong-model review, and failure diagnosis are still explicit future control points rather than active automated calls.
+Current implementation supports configurable task execution roles through `model_roles` and `model_routing`. Worker roles may define `fallback_models`, and every executor attempt is recorded in evidence. Release-level planning exists as deterministic scaffolding; strong-model review and model-based failure diagnosis are still explicit future control points rather than active automated calls.
 
 ## Context Controls
 

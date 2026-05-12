@@ -59,6 +59,8 @@ model_roles:
   worker:
     type: codex_cli
     model: gpt-5.3-codex-spark
+    fallback_models:
+      - gpt-5.4-mini
     max_walltime_minutes: 25
   reviewer:
     type: codex_cli
@@ -195,6 +197,8 @@ runs/
       executor_stdout.log
       executor_stderr.log
       model_call_metadata.json
+      executor_attempts.json
+      failure_diagnosis.yaml
       git_diff.patch
       changed_files.txt
       verification.log
@@ -246,6 +250,9 @@ agent-loop run-release \
   --project auto_develop \
   --release sprint-0
 
+agent-loop plan-release \
+  --objective objectives/v0.8.0.yaml
+
 agent-loop status
 
 agent-loop status --limit 5
@@ -292,6 +299,18 @@ Merge conflicts currently stop the command and leave the base repository in Git'
 5. Persist `runs/<release-run-id>/release_summary.json`.
 
 This command executes already-defined contracts. It does not yet use a strong model to generate contracts from a release objective.
+
+### `plan-release` Flow
+
+`agent-loop plan-release` is conservative deterministic planning scaffolding:
+
+1. Load and validate a `ReleaseObjective`.
+2. Inspect existing contracts for the release.
+3. Write `runs/<plan-id>/contract_plan.json`.
+4. If no contracts exist, propose a planning-only release-preparation draft.
+5. If contracts exist, emit acceptance-criteria coverage review entries.
+
+This is intentionally not automatic strong-model contract generation yet.
 
 `agent-loop status` reads existing evidence bundles and prints recent run summaries with run ID, task ID, decision, and bundle path.
 

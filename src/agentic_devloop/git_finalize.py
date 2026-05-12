@@ -15,6 +15,8 @@ class FinalizeResult:
     commit_hash: str | None = None
     merged: bool = False
     pushed: bool = False
+    failed_step: str | None = None
+    error: str | None = None
 
 
 def commit_worktree_changes(worktree_path: Path, message: str) -> str | None:

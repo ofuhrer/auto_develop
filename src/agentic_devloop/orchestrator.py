@@ -9,16 +9,18 @@ from agentic_devloop.config import load_project_config
 from agentic_devloop.context import enforce_context_budget, load_context_bundle
 from agentic_devloop.evidence import (
     EvidenceCollector,
+    write_failure_diagnosis,
     write_finalization_result,
     write_review_decision,
     write_scientific_outputs,
 )
 from agentic_devloop.executor import CodexExecutor
-from agentic_devloop.git_finalize import FinalizeResult, finalize_accepted_task
+from agentic_devloop.git_finalize import FinalizeResult, GitFinalizeError, finalize_accepted_task
 from agentic_devloop.git_state import changed_files as git_changed_files
 from agentic_devloop.git_state import diff_patch
 from agentic_devloop.models import (
     Decision,
+    ExecutorAttempt,
     ExecutorConfig,
     ExecutorResult,
     ProjectConfig,
@@ -113,15 +115,16 @@ def run_task(
         verification_results=[],
     )
 
-    executor_config = executor_config_for_task(config, task)
-    selected_executor = executor or _executor_for_config(executor_config)
-    _report(progress, f"running executor: {executor_config.type} model={executor_config.model}")
-    executor_result = selected_executor.run(
+    executor_configs = executor_configs_for_task(config, task)
+    executor_result = _run_executor_attempts(
+        executor_configs=executor_configs,
+        executor=executor,
+        max_attempts=config.budget.max_executor_attempts_per_task,
         prompt_path=prompt_path,
         worktree_path=worktree_path,
-        output_dir=scratch_dir,
+        scratch_dir=scratch_dir,
+        progress=progress,
     )
-    executor_result = _normalize_executor_metadata(executor_result, prompt_path)
     _report(progress, f"executor exit_code={executor_result.exit_code}")
     if executor_result.exit_code != 0:
         verification_log_path = scratch_dir / "verification.log"
@@ -157,6 +160,8 @@ def run_task(
             reviewer=Reviewer.DETERMINISTIC,
             rationale=f"Executor failed with exit code {executor_result.exit_code}.",
         )
+        diagnosis = _diagnose_executor_failure(executor_result)
+        bundle = write_failure_diagnosis(bundle, diagnosis)
         write_review_decision(bundle, decision)
         _report(progress, f"decision={decision.decision}")
 
@@ -228,22 +233,39 @@ def run_task(
         should_push = push_on_accept
         message = commit_message or f"{task.task_id}: {task.title}"
         _report(progress, "committing accepted task changes")
-        finalize_result = finalize_accepted_task(
-            repo_path=config.repo_path,
-            worktree_path=worktree_path,
-            task_branch=branch,
-            base_branch=config.default_base_branch,
-            commit_message=message,
-            merge=should_merge,
-            push=should_push,
-        )
-        if finalize_result.commit_hash:
-            _report(progress, f"commit={finalize_result.commit_hash}")
-        if finalize_result.merged:
-            _report(progress, f"merged_into={config.default_base_branch}")
-        if finalize_result.pushed:
-            _report(progress, f"pushed=origin/{config.default_base_branch}")
+        try:
+            finalize_result = finalize_accepted_task(
+                repo_path=config.repo_path,
+                worktree_path=worktree_path,
+                task_branch=branch,
+                base_branch=config.default_base_branch,
+                commit_message=message,
+                merge=should_merge,
+                push=should_push,
+            )
+            if finalize_result.commit_hash:
+                _report(progress, f"commit={finalize_result.commit_hash}")
+            if finalize_result.merged:
+                _report(progress, f"merged_into={config.default_base_branch}")
+            if finalize_result.pushed:
+                _report(progress, f"pushed=origin/{config.default_base_branch}")
+        except GitFinalizeError as error:
+            finalize_result = FinalizeResult(
+                failed_step="finalize",
+                error=str(error),
+            )
+            decision = ReviewDecision(
+                task_id=task.task_id,
+                decision=Decision.ESCALATED,
+                reviewer=Reviewer.DETERMINISTIC,
+                rationale=f"Accepted task could not be finalized: {error}",
+                risks=["Accepted work remains in the task worktree or branch."],
+                follow_up_tasks=["Inspect finalization.yaml and resolve the Git failure."],
+            )
+            _report(progress, f"finalization_failed={error}")
         write_finalization_result(bundle, finalize_result)
+        if finalize_result.error is not None:
+            write_review_decision(bundle, decision)
 
     return TaskRunResult(
         run_id=run_id,
@@ -255,6 +277,10 @@ def run_task(
 
 
 def executor_config_for_task(config: ProjectConfig, task: TaskContract) -> ExecutorConfig:
+    return executor_configs_for_task(config, task)[0]
+
+
+def executor_configs_for_task(config: ProjectConfig, task: TaskContract) -> list[ExecutorConfig]:
     role = config.model_routing.budget_class_roles.get(task.budget_class)
     if role is None:
         role = config.model_routing.task_type_roles.get(task.task_type)
@@ -262,8 +288,14 @@ def executor_config_for_task(config: ProjectConfig, task: TaskContract) -> Execu
         role = config.model_routing.default_role
 
     if role in config.model_roles:
-        return config.model_roles[role]
-    return config.executor
+        primary = config.model_roles[role]
+    else:
+        primary = config.executor
+
+    configs = [primary]
+    for model in primary.fallback_models:
+        configs.append(primary.model_copy(update={"model": model, "fallback_models": []}))
+    return configs
 
 
 def _executor_for_config(executor_config: ExecutorConfig) -> ExecutorProtocol:
@@ -284,6 +316,103 @@ def _verification_commands(config: ProjectConfig, task: TaskContract) -> list[st
 
 def _review_line_count(diff: str) -> int:
     return sum(1 for line in diff.splitlines() if line.startswith(("+", "-")))
+
+
+def _run_executor_attempts(
+    *,
+    executor_configs: list[ExecutorConfig],
+    executor: ExecutorProtocol | None,
+    max_attempts: int,
+    prompt_path: Path,
+    worktree_path: Path,
+    scratch_dir: Path,
+    progress: Callable[[str], None] | None,
+) -> ExecutorResult:
+    attempts: list[ExecutorAttempt] = []
+    last_result: ExecutorResult | None = None
+    attempt_configs = _attempt_executor_configs(executor_configs, max_attempts)
+
+    for attempt_number, executor_config in enumerate(attempt_configs, start=1):
+        output_dir = scratch_dir / f"executor_attempt_{attempt_number}"
+        selected_executor = executor or _executor_for_config(executor_config)
+        _report(
+            progress,
+            f"running executor attempt {attempt_number}/{len(attempt_configs)}: "
+            f"{executor_config.type} model={executor_config.model}",
+        )
+        result = selected_executor.run(
+            prompt_path=prompt_path,
+            worktree_path=worktree_path,
+            output_dir=output_dir,
+        )
+        result = _normalize_executor_metadata(result, prompt_path)
+        attempts.append(_executor_attempt(attempt_number, result))
+        last_result = result
+        _report(progress, f"executor attempt {attempt_number} exit_code={result.exit_code}")
+        if result.exit_code == 0:
+            return result.model_copy(update={"attempts": attempts})
+
+    assert last_result is not None
+    return last_result.model_copy(update={"attempts": attempts})
+
+
+def _attempt_executor_configs(
+    executor_configs: list[ExecutorConfig],
+    max_attempts: int,
+) -> list[ExecutorConfig]:
+    if max_attempts <= len(executor_configs):
+        return executor_configs[:max_attempts]
+    repeated = list(executor_configs)
+    while len(repeated) < max_attempts:
+        repeated.append(executor_configs[-1])
+    return repeated
+
+
+def _executor_attempt(attempt_number: int, result: ExecutorResult) -> ExecutorAttempt:
+    return ExecutorAttempt(
+        attempt=attempt_number,
+        backend=result.backend,
+        model=result.model,
+        command=result.command,
+        exit_code=result.exit_code,
+        stdout_path=result.stdout_path,
+        stderr_path=result.stderr_path,
+        duration_seconds=result.duration_seconds,
+        timed_out=result.timed_out,
+        prompt_chars=result.prompt_chars,
+        stdout_chars=result.stdout_chars,
+        stderr_chars=result.stderr_chars,
+    )
+
+
+def _diagnose_executor_failure(result: ExecutorResult) -> dict:
+    stderr_text = result.stderr_path.read_text(encoding="utf-8") if result.stderr_path.exists() else ""
+    stdout_text = result.stdout_path.read_text(encoding="utf-8") if result.stdout_path.exists() else ""
+    combined = f"{stderr_text}\n{stdout_text}".lower()
+    if "usage limit" in combined or "quota" in combined:
+        category = "model_quota"
+        recommendation = "Retry with a fallback model or wait until the quota reset."
+    elif result.timed_out:
+        category = "timeout"
+        recommendation = "Reduce task scope or increase executor walltime before retrying."
+    else:
+        category = "executor_error"
+        recommendation = "Inspect executor logs and retry only after the failure mode is understood."
+
+    return {
+        "category": category,
+        "recommendation": recommendation,
+        "final_exit_code": result.exit_code,
+        "attempts": [
+            {
+                "attempt": attempt.attempt,
+                "model": attempt.model,
+                "exit_code": attempt.exit_code,
+                "timed_out": attempt.timed_out,
+            }
+            for attempt in result.attempts
+        ],
+    }
 
 
 def _report(progress: Callable[[str], None] | None, message: str) -> None:
