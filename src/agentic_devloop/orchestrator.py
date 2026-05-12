@@ -11,8 +11,10 @@ from agentic_devloop.executor import CodexExecutor
 from agentic_devloop.git_state import changed_files as git_changed_files
 from agentic_devloop.git_state import diff_patch
 from agentic_devloop.models import (
+    Decision,
     ExecutorResult,
     ProjectConfig,
+    Reviewer,
     ReviewDecision,
     TaskContract,
     TaskRun,
@@ -96,6 +98,48 @@ def run_task(
         worktree_path=worktree_path,
         output_dir=scratch_dir,
     )
+    if executor_result.exit_code != 0:
+        verification_log_path = scratch_dir / "verification.log"
+        verification_log_path.write_text(
+            "Verification skipped because executor failed.\n",
+            encoding="utf-8",
+        )
+        current_diff = diff_patch(worktree_path)
+        current_changed_files = git_changed_files(worktree_path)
+        task_run = task_run.model_copy(
+            update={
+                "state": TaskState.ESCALATED,
+                "updated_at": datetime.now(UTC),
+                "changed_files": current_changed_files,
+                "diff_lines": _review_line_count(current_diff),
+                "verification_results": [],
+            }
+        )
+        bundle = EvidenceCollector().collect(
+            run_id=run_id,
+            task=task,
+            run_state=task_run,
+            worktree_path=worktree_path,
+            bundle_path=bundle_path,
+            contract_source_path=contract_path,
+            executor_prompt_path=prompt_path,
+            executor_result=executor_result,
+            verification_log_path=verification_log_path,
+        )
+        decision = ReviewDecision(
+            task_id=task.task_id,
+            decision=Decision.ESCALATED,
+            reviewer=Reviewer.DETERMINISTIC,
+            rationale=f"Executor failed with exit code {executor_result.exit_code}.",
+        )
+        write_review_decision(bundle, decision)
+
+        return TaskRunResult(
+            run_id=run_id,
+            worktree_path=worktree_path,
+            bundle_path=bundle.bundle_path,
+            decision=decision,
+        )
 
     verification_results = VerificationRunner(timeout_seconds=verification_timeout_seconds).run(
         commands=task.verification.commands,

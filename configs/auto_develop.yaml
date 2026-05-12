@@ -11,7 +11,7 @@ executor:
 verification_profiles:
   default:
     commands:
-      - .venv/bin/python -m pytest
+      - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
 
 budget:
   max_executor_attempts_per_task: 2

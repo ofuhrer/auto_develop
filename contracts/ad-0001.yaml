@@ -23,7 +23,7 @@ required_evidence:
 
 verification:
   commands:
-    - .venv/bin/python -m pytest
+    - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
 
 stop_conditions:
   - More than 1 file changed.
