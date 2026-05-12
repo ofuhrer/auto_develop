@@ -1,7 +1,12 @@
-release_id: roadmap-governor-bootstrap
-active_objective: Bootstrap autonomous roadmap-governor development for auto_develop.
-current_tasks: []
+release_id: run-backlog-autonomous-loop
+active_objective: Implement one-step autonomous backlog execution by chaining governor planning into objective execution.
+current_tasks:
+  - run-backlog-cli-skeleton
+  - run-backlog-orchestrator-chain
+  - run-backlog-evidence-manifest
+  - run-backlog-failure-tests
+  - run-backlog-user-docs
 next_steps:
-  - Run plan-backlog in strong-model mode with --execute-planner and --write-objective.
-  - Run run-objective on the generated objective once the governor-selected epic is acceptable under repository policy.
+  - Run doctor for release run-backlog-autonomous-loop.
+  - Run the release queue sequentially first; parallel mode can be tested after overlap behavior is clear.
   - After the release, update backlog_state.yaml, release_plan.yaml, and roadmap/backlog docs from release evidence.

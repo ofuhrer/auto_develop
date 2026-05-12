@@ -1,0 +1,25 @@
+release_id: run-backlog-autonomous-loop
+title: Add one-step autonomous backlog execution
+objective: Implement a higher-level run-backlog workflow that chains governor backlog
+  planning, selected-epic objective writing, objective-to-contract planning, and release
+  execution for exactly one selected epic, while preserving existing safety, budget,
+  evidence, and finalization policies.
+non_goals:
+- Do not execute implementation workers while planning the backlog.
+- Do not broaden the selected epic beyond its acceptance criteria.
+acceptance_criteria:
+- A new CLI command or documented command path runs one selected backlog epic end-to-end
+  for a configured project by invoking the existing backlog planner and objective
+  execution flow.
+- The workflow writes or reuses a release objective derived from selected_epic_id
+  and passes it into run-objective without requiring a routine human approval gate.
+- The workflow records evidence paths for backlog plan, generated objective, contract
+  plan, release summary, release metrics, release budget, and release tuning when
+  those artifacts are produced.
+- The workflow respects existing project policy for verification, task contracts,
+  budgets, stale worktree checks, branch safety, and autonomous finalization.
+- Focused tests cover successful chaining, planner failure, invalid backlog output,
+  and propagation of run-objective failure without weakening existing run-release
+  or run-objective behavior.
+- User-facing documentation explains how run-backlog relates to plan-backlog, run-objective,
+  and existing finalization flags.
