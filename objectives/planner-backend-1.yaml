@@ -1,0 +1,16 @@
+release_id: planner-backend-1
+title: Strong planner backend release
+objective: >
+  Add a first real strong-model planning workflow that can turn a release objective
+  into bounded task contract drafts, validate them, and write auditable planning
+  evidence without automatically executing generated work.
+non_goals:
+  - Do not implement parallel worker execution in this release.
+  - Do not auto-merge generated contracts without deterministic validation.
+  - Do not weaken task contract validation or verification requirements.
+acceptance_criteria:
+  - Strong planning mode has an executor-backed generation path or a clearly testable adapter seam.
+  - Generated contract drafts are schema-validated before being written.
+  - Planning evidence includes prompt, raw model output or deterministic substitute, validation results, and budget ledger updates.
+  - The CLI exposes a safe workflow for writing proposed contracts without executing them.
+  - Documentation explains how to run the planning workflow and review generated contracts.

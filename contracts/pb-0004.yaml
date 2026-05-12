@@ -1,0 +1,37 @@
+task_id: pb-0004
+release_id: planner-backend-1
+title: Document strong planning workflow and smoke checks
+task_type: documentation
+budget_class: S
+
+objective: >
+  Document the new strong planning workflow, generated-contract review process,
+  and smoke-test commands for the planner backend release.
+
+allowed_files:
+  - README.md
+  - docs/design/**
+
+forbidden_changes:
+  - Do not change Python source files.
+  - Do not change tests.
+  - Do not change project configuration.
+
+required_evidence:
+  - git diff
+  - test output
+  - changed-files list
+  - executor summary
+  - verifier summary
+
+verification:
+  profile: documentation
+
+stop_conditions:
+  - More than 4 documentation files changed.
+  - More than 300 diff lines.
+  - Documentation describes behavior that is not implemented.
+  - Verification fails twice.
+
+scientific_assumptions:
+  - Not applicable; documentation-only task.

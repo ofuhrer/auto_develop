@@ -1,0 +1,41 @@
+task_id: pb-0003
+release_id: planner-backend-1
+title: Add CLI options for strong planning outputs
+task_type: code_only
+budget_class: M
+
+objective: >
+  Extend the `plan-release` CLI so users can request strong planning, inspect
+  proposed contracts, and optionally write validated contract drafts to a target
+  directory without running them.
+
+allowed_files:
+  - src/agentic_devloop/cli.py
+  - src/agentic_devloop/planning*.py
+  - tests/test_cli.py
+  - tests/test_planning*.py
+
+forbidden_changes:
+  - Do not make generated contract writing the default.
+  - Do not run generated contracts from `plan-release`.
+  - Do not remove deterministic mode.
+
+required_evidence:
+  - git diff
+  - test output
+  - changed-files list
+  - CLI help/output tests
+  - executor summary
+  - verifier summary
+
+verification:
+  profile: code_only
+
+stop_conditions:
+  - More than 4 files changed.
+  - More than 500 diff lines.
+  - CLI behavior is unsafe or destructive by default.
+  - Verification fails twice.
+
+scientific_assumptions:
+  - Not applicable; developer tooling task.

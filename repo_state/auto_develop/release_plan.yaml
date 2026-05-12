@@ -1,7 +1,11 @@
-release_id: sprint-0
-active_objective: Validate the local autonomous run loop on a low-risk documentation task.
+release_id: planner-backend-1
+active_objective: Add a strong-model planning workflow that generates, validates, and optionally writes bounded task contract drafts.
 current_tasks:
-  - ad-0001
+  - pb-0001
+  - pb-0002
+  - pb-0003
+  - pb-0004
 next_steps:
-  - Review evidence quality after accepted self-test runs.
-  - Add conflict-resolution handling before relying on autonomous merges for larger changes.
+  - Run the release queue in sequential mode without finalization.
+  - Inspect evidence for each accepted task before trying autonomous finalization.
+  - If the run is clean, repeat with accepted-task merge enabled on a clean branch.
