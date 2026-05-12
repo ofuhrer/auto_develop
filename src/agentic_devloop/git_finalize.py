@@ -131,13 +131,14 @@ def _rebase_worktree_onto(worktree_path: Path, base_branch: str) -> None:
     _ensure_clean(worktree_path)
     upstream = base_branch
     if _has_remote(worktree_path, "origin"):
-        _git(worktree_path, ["fetch", "origin", base_branch])
         remote_ref = f"origin/{base_branch}"
-        try:
-            _git(worktree_path, ["rev-parse", "--verify", remote_ref])
+        fetch_result = run_process(
+            ["git", "fetch", "origin", base_branch],
+            cwd=worktree_path,
+            timeout_seconds=120,
+        )
+        if fetch_result.exit_code == 0 and _ref_exists(worktree_path, remote_ref):
             upstream = remote_ref
-        except GitFinalizeError:
-            upstream = base_branch
     _git(worktree_path, ["rebase", upstream], step="rebase")
 
 
@@ -149,8 +150,12 @@ def _has_remote(repo_path: Path, remote: str) -> bool:
 
 
 def _branch_exists(repo_path: Path, branch: str) -> bool:
+    return _ref_exists(repo_path, branch)
+
+
+def _ref_exists(repo_path: Path, ref: str) -> bool:
     result = run_process(
-        ["git", "rev-parse", "--verify", "--quiet", branch],
+        ["git", "rev-parse", "--verify", "--quiet", ref],
         cwd=repo_path,
         timeout_seconds=120,
     )
