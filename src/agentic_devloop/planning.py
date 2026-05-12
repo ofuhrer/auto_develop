@@ -8,7 +8,15 @@ from typing import Any, Protocol
 
 from agentic_devloop.budget import reserve_strong_model_call
 from agentic_devloop.config import load_project_config
-from agentic_devloop.models import ContractPlan, GeneratedContract, ProjectConfig, ReleaseObjective, TaskContract
+from agentic_devloop.contracts import normalize_contract_request
+from agentic_devloop.models import (
+    ContractNormalizationRequest,
+    ContractPlan,
+    GeneratedContract,
+    ProjectConfig,
+    ReleaseObjective,
+    TaskContract,
+)
 from agentic_devloop.planner_backend import PlannerBackendResult
 from agentic_devloop.runtime_supervisor import RuntimeSupervisor, RuntimeSupervisorApplierStopKind
 from agentic_devloop.yaml_io import load_yaml_model, write_yaml_model
@@ -294,6 +302,7 @@ def parse_planner_output(
             f"planner output release_id {plan.release_id!r} did not match expected {release_id!r}"
         )
     plan = plan.model_copy(update={"planner": planner})
+    plan = _normalize_contracts_for_admission(plan, project_config=project_config)
     try:
         validate_generated_contracts(plan, project_config=project_config)
     except ValueError as error:
@@ -316,6 +325,79 @@ def parse_planner_output(
             ) from error
         raise
     return plan
+
+
+def _normalize_contracts_for_admission(
+    plan: ContractPlan,
+    *,
+    project_config: ProjectConfig | None = None,
+) -> ContractPlan:
+    normalized_generated: list[GeneratedContract] = []
+    normalized_evidence: list[str] = []
+    for generated in plan.generated_contracts:
+        single_plan = plan.model_copy(update={"generated_contracts": [generated]})
+        try:
+            validate_generated_contracts(single_plan, project_config=project_config)
+            normalized_generated.append(generated)
+            continue
+        except ValueError as error:
+            if "must require diff evidence" not in str(error):
+                normalized_generated.append(generated)
+                continue
+
+        request = ContractNormalizationRequest(
+            release_id=plan.release_id,
+            task_id=generated.task_id,
+            rationale="Repair planner-generated admission failure with deterministic normalization.",
+            before_snapshot={"contract": generated.suggested_contract},
+            artifact_paths={
+                "planner_prompt_path": plan.planner_prompt_path,
+                "planner_stdout_path": plan.planner_stdout_path,
+                "planner_stderr_path": plan.planner_stderr_path,
+                "planner_metadata_path": plan.planner_metadata_path,
+            },
+        )
+        outcome = normalize_contract_request(request, project_config=project_config)
+        if outcome.after_snapshot is None:
+            raise PlannerNormalizationError(
+                "planner-generated contract normalization was refused",
+                stop_evidence=PlannerNormalizationStopEvidence(
+                    kind=RuntimeSupervisorApplierStopKind.BYPASSES_HARD_GATE,
+                    reason=f"Normalization refused for {generated.task_id}.",
+                ),
+            )
+        normalized_contract = outcome.after_snapshot.contract
+        if (
+            normalized_contract.allowed_files != generated.suggested_contract.allowed_files
+            or normalized_contract.forbidden_changes != generated.suggested_contract.forbidden_changes
+            or normalized_contract.depends_on != generated.suggested_contract.depends_on
+        ):
+            raise PlannerNormalizationError(
+                "planner-generated contract normalization changed guarded semantics",
+                stop_evidence=PlannerNormalizationStopEvidence(
+                    kind=RuntimeSupervisorApplierStopKind.BYPASSES_HARD_GATE,
+                    reason=(
+                        "Deterministic normalization attempted to modify allowed_files, forbidden_changes, "
+                        f"or depends_on for {generated.task_id}."
+                    ),
+                ),
+            )
+        normalized_generated_contract = generated.model_copy(update={"suggested_contract": normalized_contract})
+        rerun_plan = plan.model_copy(update={"generated_contracts": [normalized_generated_contract]})
+        validate_generated_contracts(rerun_plan, project_config=project_config)
+        normalized_generated.append(normalized_generated_contract)
+        normalized_evidence.append(
+            "planner_contract_normalization="
+            + json.dumps(outcome.model_dump(mode="json"), sort_keys=True)
+        )
+    if not normalized_evidence:
+        return plan
+    return plan.model_copy(
+        update={
+            "generated_contracts": normalized_generated,
+            "warnings": [*plan.warnings, *normalized_evidence],
+        }
+    )
 
 
 def validate_generated_contracts(

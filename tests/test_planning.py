@@ -6,7 +6,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agentic_devloop.models import ContractPlan, GeneratedContract, TaskContract
+from agentic_devloop.models import (
+    ContractNormalizationDecision,
+    ContractNormalizationOutcome,
+    ContractPlan,
+    GeneratedContract,
+    TaskContract,
+)
 from agentic_devloop.planner_backend import PlannerBackendResult
 from agentic_devloop.planning import (
     PlannerNormalizationError,
@@ -313,6 +319,101 @@ def test_parse_planner_output_stops_with_structured_evidence_for_budget_exceeded
 
     assert exc.value.stop_evidence.kind == RuntimeSupervisorApplierStopKind.EXCEEDS_TASK_BUDGET
     assert "allowed_files count exceeds project budget" in exc.value.stop_evidence.reason
+
+
+def test_parse_planner_output_normalizes_missing_diff_evidence_and_reruns_admission() -> None:
+    plan = parse_planner_output(
+        {
+            "release_id": "v0.3.5",
+            "planner": "strong-model",
+            "generated_contracts": [
+                {
+                    "task_id": "v0.3.5-0001",
+                    "title": "Repairable admission",
+                    "objective": "Repair missing diff evidence.",
+                    "rationale": "Repairable planner drift.",
+                    "suggested_contract": {
+                        "task_id": "v0.3.5-0001",
+                        "release_id": "v0.3.5",
+                        "title": "Repairable admission",
+                        "task_type": "code_only",
+                        "budget_class": "S",
+                        "objective": "Repair missing diff evidence.",
+                        "allowed_files": ["src/agentic_devloop/planning.py"],
+                        "forbidden_changes": ["Do not touch release flow."],
+                        "required_evidence": ["test output"],
+                        "verification": {"commands": ["true"]},
+                        "stop_conditions": ["Stop when scope expands."],
+                    },
+                }
+            ],
+            "warnings": [],
+        },
+        release_id="v0.3.5",
+        planner="strong-model",
+    )
+
+    required = plan.generated_contracts[0].suggested_contract.required_evidence
+    assert "git diff" in required
+    assert "changed-files list" in required
+    normalization_warnings = [warning for warning in plan.warnings if warning.startswith("planner_contract_normalization=")]
+    assert len(normalization_warnings) == 1
+    payload = json.loads(normalization_warnings[0].split("=", 1)[1])
+    assert payload["decision"] == "normalized"
+    assert payload["before_snapshot"]["contract"]["required_evidence"] == ["test output"]
+    assert "git diff" in payload["after_snapshot"]["contract"]["required_evidence"]
+
+
+def test_parse_planner_output_hard_stops_when_normalization_changes_guarded_semantics(monkeypatch) -> None:
+    def _unsafe_normalization(*args, **kwargs):
+        request = args[0]
+        changed = request.before_snapshot.contract.model_copy(update={"allowed_files": ["src/unsafe.py"]})
+        return ContractNormalizationOutcome(
+            release_id=request.release_id,
+            task_id=request.task_id,
+            decision=ContractNormalizationDecision.NORMALIZED,
+            rationale="Unsafe meaning-changing rewrite.",
+            before_snapshot=request.before_snapshot,
+            after_snapshot={"contract": changed},
+            changed_fields=[],
+            artifact_paths=request.artifact_paths,
+        )
+
+    monkeypatch.setattr("agentic_devloop.planning.normalize_contract_request", _unsafe_normalization)
+    with pytest.raises(PlannerNormalizationError) as exc:
+        parse_planner_output(
+            {
+                "release_id": "v0.3.6",
+                "planner": "strong-model",
+                "generated_contracts": [
+                    {
+                        "task_id": "v0.3.6-0001",
+                        "title": "Unsafe normalization",
+                        "objective": "Repair missing diff evidence.",
+                        "rationale": "Repairable planner drift.",
+                        "suggested_contract": {
+                            "task_id": "v0.3.6-0001",
+                            "release_id": "v0.3.6",
+                            "title": "Unsafe normalization",
+                            "task_type": "code_only",
+                            "budget_class": "S",
+                            "objective": "Repair missing diff evidence.",
+                            "allowed_files": ["src/agentic_devloop/planning.py"],
+                            "forbidden_changes": ["Do not touch release flow."],
+                            "required_evidence": ["test output"],
+                            "verification": {"commands": ["true"]},
+                            "stop_conditions": ["Stop when scope expands."],
+                        },
+                    }
+                ],
+                "warnings": [],
+            },
+            release_id="v0.3.6",
+            planner="strong-model",
+        )
+
+    assert exc.value.stop_evidence.kind == RuntimeSupervisorApplierStopKind.BYPASSES_HARD_GATE
+    assert "allowed_files" in exc.value.stop_evidence.reason
 
 
 def test_validate_generated_contracts_rejects_task_id_mismatch() -> None:
