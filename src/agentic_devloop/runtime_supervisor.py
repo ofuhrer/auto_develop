@@ -96,6 +96,7 @@ class RuntimeSupervisorApplierStopKind(StrEnum):
     EXCEEDS_RETRY_BUDGET = "exceeds_retry_budget"
     BYPASSES_HARD_GATE = "bypasses_hard_gate"
     OUTSIDE_TEMP_EVIDENCE_PATH = "outside_temp_evidence_path"
+    UNAVAILABLE_MODEL = "unavailable_model"
 
 
 class RepairActionKind(StrEnum):
@@ -506,7 +507,18 @@ class RuntimeSupervisor:
         recommended_model: str,
         reason: str,
         retry_budget_remaining: int,
+        available_models: Sequence[str] | None = None,
     ) -> RuntimeSupervisorApplierResult:
+        if available_models is not None and recommended_model not in set(available_models):
+            return RuntimeSupervisorApplierResult(
+                action_kind=RepairActionKind.MODEL_ESCALATION,
+                applied=False,
+                stop_evidence=RuntimeSupervisorApplierStopEvidence(
+                    action_kind=RepairActionKind.MODEL_ESCALATION,
+                    kind=RuntimeSupervisorApplierStopKind.UNAVAILABLE_MODEL,
+                    reason="Model escalation recommended a model unavailable in configured routing.",
+                ),
+            )
         if retry_budget_remaining <= 0:
             return RuntimeSupervisorApplierResult(
                 action_kind=RepairActionKind.MODEL_ESCALATION,

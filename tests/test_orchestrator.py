@@ -85,6 +85,25 @@ class FailingExecutor:
         )
 
 
+class TimedOutExecutor:
+    def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        stdout_path = output_dir / "executor_stdout.log"
+        stderr_path = output_dir / "executor_stderr.log"
+        stdout_path.write_text("still working\n", encoding="utf-8")
+        stderr_path.write_text("timed out\n", encoding="utf-8")
+        return ExecutorResult(
+            command=["fake-executor"],
+            exit_code=124,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            duration_seconds=300.0,
+            timed_out=True,
+            backend="fake",
+            model="gpt-5.4-mini",
+        )
+
+
 class RecordingDiagnosisBackend:
     def __init__(self, category: str) -> None:
         self.category = category
@@ -828,6 +847,160 @@ def test_run_task_keeps_failure_diagnosis_yaml_artifact_compatible(tmp_path) -> 
     assert failure_diagnosis["attempts"] == [
         {"attempt": 1, "model": None, "exit_code": 2, "timed_out": False}
     ]
+
+
+def test_run_task_records_runtime_supervisor_long_running_worker_inspection(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.4-mini",
+                "max_walltime_minutes": 5,
+            },
+            "verification_profiles": {"default": {"commands": ["false"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 1,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contract_path = tmp_path / "contract.yaml"
+    _write_yaml(
+        contract_path,
+        {
+            "task_id": "demo-0008",
+            "release_id": "v0.1.0",
+            "title": "Timeout task",
+            "budget_class": "S",
+            "objective": "Timeout before verification.",
+            "allowed_files": ["README.md"],
+            "forbidden_changes": [],
+            "required_evidence": ["git diff", "test output"],
+            "verification": {"commands": ["false"]},
+            "stop_conditions": ["Executor fails."],
+        },
+    )
+
+    result = run_task(
+        project_id="demo",
+        contract_path=contract_path,
+        config_dir=config_dir,
+        runs_dir=tmp_path / "runs",
+        executor=TimedOutExecutor(),
+        now=datetime(2026, 5, 12, 12, 8, tzinfo=UTC),
+    )
+
+    failure_diagnosis = yaml.safe_load(
+        (result.bundle_path / "failure_diagnosis.yaml").read_text(encoding="utf-8")
+    )
+    runtime_supervisor = failure_diagnosis["runtime_supervisor"]
+    assert runtime_supervisor["classification"] == "long_running_worker_active"
+    assert runtime_supervisor["inspection"]["applied"] is True
+    assert runtime_supervisor["inspection"]["action_kind"] == "long_running_worker_inspection"
+    assert runtime_supervisor["inspection"]["active"] is True
+
+
+def test_run_task_records_runtime_supervisor_model_escalation_stop_when_budget_exhausted(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.4-mini",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {
+                "worker": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.4-mini",
+                    "max_walltime_minutes": 5,
+                },
+                "escalation": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.5",
+                    "max_walltime_minutes": 5,
+                },
+            },
+            "model_routing": {
+                "default_role": "worker",
+                "escalation_role": "escalation",
+            },
+            "verification_profiles": {"default": {"commands": ["false"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 1,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contract_path = tmp_path / "contract.yaml"
+    _write_yaml(
+        contract_path,
+        {
+            "task_id": "demo-0009",
+            "release_id": "v0.1.0",
+            "title": "Exhaust attempts",
+            "budget_class": "S",
+            "objective": "Exhaust attempts before verification.",
+            "allowed_files": ["README.md"],
+            "forbidden_changes": [],
+            "required_evidence": ["git diff", "test output"],
+            "verification": {"commands": ["false"]},
+            "stop_conditions": ["Executor fails."],
+        },
+    )
+
+    result = run_task(
+        project_id="demo",
+        contract_path=contract_path,
+        config_dir=config_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FailingExecutor(),
+        now=datetime(2026, 5, 12, 12, 9, tzinfo=UTC),
+    )
+
+    failure_diagnosis = yaml.safe_load(
+        (result.bundle_path / "failure_diagnosis.yaml").read_text(encoding="utf-8")
+    )
+    runtime_supervisor = failure_diagnosis["runtime_supervisor"]
+    assert runtime_supervisor["classification"] == "model_capability_mismatch"
+    assert runtime_supervisor["model_escalation"]["applied"] is False
+    assert runtime_supervisor["model_escalation"]["available_models"] == ["gpt-5.5"]
+    assert runtime_supervisor["model_escalation"]["stop_kind"] == "exceeds_retry_budget"
 
 
 def _write_yaml(path: Path, data: dict) -> None:

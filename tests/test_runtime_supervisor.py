@@ -232,6 +232,51 @@ def test_model_escalation_stops_when_retry_budget_exhausted() -> None:
     assert result.stop_evidence.kind == RuntimeSupervisorApplierStopKind.EXCEEDS_RETRY_BUDGET
 
 
+def test_model_escalation_applies_when_model_available_and_budget_remaining() -> None:
+    supervisor = RuntimeSupervisor()
+    source_paths = _input(
+        RepairDecisionClassification.MODEL_CAPABILITY_MISMATCH,
+        attempt=1,
+        max_retries=3,
+    ).source_evidence_paths
+
+    result = supervisor.apply_model_escalation_recommendation(
+        source_evidence_paths=source_paths,
+        current_model="gpt-5.4-mini",
+        recommended_model="gpt-5.5",
+        reason="executor failure",
+        retry_budget_remaining=1,
+        available_models=["gpt-5.4-mini", "gpt-5.5"],
+    )
+
+    assert result.applied is True
+    assert result.stop_evidence is None
+    assert result.proposal is not None
+    assert result.proposal.recommended_model == "gpt-5.5"
+
+
+def test_model_escalation_stops_when_recommended_model_unavailable() -> None:
+    supervisor = RuntimeSupervisor()
+    source_paths = _input(
+        RepairDecisionClassification.MODEL_CAPABILITY_MISMATCH,
+        attempt=1,
+        max_retries=3,
+    ).source_evidence_paths
+
+    result = supervisor.apply_model_escalation_recommendation(
+        source_evidence_paths=source_paths,
+        current_model="gpt-5.4-mini",
+        recommended_model="gpt-5.5",
+        reason="executor failure",
+        retry_budget_remaining=1,
+        available_models=["gpt-5.4-mini"],
+    )
+
+    assert result.applied is False
+    assert result.stop_evidence is not None
+    assert result.stop_evidence.kind == RuntimeSupervisorApplierStopKind.UNAVAILABLE_MODEL
+
+
 def test_release_resume_stops_without_hard_gate_fields() -> None:
     supervisor = RuntimeSupervisor()
     source_paths = _input(RepairDecisionClassification.RELEASE_RESUMABLE, attempt=1, max_retries=3).source_evidence_paths

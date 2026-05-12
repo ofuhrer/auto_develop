@@ -47,6 +47,20 @@ from agentic_devloop.models import (
     TaskRun,
     TaskState,
 )
+from agentic_devloop.runtime_supervisor import (
+    BacklogStateReference,
+    BudgetLedgerPaths,
+    EvidenceBundlePaths,
+    RawLogPaths,
+    RepairDecisionClassification,
+    ReleaseEvent,
+    ReleaseEventKind,
+    ReleaseSummaryReference,
+    RuntimeSupervisor,
+    RuntimeSupervisorStopReason,
+    RuntimeSupervisorInput,
+    TuningReportPaths,
+)
 from agentic_devloop.prompt import write_executor_prompt
 from agentic_devloop.review import deterministic_review
 from agentic_devloop.scientific import analyze_scientific_changes
@@ -204,12 +218,15 @@ def run_task(
         )
         bundle = _diagnose_failure(
             bundle=bundle,
+            config=config,
             task=task,
             executor_result=executor_result,
+            executor_configs=executor_configs,
             verification_results=[],
             changed_files=current_changed_files,
             verification_log_path=verification_log_path,
             backend=diagnosis_backend,
+            max_executor_attempts=config.budget.max_executor_attempts_per_task,
             progress=progress,
         )
         write_review_decision(bundle, decision)
@@ -276,12 +293,15 @@ def run_task(
     if any(result.exit_code != 0 for result in verification_results):
         bundle = _diagnose_failure(
             bundle=bundle,
+            config=config,
             task=task,
             executor_result=executor_result,
+            executor_configs=executor_configs,
             verification_results=verification_results,
             changed_files=current_changed_files,
             verification_log_path=bundle.verification_log_path,
             backend=diagnosis_backend,
+            max_executor_attempts=config.budget.max_executor_attempts_per_task,
             progress=progress,
         )
     write_review_decision(bundle, decision)
@@ -502,12 +522,15 @@ def _executor_attempt(attempt_number: int, result: ExecutorResult) -> ExecutorAt
 def _diagnose_failure(
     *,
     bundle: EvidenceBundle,
+    config: ProjectConfig,
     task: TaskContract,
     executor_result: ExecutorResult,
+    executor_configs: list[ExecutorConfig],
     verification_results: list[CommandResult],
     changed_files: list[str],
     verification_log_path: Path,
     backend: FailureDiagnosisBackend,
+    max_executor_attempts: int,
     progress: Callable[[str], None] | None,
 ) -> EvidenceBundle:
     diagnosis_result = backend.diagnose(
@@ -520,18 +543,146 @@ def _diagnose_failure(
         )
     )
     _report(progress, f"event=failure_diagnosis task={task.task_id} category={diagnosis_result.diagnosis.category}")
-    return write_failure_diagnosis(
-        bundle,
-        _failure_diagnosis_payload(diagnosis_result.diagnosis),
+    runtime_supervisor_payload = _runtime_supervisor_payload(
+        config=config,
+        task=task,
+        executor_result=executor_result,
+        executor_configs=executor_configs,
+        max_executor_attempts=max_executor_attempts,
+        bundle=bundle,
+        verification_log_path=verification_log_path,
     )
+    return write_failure_diagnosis(bundle, _failure_diagnosis_payload(diagnosis_result.diagnosis, runtime_supervisor_payload))
 
 
-def _failure_diagnosis_payload(diagnosis: FailureDiagnosis) -> dict:
+def _failure_diagnosis_payload(diagnosis: FailureDiagnosis, runtime_supervisor: dict | None = None) -> dict:
     payload = diagnosis.model_dump(mode="json")
     payload["final_exit_code"] = diagnosis.source_metadata.exit_code
     payload["attempts"] = [
         attempt.model_dump(mode="json") for attempt in diagnosis.source_metadata.attempts
     ]
+    if runtime_supervisor is not None:
+        payload["runtime_supervisor"] = runtime_supervisor
+    return payload
+
+
+def _runtime_supervisor_payload(
+    *,
+    config: ProjectConfig,
+    task: TaskContract,
+    executor_result: ExecutorResult,
+    executor_configs: list[ExecutorConfig],
+    max_executor_attempts: int,
+    bundle: EvidenceBundle,
+    verification_log_path: Path,
+) -> dict | None:
+    attempts_used = len(executor_result.attempts) or 1
+    exhausted_attempts = executor_result.exit_code != 0 and attempts_used >= max_executor_attempts
+    if not executor_result.timed_out and not exhausted_attempts:
+        return None
+
+    classification = (
+        RepairDecisionClassification.LONG_RUNNING_WORKER_ACTIVE
+        if executor_result.timed_out
+        else RepairDecisionClassification.MODEL_CAPABILITY_MISMATCH
+    )
+    supervisor = RuntimeSupervisor()
+    supervisor_input = RuntimeSupervisorInput(
+        classification=classification,
+        attempt=attempts_used,
+        max_retries=max_executor_attempts,
+        release_event=ReleaseEvent(
+            kind=ReleaseEventKind.TASK_FAILED,
+            message=f"task={task.task_id} executor_failed={executor_result.exit_code != 0} timed_out={executor_result.timed_out}",
+            event_path=bundle.bundle_path / "event.jsonl",
+        ),
+        release_summary=ReleaseSummaryReference(
+            release_id=task.release_id,
+            summary_path=bundle.bundle_path / "release_summary.yaml",
+        ),
+        evidence_bundle_paths=EvidenceBundlePaths(
+            bundle_path=bundle.bundle_path,
+            changed_files_path=bundle.changed_files_path,
+            verification_log_path=verification_log_path,
+        ),
+        raw_log_paths=RawLogPaths(
+            supervisor_log_path=bundle.bundle_path / "supervisor.log",
+            worker_stdout_path=executor_result.stdout_path,
+            worker_stderr_path=executor_result.stderr_path,
+        ),
+        budget_ledger_paths=BudgetLedgerPaths(
+            repair_budget_ledger_path=bundle.bundle_path / "repair_budget.yaml",
+            retry_budget_ledger_path=bundle.bundle_path / "retry_budget.yaml",
+        ),
+        tuning_report_paths=TuningReportPaths(
+            model_tuning_report_path=bundle.bundle_path / "model_tuning.yaml",
+            verification_tuning_report_path=bundle.bundle_path / "verification_tuning.yaml",
+        ),
+        backlog_state_reference=BacklogStateReference(
+            backlog_state_path=(config.repo_state_path or Path("repo_state") / config.project_id) / "backlog_state.yaml",
+            active_epic_id=task.release_id,
+        ),
+    )
+    decision = supervisor.decide(supervisor_input)
+    payload: dict = {
+        "classification": str(classification),
+        "decision": str(decision.decision),
+        "attempt": decision.attempt,
+        "max_retries": decision.max_retries,
+        "remaining_retries": decision.remaining_retries,
+        "source_evidence_paths": [str(path) for path in supervisor_input.source_evidence_paths],
+    }
+    if decision.stop_reason is not None:
+        payload["stop_reason"] = str(decision.stop_reason)
+
+    if classification == RepairDecisionClassification.LONG_RUNNING_WORKER_ACTIVE:
+        inspection = supervisor.apply_long_running_worker_inspection(
+            source_evidence_paths=supervisor_input.source_evidence_paths,
+            summary=f"Executor timed out after {executor_result.duration_seconds:.2f}s on attempt {attempts_used}/{max_executor_attempts}.",
+            active=True,
+        )
+        payload["inspection"] = {
+            "applied": inspection.applied,
+            "action_kind": str(inspection.action_kind),
+        }
+        if inspection.proposal is not None:
+            payload["inspection"]["summary"] = inspection.proposal.summary
+            payload["inspection"]["active"] = inspection.proposal.active
+        return payload
+
+    escalation_role = config.model_routing.escalation_role
+    if escalation_role is None:
+        payload["stop_reason"] = str(RuntimeSupervisorStopReason.EXHAUSTED_RETRY_BUDGET)
+        payload["model_escalation"] = {
+            "applied": False,
+            "stop_kind": "bypasses_hard_gate",
+            "reason": "No escalation role configured in model_routing.",
+        }
+        return payload
+    routing_configs = _executor_configs_for_role(config, escalation_role)
+    available_models = [item.model for item in routing_configs]
+    current_model = executor_result.model or executor_configs[-1].model
+    recommended_model = next((model for model in available_models if model != current_model), available_models[0])
+    escalation = supervisor.apply_model_escalation_recommendation(
+        source_evidence_paths=supervisor_input.source_evidence_paths,
+        current_model=current_model,
+        recommended_model=recommended_model,
+        reason="Task execution exhausted supported attempts.",
+        retry_budget_remaining=decision.remaining_retries,
+        available_models=available_models,
+    )
+    payload["model_escalation"] = {
+        "applied": escalation.applied,
+        "action_kind": str(escalation.action_kind),
+        "available_models": available_models,
+    }
+    if escalation.proposal is not None:
+        payload["model_escalation"]["current_model"] = escalation.proposal.current_model
+        payload["model_escalation"]["recommended_model"] = escalation.proposal.recommended_model
+        payload["model_escalation"]["reason"] = escalation.proposal.reason
+    if escalation.stop_evidence is not None:
+        payload["model_escalation"]["stop_kind"] = str(escalation.stop_evidence.kind)
+        payload["model_escalation"]["stop_reason"] = escalation.stop_evidence.reason
     return payload
 
 
