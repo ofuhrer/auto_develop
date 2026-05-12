@@ -6,15 +6,20 @@ import shlex
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from pydantic import ValidationError
 
 from agentic_devloop.budget import reserve_strong_model_call
 from agentic_devloop.config import load_project_config
-from agentic_devloop.models import BacklogEpic, BacklogPlan, ReleaseObjective
+from agentic_devloop.models import BacklogEpic, BacklogEvidenceManifest, BacklogPlan, ReleaseObjective
+from agentic_devloop.objective import run_objective
+from agentic_devloop.orchestrator import ExecutorProtocol
+from agentic_devloop.planning import PlannerBackend
+from agentic_devloop.planner_backend import CodexPlannerBackend
 from agentic_devloop.process import run_process
-from agentic_devloop.yaml_io import write_yaml_model
+from agentic_devloop.release import ReleaseRunResult
+from agentic_devloop.yaml_io import load_yaml_model, write_yaml_model
 
 
 @dataclass(frozen=True)
@@ -22,6 +27,25 @@ class BacklogPlanResult:
     plan_path: Path
     plan: BacklogPlan
     objective_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class BacklogRunResult:
+    selected_epic_id: str
+    plan_path: Path
+    backlog_plan_path: Path
+    plan: BacklogPlan
+    objective_path: Path
+    objective: ReleaseObjective
+    release_id: str
+    release: ReleaseRunResult
+    generated_objective_path: Path | None = None
+    contract_plan_path: Path | None = None
+    release_summary_path: Path | None = None
+    release_metrics_path: Path | None = None
+    release_budget_path: Path | None = None
+    release_tuning_path: Path | None = None
+    evidence_manifest: BacklogEvidenceManifest | None = None
 
 
 @dataclass(frozen=True)
@@ -225,6 +249,141 @@ def plan_backlog(
     plan_path = plan_dir / "backlog_plan.json"
     plan_path.write_text(json.dumps(plan.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8")
     return BacklogPlanResult(plan_path=plan_path, plan=plan, objective_path=objective_path)
+
+
+def run_backlog(
+    *,
+    project_id: str,
+    goal: str,
+    roadmap_path: Path = Path("docs/design/ROADMAP_AND_BACKLOG.md"),
+    selected_epic_id: str | None = None,
+    config_dir: Path = Path("configs"),
+    contracts_dir: Path = Path("contracts"),
+    runs_dir: Path = Path("runs"),
+    objectives_dir: Path = Path("objectives"),
+    mode: str = "strong-model",
+    planner_backend: BacklogPlannerBackend | None = None,
+    objective_planner_backend: PlannerBackend | None = None,
+    executor: ExecutorProtocol | None = None,
+    verification_timeout_seconds: int = 600,
+    allow_dirty: bool = False,
+    commit_on_accept: bool = False,
+    merge_on_accept: bool = False,
+    push_on_accept: bool = False,
+    release_finalize: str = "none",
+    integration_branch: str | None = None,
+    stop_on_failure: bool = True,
+    execution_mode: str = "sequential",
+    debug_keep_artifacts: bool = False,
+    progress: Callable[[str], None] | None = None,
+    now: datetime | None = None,
+) -> BacklogRunResult:
+    plan_result = plan_backlog(
+        project_id=project_id,
+        goal=goal,
+        roadmap_path=roadmap_path,
+        config_dir=config_dir,
+        runs_dir=runs_dir,
+        objectives_dir=objectives_dir,
+        write_objective=False,
+        mode=mode,
+        planner_backend=planner_backend,
+        now=now,
+    )
+    plan = plan_result.plan
+    epic = _select_epic(plan, selected_epic_id=selected_epic_id)
+    objective, objective_path, created_objective = _ensure_objective_for_epic(epic, objectives_dir)
+
+    objective_planning_mode = "strong-model"
+    planner_backend_for_objective = objective_planner_backend
+    if planner_backend_for_objective is None:
+        config = load_project_config(project_id, config_dir, validate_repo=True)
+        planner = config.model_roles.get("planner", config.executor)
+        planner_backend_for_objective = CodexPlannerBackend(config=planner, repo_path=config.repo_path)
+
+    objective_run = run_objective(
+        project_id=project_id,
+        objective_path=objective_path,
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=runs_dir,
+        planning_mode=objective_planning_mode,
+        planner_backend=planner_backend_for_objective,
+        executor=executor,
+        verification_timeout_seconds=verification_timeout_seconds,
+        allow_dirty=allow_dirty,
+        commit_on_accept=commit_on_accept,
+        merge_on_accept=merge_on_accept,
+        push_on_accept=push_on_accept,
+        release_finalize=release_finalize,
+        integration_branch=integration_branch,
+        stop_on_failure=stop_on_failure,
+        execution_mode=execution_mode,
+        debug_keep_artifacts=debug_keep_artifacts,
+        progress=progress,
+    )
+    evidence_manifest = BacklogEvidenceManifest(
+        backlog_plan_path=plan_result.plan_path,
+        generated_objective_path=objective_path if created_objective else None,
+        contract_plan_path=objective_run.planning.plan_path,
+        release_summary_path=objective_run.release.summary_path,
+        release_metrics_path=objective_run.release.metrics_path,
+        release_budget_path=objective_run.release.budget_path,
+        release_tuning_path=objective_run.release.tuning_path,
+    )
+    return BacklogRunResult(
+        selected_epic_id=epic.epic_id,
+        plan_path=plan_result.plan_path,
+        backlog_plan_path=plan_result.plan_path,
+        plan=plan,
+        objective_path=objective_path,
+        generated_objective_path=objective_path if created_objective else None,
+        objective=objective,
+        contract_plan_path=objective_run.planning.plan_path,
+        release_id=objective_run.release_id,
+        release=objective_run.release,
+        release_summary_path=objective_run.release.summary_path,
+        release_metrics_path=objective_run.release.metrics_path,
+        release_budget_path=objective_run.release.budget_path,
+        release_tuning_path=objective_run.release.tuning_path,
+        evidence_manifest=evidence_manifest,
+    )
+
+
+def _select_epic(plan: BacklogPlan, *, selected_epic_id: str | None) -> BacklogEpic:
+    epic_id = selected_epic_id or plan.selected_epic_id
+    if epic_id is None:
+        raise ValueError("backlog plan did not select an epic and no --epic-id was provided")
+    epic = next((item for item in plan.epics if item.epic_id == epic_id), None)
+    if epic is None:
+        raise ValueError(f"selected_epic_id not found in backlog plan: {epic_id}")
+    return epic
+
+
+def _ensure_objective_for_epic(
+    epic: BacklogEpic, objectives_dir: Path
+) -> tuple[ReleaseObjective, Path, bool]:
+    objectives_dir.mkdir(parents=True, exist_ok=True)
+    objective_path = objectives_dir / f"{epic.suggested_release_id}.yaml"
+    if objective_path.exists():
+        objective = load_yaml_model(objective_path, ReleaseObjective)
+        if objective.release_id != epic.suggested_release_id:
+            raise ValueError(
+                f"objective release_id {objective.release_id!r} did not match expected {epic.suggested_release_id!r}"
+            )
+        return objective, objective_path, False
+
+    objective = ReleaseObjective(
+        release_id=epic.suggested_release_id,
+        title=epic.title,
+        objective=epic.objective,
+        non_goals=[
+            "Do not broaden the selected epic beyond its stated acceptance criteria.",
+        ],
+        acceptance_criteria=epic.acceptance_criteria,
+    )
+    written = write_yaml_model(objective_path, objective)
+    return objective, written, True
 
 
 def parse_backlog_planner_output(

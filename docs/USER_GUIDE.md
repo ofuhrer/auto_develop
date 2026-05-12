@@ -758,6 +758,47 @@ Key options:
 
 This is the highest-level command. Use it only when you trust the planner output and admission checks enough to proceed directly into execution.
 
+### `agent-loop run-backlog`
+
+Selects one epic from backlog planning and executes it through the objective/release orchestration flow.
+
+```bash
+agent-loop run-backlog \
+  --project my_project \
+  --epic-id run-backlog \
+  --goal "Move toward fully autonomous roadmap-driven development" \
+  --mode strong-model \
+  --execute-planner \
+  --merge-on-accept \
+  --release-finalize push-feature
+```
+
+Key options:
+
+- `--project`: project identifier.
+- `--epic-id`: backlog epic identifier that must be selected for execution.
+- `--goal`: repository goal passed to backlog planning.
+- `--roadmap`: roadmap Markdown file to analyze.
+- `--mode strong-model`: required execution mode for backlog runs.
+- `--execute-planner`: required; executes planner backend instead of prompt-only output.
+- All relevant `run-release` execution and finalization options.
+
+Relationship to nearby commands:
+
+- `plan-backlog` selects and prioritizes epics. With `--write-objective`, it stops after writing the selected epic as an objective YAML file.
+- `run-backlog` performs backlog planning first, then selects the requested epic, reuses `objectives/<suggested_release_id>.yaml` when it already exists, or writes that objective file when it does not.
+- `run-objective` skips backlog selection and starts from an existing objective file.
+- `run-backlog` forwards the usual release execution and finalization flags, so `--commit-on-accept`, `--merge-on-accept`, `--push-on-accept`, and `--release-finalize` still control task commits and release finalization.
+
+Run-backlog evidence records artifact paths when produced, including:
+- backlog plan (`backlog_plan.json`);
+- generated objective path (when run-backlog creates a new objective file);
+- contract plan (`contract_plan.json`);
+- release summary (`release_summary.json`);
+- release metrics (`release_metrics.json`);
+- release budget (`release_budget.json`);
+- release tuning (`release_tuning.md`).
+
 ### `agent-loop status`
 
 Shows recent run summaries.

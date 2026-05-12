@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 import time
 import json
 from pathlib import Path
@@ -12,6 +13,7 @@ from agentic_devloop.models import ExecutorResult, ProjectConfig, TaskContract
 from agentic_devloop.models import Decision, Reviewer, ReviewDecision
 from agentic_devloop.orchestrator import TaskRunResult, executor_config_for_task, executor_configs_for_task
 from agentic_devloop.release import (
+    _completed_release_task_ids,
     _ensure_no_existing_task_branches,
     _ensure_no_existing_worktrees,
     _multiplexed_progress,
@@ -54,9 +56,21 @@ class FakeExecutor:
 
 
 class SlowFakeExecutor(FakeExecutor):
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active = 0
+        self.max_active = 0
+
     def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
-        time.sleep(0.2)
-        return super().run(prompt_path=prompt_path, worktree_path=worktree_path, output_dir=output_dir)
+        with self._lock:
+            self._active += 1
+            self.max_active = max(self.max_active, self._active)
+        try:
+            time.sleep(0.2)
+            return super().run(prompt_path=prompt_path, worktree_path=worktree_path, output_dir=output_dir)
+        finally:
+            with self._lock:
+                self._active -= 1
 
 
 def test_executor_config_for_task_uses_budget_then_task_type_roles() -> None:
@@ -233,20 +247,19 @@ def test_run_release_parallel_executes_independent_tasks_concurrently(tmp_path) 
         _task_contract("demo-0002", allowed_files=["docs/demo-0002.md"]).model_dump(mode="json"),
     )
 
-    started = time.monotonic()
+    executor = SlowFakeExecutor()
     result = run_release(
         project_id="demo",
         release_id="v0.1.0",
         config_dir=config_dir,
         contracts_dir=contracts_dir,
         runs_dir=tmp_path / "runs",
-        executor=SlowFakeExecutor(),
+        executor=executor,
         execution_mode="parallel",
     )
-    elapsed = time.monotonic() - started
 
     assert result.decision == Decision.ACCEPTED
-    assert elapsed < 0.7
+    assert executor.max_active == 2
     assert "parallel_scheduler" in result.log_path.read_text(encoding="utf-8")
     assert result.review_path.exists()
 
@@ -263,6 +276,51 @@ def test_release_dependency_map_chains_explicit_and_overlapping_tasks() -> None:
     dependencies = _release_dependency_map(tasks, report)
 
     assert dependencies == {"demo-0002": ["demo-0001"], "demo-0003": ["demo-0002"]}
+
+
+def test_release_dependency_map_accepts_completed_prior_release_tasks() -> None:
+    tasks = [
+        _task_contract("demo-0002", allowed_files=["docs/demo-0002.md"]).model_copy(
+            update={"depends_on": ["demo-0001"]}
+        )
+    ]
+    report = analyze_contract_overlaps(tasks)
+
+    dependencies = _release_dependency_map(
+        tasks,
+        report,
+        completed_task_ids={"demo-0001"},
+    )
+
+    assert dependencies == {}
+
+
+def test_completed_release_task_ids_reads_accepted_merged_summaries(tmp_path) -> None:
+    summary_dir = tmp_path / "20260512T000000Z_demo_release"
+    summary_dir.mkdir(parents=True)
+    (summary_dir / "release_summary.json").write_text(
+        json.dumps(
+            {
+                "release_id": "demo",
+                "integration_branch": "feature/demo",
+                "tasks": [
+                    {"task_id": "demo-0001", "decision": "accepted", "merged": True},
+                    {"task_id": "demo-0002", "decision": "failed", "merged": True},
+                    {"task_id": "demo-0003", "decision": "accepted", "merged": False},
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    completed = _completed_release_task_ids(
+        runs_dir=tmp_path,
+        release_id="demo",
+        integration_branch="feature/demo",
+    )
+
+    assert completed == {"demo-0001"}
 
 
 def test_multiplexed_progress_filters_noisy_agent_lines_and_keeps_raw_log(tmp_path) -> None:

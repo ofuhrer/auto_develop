@@ -37,6 +37,7 @@ Implemented capabilities include:
 - role-based model routing;
 - repo-state context injection;
 - `run-task`, `run-release`, `plan-backlog`, `plan-release`, `run-objective`, `status`, and `cleanup` commands;
+- `run-backlog` for chaining backlog planning into objective and release execution;
 - release-level feature branch integration through `feature/<release>`;
 - dynamic release DAG scheduling from `depends_on` and file-overlap analysis;
 - human-cockpit `release.log`, raw audit `release.raw.log`, `release_metrics.json`, `release_budget.json`, and `release_tuning.md`;
