@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 
 import yaml
@@ -12,6 +13,8 @@ from agentic_devloop.orchestrator import TaskRunResult, executor_config_for_task
 from agentic_devloop.release import (
     _ensure_no_existing_task_branches,
     _ensure_no_existing_worktrees,
+    _multiplexed_progress,
+    _release_dependency_map,
     _should_preserve_task_branch,
     _should_preserve_task_worktree,
     analyze_contract_overlaps,
@@ -47,6 +50,12 @@ class FakeExecutor:
             backend="fake",
             model=None,
         )
+
+
+class SlowFakeExecutor(FakeExecutor):
+    def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+        time.sleep(0.2)
+        return super().run(prompt_path=prompt_path, worktree_path=worktree_path, output_dir=output_dir)
 
 
 def test_executor_config_for_task_uses_budget_then_task_type_roles() -> None:
@@ -198,6 +207,74 @@ def test_run_release_executes_ordered_contracts_and_writes_summary(tmp_path) -> 
         text=True,
     ).stdout
     assert branches.strip() == ""
+    assert _git_output(repo, "rev-parse", "--verify", "feature/v0.1.0")
+    assert _git_output(repo, "branch", "--show-current").strip() == "feature/v0.1.0"
+    assert not _git_object_exists(repo, "main:docs/demo-0001.md")
+    assert _git_output(repo, "show", "feature/v0.1.0:docs/demo-0001.md").strip() == "# demo-0001"
+    assert result.review_path.exists()
+    assert "Release Review" in result.review_path.read_text(encoding="utf-8")
+
+
+def test_run_release_parallel_executes_independent_tasks_concurrently(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+    _write_yaml(
+        contracts_dir / "demo-0002.yaml",
+        _task_contract("demo-0002", allowed_files=["docs/demo-0002.md"]).model_dump(mode="json"),
+    )
+
+    started = time.monotonic()
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=SlowFakeExecutor(),
+        execution_mode="parallel",
+    )
+    elapsed = time.monotonic() - started
+
+    assert result.decision == Decision.ACCEPTED
+    assert elapsed < 0.45
+    assert "parallel_scheduler" in result.log_path.read_text(encoding="utf-8")
+    assert result.review_path.exists()
+
+
+def test_release_dependency_map_chains_explicit_and_overlapping_tasks() -> None:
+    tasks = [
+        _task_contract("demo-0001", allowed_files=["docs/guides/**"]),
+        _task_contract("demo-0002", allowed_files=["docs/guides/setup.md"]),
+        _task_contract("demo-0003", allowed_files=["docs/other.md"]),
+    ]
+    tasks[2] = tasks[2].model_copy(update={"depends_on": ["demo-0002"]})
+    report = analyze_contract_overlaps(tasks)
+
+    dependencies = _release_dependency_map(tasks, report)
+
+    assert dependencies == {"demo-0002": ["demo-0001"], "demo-0003": ["demo-0002"]}
+
+
+def test_multiplexed_progress_filters_noisy_agent_lines_and_keeps_raw_log(tmp_path) -> None:
+    visible: list[str] = []
+    progress = _multiplexed_progress(visible.append, tmp_path / "release.log", tmp_path / "raw.log")
+
+    progress("agent task=x phase=executor attempt=1 stream=stderr | 2026 WARN plugin noise")
+    progress("agent task=x phase=executor attempt=1 stream=stderr | ERROR: quota")
+    progress("agent task=x phase=executor attempt=1 stream=stdout | Changed files:")
+
+    assert visible == [
+        "agent task=x phase=executor attempt=1 stream=stderr | ERROR: quota",
+        "agent task=x phase=executor attempt=1 stream=stdout | Changed files:",
+    ]
+    assert "plugin noise" not in (tmp_path / "release.log").read_text(encoding="utf-8")
+    assert "plugin noise" in (tmp_path / "raw.log").read_text(encoding="utf-8")
 
 
 def test_release_preflight_rejects_existing_project_worktrees(tmp_path) -> None:
@@ -213,6 +290,34 @@ def test_release_preflight_rejects_existing_project_worktrees(tmp_path) -> None:
         assert str(stale) in str(error)
     else:
         raise AssertionError("expected stale worktree preflight failure")
+
+
+def test_run_release_can_finalize_feature_branch_into_main(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FakeExecutor(),
+        merge_on_accept=True,
+        release_finalize="merge-main",
+    )
+
+    assert result.integration_branch == "feature/v0.1.0"
+    assert result.finalization is not None
+    assert result.finalization.merged is True
+    assert (repo / "docs" / "demo-0001.md").exists()
+    assert _git_output(repo, "branch", "--show-current").strip() == "main"
 
 
 def test_release_preflight_ignores_metadata_files(tmp_path) -> None:
@@ -457,6 +562,66 @@ def _task_contract(
 
 def _git(repo, *args: str) -> None:
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+
+
+def _git_output(repo, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def _git_object_exists(repo, ref: str) -> bool:
+    return (
+        subprocess.run(
+            ["git", "cat-file", "-e", ref],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        ).returncode
+        == 0
+    )
+
+
+def _repo_with_initial_commit(repo: Path) -> Path:
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+    return repo
+
+
+def _write_demo_config(tmp_path: Path, repo: Path) -> Path:
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    return config_dir
 
 
 def _write_yaml(path: Path, data: dict) -> None:

@@ -192,9 +192,12 @@ def _draft_release_preparation_contract(
         "objective": "Create bounded implementation contracts for the approved release objective.",
         "allowed_files": ["contracts/**", f"repo_state/**/release_plan.yaml"],
         "forbidden_changes": ["Do not modify source code while planning contracts."],
-        "required_evidence": ["contract diff", "release plan diff"],
+        "required_evidence": ["git diff", "contract diff", "release plan diff"],
         "verification": {"profile": verification_profile},
-        "stop_conditions": ["Generated contracts cannot be bounded to allowed files."],
+        "stop_conditions": [
+            "Generated contracts cannot be bounded to allowed files.",
+            "Verification profiles cannot be matched to project config.",
+        ],
     }
     return GeneratedContract(
         task_id=task_id,
@@ -226,11 +229,13 @@ def _criterion_review_contract(
                 "Do not modify source code while validating release coverage.",
             ],
             "required_evidence": [
+                "git diff",
                 f"Coverage note for {criterion}",
             ],
             "verification": {"profile": verification_profile},
             "stop_conditions": [
                 f"Acceptance criterion is not covered by current contracts: {', '.join(sorted(covered))}",
+                "Coverage review requires source code changes.",
             ],
         }
     )
@@ -289,6 +294,19 @@ def validate_generated_contracts(
                 "generated contract uses unsafe whole-repo allowed_files patterns: "
                 + ", ".join(broad_patterns)
             )
+        if not _has_required_evidence(suggested_contract, "diff"):
+            raise ValueError(
+                f"generated contract must require diff evidence: {suggested_contract.task_id}"
+            )
+        if not _has_quality_stop_condition(suggested_contract):
+            raise ValueError(
+                f"generated contract must include a scope or verification stop condition: {suggested_contract.task_id}"
+            )
+        if suggested_contract.task_type in {"benchmark", "scientific_validation"} and not suggested_contract.non_goals:
+            raise ValueError(
+                "generated scientific or benchmark contracts must include explicit non_goals: "
+                f"{suggested_contract.task_id}"
+            )
         if project_config is not None:
             if len(suggested_contract.allowed_files) > project_config.budget.max_changed_files_per_task:
                 raise ValueError(
@@ -302,6 +320,15 @@ def validate_generated_contracts(
                     raise ValueError(
                         f"generated contract references unknown verification profile {profile!r}: "
                         f"{suggested_contract.task_id}"
+                    )
+                if (
+                    suggested_contract.task_type.value in project_config.verification_profiles
+                    and profile != suggested_contract.task_type.value
+                    and profile != "default"
+                ):
+                    raise ValueError(
+                        "generated contract verification profile is inconsistent with task_type "
+                        f"{suggested_contract.task_type.value!r}: {suggested_contract.task_id}"
                     )
         seen_task_ids.add(suggested_contract.task_id)
         validated_contracts.append(suggested_contract)
@@ -385,6 +412,16 @@ def _extract_json_object(raw_output: str) -> str:
 def _is_whole_repo_pattern(pattern: str) -> bool:
     normalized = pattern.strip().rstrip("/")
     return normalized in {"*", "**", "**/*", "./**", "./**/*"}
+
+
+def _has_required_evidence(contract: TaskContract, needle: str) -> bool:
+    needle_lower = needle.lower()
+    return any(needle_lower in item.lower() for item in contract.required_evidence)
+
+
+def _has_quality_stop_condition(contract: TaskContract) -> bool:
+    terms = ("scope", "verification", "fail", "cannot", "allowed")
+    return any(any(term in condition.lower() for term in terms) for condition in contract.stop_conditions)
 
 
 def _planner_backend_paths(raw_output: object) -> dict[str, Path]:

@@ -87,11 +87,13 @@ agent-loop run-release \
   --release sprint-0
 ```
 
-`run-release` executes existing task contracts in order. If no `--contract` arguments are provided, it reads `current_tasks` from `repo_state/<project>/release_plan.yaml` and maps each task ID to `contracts/<task-id>.yaml`. It stops after the first non-accepted task by default and writes `release_summary.json` under `runs/`.
+`run-release` executes existing task contracts. If no `--contract` arguments are provided, it reads `current_tasks` from `repo_state/<project>/release_plan.yaml` and maps each task ID to `contracts/<task-id>.yaml`. Sequential mode runs the queue in order. Parallel mode lets the orchestrator build a dependency DAG from explicit `depends_on` fields and inferred file-overlap dependencies, submit ready tasks concurrently, and continue scheduling as task outcomes arrive. It stops after the first non-accepted task by default and writes `release_summary.json` plus `release_review.md` under `runs/`.
 
-Before running tasks, `run-release` classifies overlapping `allowed_files` patterns. Minor overlap is allowed in sequential mode, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected.
+By default the orchestrator owns `feature/<release>` as the release integration branch. Task branches are based on that feature branch, and `--merge-on-accept` merges accepted task branches into the feature branch, not directly into `main`. Use `--release-finalize merge-main` after the release is accepted to merge the feature branch into `main`, `--release-finalize push-feature` to push the feature branch for PR review, or `--release-finalize push-main` to merge and push `main`.
 
-`run-release` also writes a multiplexed progress log at `runs/<release-run-id>/release.log` and prints that path as `release_log=...` at startup. The log includes release progress plus live stdout/stderr lines from Codex executor attempts with task, phase, attempt, and stream labels, so parallel workers can be monitored from one file. Monitor a live run with:
+Before running tasks, `run-release` classifies overlapping `allowed_files` patterns. Minor overlap becomes a sequencing dependency in parallel mode, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected.
+
+`run-release` also writes a filtered multiplexed progress log at `runs/<release-run-id>/release.log` and prints that path as `release_log=...` at startup. Full unfiltered agent stdout/stderr is retained in `release.raw.log`. Monitor a live run with:
 
 ```bash
 tail -f runs/<release-run-id>/release.log

@@ -82,6 +82,7 @@ def run_task(
     merge_on_accept: bool = False,
     push_on_accept: bool = False,
     commit_message: str | None = None,
+    base_branch: str | None = None,
     now: datetime | None = None,
     progress: Callable[[str], None] | None = None,
 ) -> TaskRunResult:
@@ -93,6 +94,7 @@ def run_task(
     run_root = runs_dir / run_id / task.task_id
     scratch_dir = run_root / "_scratch"
     bundle_path = run_root / "evidence"
+    task_base_branch = base_branch or config.default_base_branch
 
     _report(progress, f"run_id={run_id}")
     _report(progress, f"creating worktree: {worktree_path}")
@@ -101,7 +103,7 @@ def run_task(
         repo_path=config.repo_path,
         worktree_path=worktree_path,
         branch=branch,
-        base_branch=config.default_base_branch,
+        base_branch=task_base_branch,
         allow_dirty=allow_dirty,
     )
 
@@ -247,7 +249,7 @@ def run_task(
                 repo_path=config.repo_path,
                 worktree_path=worktree_path,
                 task_branch=branch,
-                base_branch=config.default_base_branch,
+                base_branch=task_base_branch,
                 commit_message=message,
                 merge=should_merge,
                 push=should_push,
@@ -255,9 +257,9 @@ def run_task(
             if finalize_result.commit_hash:
                 _report(progress, f"commit={finalize_result.commit_hash}")
             if finalize_result.merged:
-                _report(progress, f"merged_into={config.default_base_branch}")
+                _report(progress, f"merged_into={task_base_branch}")
             if finalize_result.pushed:
-                _report(progress, f"pushed=origin/{config.default_base_branch}")
+                _report(progress, f"pushed=origin/{task_base_branch}")
         except GitFinalizeError as error:
             _report(progress, f"finalization_failed={error}")
             repair_result = _attempt_conflict_repair(
@@ -278,7 +280,7 @@ def run_task(
                         repo_path=config.repo_path,
                         worktree_path=worktree_path,
                         task_branch=branch,
-                        base_branch=config.default_base_branch,
+                        base_branch=task_base_branch,
                         commit_message=message,
                         merge=should_merge,
                         push=should_push,

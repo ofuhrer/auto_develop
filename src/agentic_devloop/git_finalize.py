@@ -42,6 +42,38 @@ def push_branch(repo_path: Path, branch: str, remote: str = "origin") -> None:
     _git(repo_path, ["push", remote, branch])
 
 
+def ensure_branch_from_base(repo_path: Path, branch: str, base_branch: str) -> None:
+    _ensure_clean(repo_path)
+    if _branch_exists(repo_path, branch):
+        return
+    _ensure_base_branch(repo_path, base_branch)
+    _git(repo_path, ["branch", branch, base_branch])
+
+
+def merge_integration_branch_to_base(
+    *,
+    repo_path: Path,
+    integration_branch: str,
+    base_branch: str,
+    push: bool = False,
+) -> FinalizeResult:
+    lock_path = repo_path / ".git" / "agent-main.lock"
+    with _merge_lock(lock_path):
+        _ensure_base_branch(repo_path, base_branch)
+        rebased_onto = _git(repo_path, ["rev-parse", base_branch]).strip()
+        merge_branch(repo_path, integration_branch)
+        pushed = False
+        if push:
+            push_branch(repo_path, base_branch)
+            pushed = True
+        return FinalizeResult(
+            merged=True,
+            pushed=pushed,
+            lock_path=str(lock_path),
+            rebased_onto=rebased_onto,
+        )
+
+
 def finalize_accepted_task(
     *,
     repo_path: Path,
@@ -114,6 +146,15 @@ def _has_remote(repo_path: Path, remote: str) -> bool:
     if result.exit_code != 0:
         return False
     return remote in result.stdout.splitlines()
+
+
+def _branch_exists(repo_path: Path, branch: str) -> bool:
+    result = run_process(
+        ["git", "rev-parse", "--verify", "--quiet", branch],
+        cwd=repo_path,
+        timeout_seconds=120,
+    )
+    return result.exit_code == 0
 
 
 class _merge_lock:

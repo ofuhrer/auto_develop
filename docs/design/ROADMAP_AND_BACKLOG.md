@@ -93,17 +93,20 @@ Current implementation status:
 - Context size is bounded by `budget.max_context_chars_per_task`.
 - Evidence bundles persist `model_call_metadata.json` with prompt/output character counts.
 - `agent-loop status` reads existing evidence bundles and reports recent run summaries.
-- `agent-loop run-release` executes an ordered set of existing contracts from explicit `--contract` arguments or `repo_state/<project>/release_plan.yaml`.
-- `agent-loop run-release` writes a multiplexed `release.log` with release progress and live executor stdout/stderr for monitoring with `tail -f`.
+- `agent-loop run-release` executes existing contracts from explicit `--contract` arguments or `repo_state/<project>/release_plan.yaml`.
+- Parallel release mode builds a dynamic execution DAG from explicit dependencies and file-overlap dependencies, submits ready tasks concurrently, and schedules newly unblocked tasks as results arrive.
+- Release runs use an orchestrator-owned integration branch by default (`feature/<release>`); accepted task branches merge into that feature branch before optional final merge or push.
+- `agent-loop run-release` writes a filtered multiplexed `release.log` for monitoring with `tail -f` and preserves full raw agent streams in `release.raw.log`.
+- Release runs write a `release_review.md` artifact.
 - Release runs fail fast when the configured project worktree root contains stale worktrees or selected task branches already exist.
 - Release task worktrees and merged branches are cleaned up by default unless debug artifact retention is requested; accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches are preserved.
-- Release queues classify allowed-file overlap; minor overlap is sequential-only, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected.
+- Release queues classify allowed-file overlap; minor overlap becomes a dependency, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected.
 - Project configs support `model_roles` and `model_routing` for cheap-worker and stronger-model task execution routing.
 - Executor roles support `fallback_models`; attempts are bounded by `budget.max_executor_attempts_per_task`.
 - Executor failure evidence includes `executor_attempts.json` and deterministic `failure_diagnosis.yaml`.
 - `agent-loop plan-release` writes deterministic contract planning scaffolds from release objectives and can execute a configured planner backend with `--execute-planner`, preserving planner stdout/stderr/metadata paths in the contract plan.
 - `agent-loop run-objective` plans from an objective, writes validated generated contracts, and runs those contracts as a release queue.
-- Generated-contract admission rejects release mismatch, whole-repo scope, unknown verification profiles, and allowed-file counts above project budget.
+- Generated-contract admission rejects release mismatch, missing diff evidence, weak stop conditions, whole-repo scope, unknown verification profiles, inconsistent verification profiles, and allowed-file counts above project budget.
 - Accepted-task finalization uses a local merge lock and rebases the worktree onto latest base before merging.
 - Contract-contained rebase conflicts get one bounded autonomous repair attempt before escalation.
 - Model-based repeated-failure diagnosis is not yet implemented.

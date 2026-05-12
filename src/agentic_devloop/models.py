@@ -149,8 +149,9 @@ class TaskContract(StrictModel):
     tolerance_changes_allowed: bool = False
     benchmark_delta_required: bool = False
     remote_dispatch: RemoteDispatch | None = None
+    depends_on: list[str] = Field(default_factory=list)
 
-    @field_validator("allowed_files", "required_evidence", "stop_conditions")
+    @field_validator("allowed_files", "required_evidence", "stop_conditions", "depends_on")
     @classmethod
     def list_items_must_not_be_empty(cls, values: list[str]) -> list[str]:
         if any(not value.strip() for value in values):

@@ -307,12 +307,16 @@ Finalization conflicts are captured in evidence. Contract-contained rebase confl
 2. Fail fast unless the configured project `worktree_root` is empty.
 3. Resolve an ordered contract queue from explicit `--contract` arguments or `repo_state/<project>/release_plan.yaml`.
 4. Fail fast if any task branch for the selected release queue already exists.
-5. Classify `allowed_files` overlap.
-6. Run each contract through the existing `run-task` state machine.
-7. Stop after the first non-accepted task unless `--continue-on-failure` is set.
-8. Mirror progress and live executor stdout/stderr to `runs/<release-run-id>/release.log`.
-9. Remove task worktrees and merged task branches unless `--debug-keep-artifacts` is set; preserve accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches.
-10. Persist `runs/<release-run-id>/release_summary.json`.
+5. Create or reuse the orchestrator-owned integration branch, defaulting to `feature/<release>`, from the configured base branch.
+6. Classify `allowed_files` overlap.
+7. Build an execution DAG from explicit `depends_on` edges and inferred overlap dependencies.
+8. In sequential mode, run the queue in order; in parallel mode, submit currently-ready tasks, monitor completions, and dynamically submit newly unblocked tasks.
+9. Base task branches on the integration branch and merge accepted task branches back into that integration branch when task finalization is requested.
+10. Stop after the first non-accepted task unless `--continue-on-failure` is set.
+11. Optionally finalize the accepted release with `--release-finalize merge-main`, `push-feature`, or `push-main`.
+12. Mirror filtered progress to `runs/<release-run-id>/release.log` and full raw agent streams to `release.raw.log`.
+13. Remove task worktrees and merged task branches unless `--debug-keep-artifacts` is set; preserve accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches.
+14. Persist `runs/<release-run-id>/release_summary.json` and `release_review.md`.
 
 This command executes already-defined contracts. Objective-level planning and execution are composed by `run-objective`.
 
@@ -328,7 +332,7 @@ This command executes already-defined contracts. Objective-level planning and ex
 6. In `--mode strong-model`, reserve a strong-model budget ledger entry and write `planner_prompt.md`.
 7. With `--execute-planner`, run the configured planner backend, persist planner stdout/stderr/metadata paths, parse structured JSON output, and validate generated contracts.
 
-Generated contracts must match the release ID and must not request whole-repo file scope. When project config is available, generated contracts must reference existing verification profiles and must not exceed `budget.max_changed_files_per_task` allowed-file entries.
+Generated contracts must match the release ID, require diff evidence, include a scope or verification stop condition, and must not request whole-repo file scope. When project config is available, generated contracts must reference existing verification profiles, keep profile/task-type choices consistent, and must not exceed `budget.max_changed_files_per_task` allowed-file entries.
 
 ### `run-objective` Flow
 

@@ -185,6 +185,16 @@ def _add_release_execution_arguments(parser: argparse.ArgumentParser) -> None:
     _add_allow_dirty_argument(parser, subject="worktrees")
     _add_finalization_arguments(parser, task_scope="task worktrees")
     parser.add_argument(
+        "--integration-branch",
+        help="Feature branch owned by the release orchestrator. Defaults to feature/<release>.",
+    )
+    parser.add_argument(
+        "--release-finalize",
+        choices=["none", "merge-main", "push-feature", "push-main"],
+        default="none",
+        help="Final action for the release integration branch after all tasks are accepted.",
+    )
+    parser.add_argument(
         "--continue-on-failure",
         action="store_true",
         help="Continue running remaining contracts after a task is not accepted.",
@@ -285,6 +295,8 @@ def main(argv: list[str] | None = None) -> int:
                 commit_on_accept=args.commit_on_accept,
                 merge_on_accept=args.merge_on_accept,
                 push_on_accept=args.push_on_accept,
+                release_finalize=args.release_finalize,
+                integration_branch=args.integration_branch,
                 stop_on_failure=not args.continue_on_failure,
                 execution_mode=args.execution_mode,
                 debug_keep_artifacts=args.debug_keep_artifacts,
@@ -355,6 +367,8 @@ def main(argv: list[str] | None = None) -> int:
                 commit_on_accept=args.commit_on_accept,
                 merge_on_accept=args.merge_on_accept,
                 push_on_accept=args.push_on_accept,
+                release_finalize=args.release_finalize,
+                integration_branch=args.integration_branch,
                 stop_on_failure=not args.continue_on_failure,
                 execution_mode=args.execution_mode,
                 debug_keep_artifacts=args.debug_keep_artifacts,
@@ -401,6 +415,8 @@ def _release_run_result(result) -> dict[str, object]:
         "run_id": result.run_id,
         "summary_path": str(result.summary_path),
         "log_path": str(result.log_path),
+        "review_path": str(result.review_path) if getattr(result, "review_path", None) else None,
+        "integration_branch": getattr(result, "integration_branch", None),
         "decision": result.decision,
         "tasks": [_task_run_result(task_result) for task_result in result.task_results],
     }

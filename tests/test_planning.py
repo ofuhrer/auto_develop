@@ -253,6 +253,32 @@ def test_validate_generated_contracts_rejects_whole_repo_scope() -> None:
         validate_generated_contracts(plan)
 
 
+def test_validate_generated_contracts_rejects_missing_diff_evidence() -> None:
+    plan = _contract_plan_with_allowed_files(
+        release_id="v0.5.0",
+        task_id="v0.5.0-0001",
+        contract_release_id="v0.5.0",
+        allowed_files=["src/agentic_devloop/planning.py"],
+        required_evidence=["test output"],
+    )
+
+    with pytest.raises(ValueError, match="diff evidence"):
+        validate_generated_contracts(plan)
+
+
+def test_validate_generated_contracts_rejects_weak_stop_conditions() -> None:
+    plan = _contract_plan_with_allowed_files(
+        release_id="v0.5.0",
+        task_id="v0.5.0-0001",
+        contract_release_id="v0.5.0",
+        allowed_files=["src/agentic_devloop/planning.py"],
+        stop_conditions=["Ask a human."],
+    )
+
+    with pytest.raises(ValueError, match="scope or verification stop"):
+        validate_generated_contracts(plan)
+
+
 def test_write_generated_contracts_refuses_to_overwrite_existing_contract(tmp_path) -> None:
     contracts_dir = tmp_path / "contracts"
     contracts_dir.mkdir()
@@ -697,6 +723,8 @@ def _contract_plan_with_allowed_files(
     task_id: str,
     contract_release_id: str,
     allowed_files: list[str],
+    required_evidence: list[str] | None = None,
+    stop_conditions: list[str] | None = None,
 ) -> ContractPlan:
     return ContractPlan(
         release_id=release_id,
@@ -717,9 +745,9 @@ def _contract_plan_with_allowed_files(
                         "objective": "Implement bounded API support.",
                         "allowed_files": allowed_files,
                         "forbidden_changes": ["Do not touch release contracts."],
-                        "required_evidence": ["plan diff"],
+                        "required_evidence": required_evidence or ["plan diff"],
                         "verification": {"commands": ["true"]},
-                        "stop_conditions": ["Scope expands beyond the allowed file."],
+                        "stop_conditions": stop_conditions or ["Scope expands beyond the allowed file."],
                     }
                 ),
             )
