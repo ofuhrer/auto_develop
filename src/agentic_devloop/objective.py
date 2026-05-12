@@ -42,7 +42,7 @@ def run_objective(
         runs_dir=runs_dir,
         write_contracts_dir=contracts_dir,
         mode=planning_mode,
-        project_id=project_id if planning_mode == "strong-model" else None,
+        project_id=project_id,
         config_dir=config_dir,
         planner_backend=planner_backend,
     )

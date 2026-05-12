@@ -10,7 +10,8 @@ from pydantic import ValidationError
 
 from agentic_devloop.budget import reserve_strong_model_call
 from agentic_devloop.config import load_project_config
-from agentic_devloop.models import ContractPlan, GeneratedContract, ReleaseObjective, TaskContract
+from agentic_devloop.models import ContractPlan, GeneratedContract, ProjectConfig, ReleaseObjective, TaskContract
+from agentic_devloop.planner_backend import PlannerBackendResult
 from agentic_devloop.yaml_io import load_yaml_model, write_yaml_model
 
 
@@ -30,7 +31,7 @@ class PlannerBackend(Protocol):
         objective: ReleaseObjective,
         existing_contracts: list[TaskContract],
         model: str,
-    ) -> str | dict[str, Any] | ContractPlan:
+    ) -> str | dict[str, Any] | ContractPlan | PlannerBackendResult:
         ...
 
 
@@ -58,12 +59,12 @@ def plan_release_contracts(
 
     budget_ledger_path = None
     planner_prompt_path = None
+    config = load_project_config(project_id, config_dir, validate_repo=True) if project_id is not None else None
     if mode not in {"deterministic", "strong-model"}:
         raise ValueError(f"unsupported planning mode: {mode}")
     if mode == "strong-model":
-        if project_id is None:
+        if config is None:
             raise ValueError("strong-model planning requires --project")
-        config = load_project_config(project_id, config_dir, validate_repo=True)
         planner = config.model_roles.get("planner", config.executor)
         planner_prompt = _planner_prompt(objective, existing_contracts)
         budget_ledger_path = reserve_strong_model_call(
@@ -86,17 +87,21 @@ def plan_release_contracts(
         planner_prompt_path = plan_dir / "planner_prompt.md"
         planner_prompt_path.write_text(planner_prompt, encoding="utf-8")
         if planner_backend is not None:
-            backend_output = planner_backend.generate(
+            plan_backend = _planner_backend_for_plan(planner_backend, plan_dir / "planner_backend")
+            backend_output = plan_backend.generate(
                 prompt=planner_prompt,
                 objective=objective,
                 existing_contracts=existing_contracts,
                 model=planner.model,
             )
-            plan = parse_planner_output(backend_output, release_id=objective.release_id, planner=mode)
+            backend_paths = _planner_backend_paths(backend_output)
+            raw_output = backend_output.raw_output if isinstance(backend_output, PlannerBackendResult) else backend_output
+            plan = parse_planner_output(raw_output, release_id=objective.release_id, planner=mode)
             plan = plan.model_copy(
                 update={
                     "budget_ledger_path": budget_ledger_path,
                     "planner_prompt_path": planner_prompt_path,
+                    **backend_paths,
                 }
             )
 
@@ -105,7 +110,12 @@ def plan_release_contracts(
             warnings.append(
                 "No existing contracts found for release; generated output is a conservative draft."
             )
-            generated_contracts.append(_draft_release_preparation_contract(objective))
+            generated_contracts.append(
+                _draft_release_preparation_contract(
+                    objective,
+                    verification_profile=_verification_profile_for_draft(config, "release_preparation"),
+                )
+            )
         else:
             covered = {contract.task_id for contract in existing_contracts}
             warnings.append(
@@ -118,7 +128,13 @@ def plan_release_contracts(
                         title=f"Validate criterion: {criterion[:60]}",
                         objective=f"Confirm release contracts cover acceptance criterion: {criterion}",
                         rationale=f"Current contracts for {objective.release_id}: {', '.join(sorted(covered))}",
-                        suggested_contract=_criterion_review_contract(objective, index, criterion, covered),
+                        suggested_contract=_criterion_review_contract(
+                            objective,
+                            index,
+                            criterion,
+                            covered,
+                            verification_profile=_verification_profile_for_draft(config, "documentation"),
+                        ),
                     )
                 )
 
@@ -131,9 +147,16 @@ def plan_release_contracts(
             planner_prompt_path=planner_prompt_path,
         )
 
+    if config is not None:
+        validate_generated_contracts(plan, project_config=config)
+
     written_contract_paths: list[Path] = []
     if write_contracts_dir is not None:
-        written_contract_paths = write_generated_contracts(plan, write_contracts_dir)
+        written_contract_paths = write_generated_contracts(
+            plan,
+            write_contracts_dir,
+            project_config=config,
+        )
 
     plan_path = plan_dir / "contract_plan.json"
     plan_path.write_text(json.dumps(plan.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8")
@@ -154,7 +177,11 @@ def _contracts_for_release(release_id: str, contracts_dir: Path) -> list[TaskCon
     return contracts
 
 
-def _draft_release_preparation_contract(objective: ReleaseObjective) -> GeneratedContract:
+def _draft_release_preparation_contract(
+    objective: ReleaseObjective,
+    *,
+    verification_profile: str,
+) -> GeneratedContract:
     task_id = f"{objective.release_id}-0001".replace(".", "-")
     suggested = {
         "task_id": task_id,
@@ -166,7 +193,7 @@ def _draft_release_preparation_contract(objective: ReleaseObjective) -> Generate
         "allowed_files": ["contracts/**", f"repo_state/**/release_plan.yaml"],
         "forbidden_changes": ["Do not modify source code while planning contracts."],
         "required_evidence": ["contract diff", "release plan diff"],
-        "verification": {"profile": "documentation"},
+        "verification": {"profile": verification_profile},
         "stop_conditions": ["Generated contracts cannot be bounded to allowed files."],
     }
     return GeneratedContract(
@@ -183,6 +210,8 @@ def _criterion_review_contract(
     index: int,
     criterion: str,
     covered: set[str],
+    *,
+    verification_profile: str,
 ) -> TaskContract:
     return TaskContract.model_validate(
         {
@@ -199,7 +228,7 @@ def _criterion_review_contract(
             "required_evidence": [
                 f"Coverage note for {criterion}",
             ],
-            "verification": {"profile": "documentation"},
+            "verification": {"profile": verification_profile},
             "stop_conditions": [
                 f"Acceptance criterion is not covered by current contracts: {', '.join(sorted(covered))}",
             ],
@@ -232,7 +261,11 @@ def parse_planner_output(
     return plan
 
 
-def validate_generated_contracts(plan: ContractPlan) -> list[TaskContract]:
+def validate_generated_contracts(
+    plan: ContractPlan,
+    *,
+    project_config: ProjectConfig | None = None,
+) -> list[TaskContract]:
     validated_contracts: list[TaskContract] = []
     seen_task_ids: set[str] = set()
     for generated_contract in plan.generated_contracts:
@@ -256,13 +289,32 @@ def validate_generated_contracts(plan: ContractPlan) -> list[TaskContract]:
                 "generated contract uses unsafe whole-repo allowed_files patterns: "
                 + ", ".join(broad_patterns)
             )
+        if project_config is not None:
+            if len(suggested_contract.allowed_files) > project_config.budget.max_changed_files_per_task:
+                raise ValueError(
+                    "generated contract allowed_files count exceeds project budget "
+                    f"max_changed_files_per_task={project_config.budget.max_changed_files_per_task}: "
+                    f"{suggested_contract.task_id}"
+                )
+            if suggested_contract.verification.profile is not None:
+                profile = suggested_contract.verification.profile
+                if profile not in project_config.verification_profiles:
+                    raise ValueError(
+                        f"generated contract references unknown verification profile {profile!r}: "
+                        f"{suggested_contract.task_id}"
+                    )
         seen_task_ids.add(suggested_contract.task_id)
         validated_contracts.append(suggested_contract)
     return validated_contracts
 
 
-def write_generated_contracts(plan: ContractPlan, contracts_dir: Path) -> list[Path]:
-    validated_contracts = validate_generated_contracts(plan)
+def write_generated_contracts(
+    plan: ContractPlan,
+    contracts_dir: Path,
+    *,
+    project_config: ProjectConfig | None = None,
+) -> list[Path]:
+    validated_contracts = validate_generated_contracts(plan, project_config=project_config)
     contracts_dir.mkdir(parents=True, exist_ok=True)
     target_paths = [contracts_dir / f"{contract.task_id}.yaml" for contract in validated_contracts]
     existing_paths = [path for path in target_paths if path.exists()]
@@ -333,3 +385,30 @@ def _extract_json_object(raw_output: str) -> str:
 def _is_whole_repo_pattern(pattern: str) -> bool:
     normalized = pattern.strip().rstrip("/")
     return normalized in {"*", "**", "**/*", "./**", "./**/*"}
+
+
+def _planner_backend_paths(raw_output: object) -> dict[str, Path]:
+    if not isinstance(raw_output, PlannerBackendResult):
+        return {}
+    return {
+        "planner_stdout_path": raw_output.stdout_path,
+        "planner_stderr_path": raw_output.stderr_path,
+        "planner_metadata_path": raw_output.metadata_path,
+    }
+
+
+def _planner_backend_for_plan(planner_backend: PlannerBackend, output_dir: Path) -> PlannerBackend:
+    with_output_dir = getattr(planner_backend, "with_output_dir", None)
+    if callable(with_output_dir):
+        return with_output_dir(output_dir)
+    return planner_backend
+
+
+def _verification_profile_for_draft(config: ProjectConfig | None, preferred: str) -> str:
+    if config is None:
+        return preferred
+    if preferred in config.verification_profiles:
+        return preferred
+    if "default" in config.verification_profiles:
+        return "default"
+    return next(iter(config.verification_profiles))

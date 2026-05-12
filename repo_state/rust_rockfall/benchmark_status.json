@@ -1,0 +1,21 @@
+{
+  "project_id": "rust_rockfall",
+  "evidence_scope": "conditional-probe-only",
+  "fresh_slurm_420x450_baseline": {
+    "run_root": "/scratch/mch/olifu/rust_rockfall/probes/slurm_smoke_420x450/fresh_baseline_ee8c4eb",
+    "job_id": "4289703",
+    "state": "COMPLETED",
+    "partition": "postproc",
+    "total_wall_seconds": 14.95406103390269,
+    "output_bytes": 32124738,
+    "output_file_count": 46,
+    "output_write_seconds": 5.986803226056509,
+    "trajectory_decision_counts": {
+      "executed": 2
+    },
+    "reducer_decision_counts": {
+      "executed": 2
+    }
+  },
+  "next_validation_gap": "Document and validate repeat/reuse behavior for the fresh SLURM 420x450 run root."
+}

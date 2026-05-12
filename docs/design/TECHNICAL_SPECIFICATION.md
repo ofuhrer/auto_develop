@@ -304,13 +304,14 @@ Finalization conflicts are captured in evidence. Contract-contained rebase confl
 `agent-loop run-release` is the first release-level orchestration path:
 
 1. Load and validate `ProjectConfig`.
-2. Resolve an ordered contract queue from explicit `--contract` arguments or `repo_state/<project>/release_plan.yaml`.
-3. Classify `allowed_files` overlap.
-4. Run each contract through the existing `run-task` state machine.
-5. Stop after the first non-accepted task unless `--continue-on-failure` is set.
-6. Mirror progress to `runs/<release-run-id>/release.log`.
-7. Remove task worktrees and merged task branches unless `--debug-keep-artifacts` is set; preserve accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches.
-8. Persist `runs/<release-run-id>/release_summary.json`.
+2. Fail fast unless the configured project `worktree_root` is empty.
+3. Resolve an ordered contract queue from explicit `--contract` arguments or `repo_state/<project>/release_plan.yaml`.
+4. Classify `allowed_files` overlap.
+5. Run each contract through the existing `run-task` state machine.
+6. Stop after the first non-accepted task unless `--continue-on-failure` is set.
+7. Mirror progress and live executor stdout/stderr to `runs/<release-run-id>/release.log`.
+8. Remove task worktrees and merged task branches unless `--debug-keep-artifacts` is set; preserve accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches.
+9. Persist `runs/<release-run-id>/release_summary.json`.
 
 This command executes already-defined contracts. Objective-level planning and execution are composed by `run-objective`.
 
@@ -324,9 +325,9 @@ This command executes already-defined contracts. Objective-level planning and ex
 4. If no contracts exist, propose a planning-only release-preparation draft.
 5. If contracts exist, emit acceptance-criteria coverage review entries.
 6. In `--mode strong-model`, reserve a strong-model budget ledger entry and write `planner_prompt.md`.
-7. With `--execute-planner`, run the configured planner backend, parse structured JSON output, and validate generated contracts.
+7. With `--execute-planner`, run the configured planner backend, persist planner stdout/stderr/metadata paths, parse structured JSON output, and validate generated contracts.
 
-Generated contracts must match the release ID and must not request whole-repo file scope.
+Generated contracts must match the release ID and must not request whole-repo file scope. When project config is available, generated contracts must reference existing verification profiles and must not exceed `budget.max_changed_files_per_task` allowed-file entries.
 
 ### `run-objective` Flow
 

@@ -91,13 +91,13 @@ agent-loop run-release \
 
 Before running tasks, `run-release` classifies overlapping `allowed_files` patterns. Minor overlap is allowed in sequential mode, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected.
 
-`run-release` also writes a multiplexed progress log at `runs/<release-run-id>/release.log` and prints that path as `release_log=...` at startup. Monitor a live run with:
+`run-release` also writes a multiplexed progress log at `runs/<release-run-id>/release.log` and prints that path as `release_log=...` at startup. The log includes release progress plus live stdout/stderr lines from Codex executor attempts with task, phase, attempt, and stream labels, so parallel workers can be monitored from one file. Monitor a live run with:
 
 ```bash
 tail -f runs/<release-run-id>/release.log
 ```
 
-Task worktrees and merged task branches are removed after each task by default. Accepted work that was not finalized, unmerged accepted branches, and failed-finalization branches are preserved to keep work reachable. Use `--debug-keep-artifacts` to preserve all task artifacts for inspection.
+Before starting, `run-release` requires the configured project `worktree_root` to be empty. This prevents stale debug or unmerged task worktrees from contaminating a new release run. Task worktrees and merged task branches are removed after each task by default. Accepted work that was not finalized, unmerged accepted branches, and failed-finalization branches are preserved to keep work reachable. Use `--debug-keep-artifacts` to preserve all task artifacts for inspection.
 
 Create a conservative release contract plan:
 
@@ -106,7 +106,7 @@ agent-loop plan-release \
   --objective objectives/v0.8.0.yaml
 ```
 
-`plan-release` validates whether a release objective has matching contracts and writes `contract_plan.json` under `runs/`. Deterministic mode emits conservative planning scaffolds. Strong-model mode reserves planner budget and writes `planner_prompt.md`; add `--execute-planner` to call the configured planner backend and parse generated contracts.
+`plan-release` validates whether a release objective has matching contracts and writes `contract_plan.json` under `runs/`. Deterministic mode emits conservative planning scaffolds. Strong-model mode reserves planner budget and writes `planner_prompt.md`; add `--execute-planner` to call the configured planner backend, persist planner stdout/stderr/metadata paths, parse generated contracts, and run admission checks.
 
 To reserve strong-model planning budget and write the planner prompt artifact:
 
@@ -135,7 +135,7 @@ agent-loop run-objective \
   --execute-planner
 ```
 
-`run-objective` applies the same generated-contract validation as `plan-release`, writes accepted contract drafts to `contracts/`, then runs those exact contract paths with `run-release`.
+`run-objective` applies the same generated-contract validation as `plan-release`, writes accepted contract drafts to `contracts/`, then runs those exact contract paths with `run-release`. With a project config, generated contracts are rejected if they reference unknown verification profiles or exceed `budget.max_changed_files_per_task` allowed-file entries.
 
 To provide an explicit queue:
 
@@ -157,7 +157,7 @@ agent-loop run-task \
 
 `--push-on-accept` commits accepted changes in the task worktree, merges the task branch into the configured base branch, and pushes the base branch to `origin`. Use `--merge-on-accept` to commit and merge without pushing, or `--commit-on-accept` to only commit in the task worktree.
 
-Repo-specific context can be stored under `repo_state/<project>/` and referenced with `repo_state_path` in the project config. `run-task` injects selected state into executor prompts and writes `model_call_metadata.json` into the evidence bundle.
+Repo-specific context can be stored under `repo_state/<project>/` and referenced with `repo_state_path` in the project config. Relative paths resolve against the controller repo first and the target repo second, which lets external projects use state kept in this orchestration repo. `run-task` injects selected state into executor prompts and writes `model_call_metadata.json` into the evidence bundle.
 
 Scientific and benchmark contracts can set `task_type`, use named verification profiles, and declare fixture/tolerance permissions. Phase 3 evidence includes `scientific_review.yaml`, optional `benchmark_delta.json`, and optional `remote_dispatch.yaml`.
 

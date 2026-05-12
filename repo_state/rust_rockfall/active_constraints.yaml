@@ -1,0 +1,14 @@
+project_id: rust_rockfall
+constraints:
+  - Do not mutate simulation physics, contact/integrator semantics, or probabilistic interpretation.
+  - Do not change validation fixtures, numerical tolerances, or benchmark expectations unless explicitly allowed.
+  - Do not commit runtime outputs under hazard/results, validation/private, /tmp, or Balfrin scratch.
+  - Do not submit SLURM jobs from local pilot tasks.
+  - Do not use operational or GPU Balfrin partitions, and do not add --account.
+  - Keep conditional pilot wording explicit; do not imply annual or operational hazard semantics.
+  - Prefer focused tests before broad pre-commit checks.
+  - Preserve existing tracked probe definitions and evidence unless the contract explicitly allows updates.
+validation_commands:
+  focused_driver: python3 -m unittest tests/test_balfrin_probe_driver.py
+  consistency: python3 scripts/check_repo_consistency.py
+  pre_commit: scripts/git-hooks/pre-commit

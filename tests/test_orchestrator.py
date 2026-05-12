@@ -6,7 +6,8 @@ from pathlib import Path
 
 import yaml
 
-from agentic_devloop.models import ExecutorResult
+from agentic_devloop.models import ExecutorConfig, ExecutorResult
+from agentic_devloop import orchestrator as orchestrator_module
 from agentic_devloop.orchestrator import run_task
 
 
@@ -147,6 +148,57 @@ def test_run_task_wires_executor_verification_evidence_and_review(tmp_path) -> N
     assert "+Implemented by fake executor." in (result.bundle_path / "git_diff.patch").read_text(
         encoding="utf-8"
     )
+
+
+def test_executor_attempts_stream_codex_output_to_progress(tmp_path, monkeypatch) -> None:
+    class StreamingCodexExecutor:
+        def __init__(self, config: ExecutorConfig, *, stream_callback=None) -> None:
+            self.config = config
+            self.stream_callback = stream_callback
+
+        def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            if self.stream_callback is not None:
+                self.stream_callback("stdout", "agent says hello")
+                self.stream_callback("stderr", "agent warns")
+            stdout_path = output_dir / "executor_stdout.log"
+            stderr_path = output_dir / "executor_stderr.log"
+            stdout_path.write_text("agent says hello\n", encoding="utf-8")
+            stderr_path.write_text("agent warns\n", encoding="utf-8")
+            return ExecutorResult(
+                command=["fake-codex"],
+                exit_code=0,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                duration_seconds=0.01,
+                backend="codex_cli",
+                model=self.config.model,
+            )
+
+    monkeypatch.setattr(orchestrator_module, "CodexExecutor", StreamingCodexExecutor)
+    prompt_path = tmp_path / "prompt.md"
+    prompt_path.write_text("prompt", encoding="utf-8")
+    progress: list[str] = []
+
+    result = orchestrator_module._run_executor_attempts(
+        task_id="demo-0001",
+        executor_configs=[
+            ExecutorConfig(type="codex_cli", model="worker", max_walltime_minutes=1)
+        ],
+        executor=None,
+        max_attempts=1,
+        prompt_path=prompt_path,
+        worktree_path=tmp_path,
+        scratch_dir=tmp_path / "scratch",
+        progress=progress.append,
+    )
+
+    assert result.exit_code == 0
+    assert (
+        "agent task=demo-0001 phase=executor attempt=1 stream=stdout | agent says hello"
+        in progress
+    )
+    assert "agent task=demo-0001 phase=executor attempt=1 stream=stderr | agent warns" in progress
 
 
 def test_run_task_uses_verification_profile_and_writes_phase3_evidence(tmp_path) -> None:

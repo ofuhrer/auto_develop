@@ -1,0 +1,11 @@
+release_id: rr-slurm-log-audit-1
+active_objective: >
+  Add local collector log-audit evidence for Balfrin SLURM probe summaries and
+  document how to interpret it, without running remote jobs or changing physics.
+current_tasks:
+  - rr-slurm-log-audit-0001
+  - rr-slurm-log-audit-0002
+next_steps:
+  - Run the generated contracts locally with debug artifact retention.
+  - Inspect evidence before enabling autonomous merge.
+  - Use a separate future contract for actual Balfrin repeat/reuse execution.

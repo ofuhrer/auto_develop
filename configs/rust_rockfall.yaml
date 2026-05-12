@@ -1,7 +1,8 @@
 project_id: rust_rockfall
-repo_path: /path/to/rust_rockfall
+repo_path: /Users/fuhrer/Desktop/rust_rockfall/main
 default_base_branch: main
-worktree_root: /path/to/worktrees/rust_rockfall
+worktree_root: /Users/fuhrer/Desktop/rust_rockfall/worktrees
+repo_state_path: repo_state/rust_rockfall
 
 executor:
   type: codex_cli

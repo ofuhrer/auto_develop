@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -23,8 +25,19 @@ def run_process(
     timeout_seconds: int,
     shell: bool = False,
     input_text: str | None = None,
+    stream_callback: Callable[[str, str], None] | None = None,
 ) -> ProcessOutput:
     started_at = time.monotonic()
+    if stream_callback is not None:
+        return _run_process_streamed(
+            command,
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+            shell=shell,
+            input_text=input_text,
+            stream_callback=stream_callback,
+            started_at=started_at,
+        )
     try:
         completed = subprocess.run(
             command,
@@ -52,3 +65,67 @@ def run_process(
             duration_seconds=time.monotonic() - started_at,
             timed_out=True,
         )
+
+
+def _run_process_streamed(
+    command: list[str] | str,
+    *,
+    cwd: Path,
+    timeout_seconds: int,
+    shell: bool,
+    input_text: str | None,
+    stream_callback: Callable[[str, str], None],
+    started_at: float,
+) -> ProcessOutput:
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        text=True,
+        shell=shell,
+        stdin=subprocess.PIPE if input_text is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+
+    def read_stream(name: str, lines: list[str]) -> None:
+        stream = process.stdout if name == "stdout" else process.stderr
+        assert stream is not None
+        for line in iter(stream.readline, ""):
+            lines.append(line)
+            stream_callback(name, line.rstrip("\n"))
+        stream.close()
+
+    stdout_thread = threading.Thread(target=read_stream, args=("stdout", stdout_lines), daemon=True)
+    stderr_thread = threading.Thread(target=read_stream, args=("stderr", stderr_lines), daemon=True)
+    stdout_thread.start()
+    stderr_thread.start()
+
+    if input_text is not None:
+        assert process.stdin is not None
+        try:
+            process.stdin.write(input_text)
+            process.stdin.close()
+        except BrokenPipeError:
+            pass
+
+    timed_out = False
+    try:
+        exit_code = process.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        process.kill()
+        exit_code = 124
+        process.wait()
+
+    stdout_thread.join(timeout=1)
+    stderr_thread.join(timeout=1)
+    return ProcessOutput(
+        command=command,
+        exit_code=exit_code,
+        stdout="".join(stdout_lines),
+        stderr="".join(stderr_lines),
+        duration_seconds=time.monotonic() - started_at,
+        timed_out=timed_out,
+    )

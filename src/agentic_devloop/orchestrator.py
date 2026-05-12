@@ -125,6 +125,7 @@ def run_task(
 
     executor_configs = executor_configs_for_task(config, task)
     executor_result = _run_executor_attempts(
+        task_id=task.task_id,
         executor_configs=executor_configs,
         executor=executor,
         max_attempts=config.budget.max_executor_attempts_per_task,
@@ -323,10 +324,14 @@ def executor_configs_for_task(config: ProjectConfig, task: TaskContract) -> list
     return configs
 
 
-def _executor_for_config(executor_config: ExecutorConfig) -> ExecutorProtocol:
+def _executor_for_config(
+    executor_config: ExecutorConfig,
+    *,
+    stream_callback: Callable[[str, str], None] | None = None,
+) -> ExecutorProtocol:
     if executor_config.type != "codex_cli":
         raise ValueError(f"unsupported executor type: {executor_config.type}")
-    return CodexExecutor(executor_config)
+    return CodexExecutor(executor_config, stream_callback=stream_callback)
 
 
 def _verification_commands(config: ProjectConfig, task: TaskContract) -> list[str]:
@@ -345,6 +350,7 @@ def _review_line_count(diff: str) -> int:
 
 def _run_executor_attempts(
     *,
+    task_id: str,
     executor_configs: list[ExecutorConfig],
     executor: ExecutorProtocol | None,
     max_attempts: int,
@@ -359,7 +365,14 @@ def _run_executor_attempts(
 
     for attempt_number, executor_config in enumerate(attempt_configs, start=1):
         output_dir = scratch_dir / f"executor_attempt_{attempt_number}"
-        selected_executor = executor or _executor_for_config(executor_config)
+        selected_executor = executor or _executor_for_config(
+            executor_config,
+            stream_callback=_executor_stream_callback(
+                task_id=task_id,
+                attempt_number=attempt_number,
+                progress=progress,
+            ),
+        )
         _report(
             progress,
             f"running executor attempt {attempt_number}/{len(attempt_configs)}: "
@@ -467,7 +480,15 @@ def _attempt_conflict_repair(
         conflicted=conflicted,
         failure=str(error),
     )
-    repair_executor = executor or _executor_for_config(executor_configs[-1])
+    repair_executor = executor or _executor_for_config(
+        executor_configs[-1],
+        stream_callback=_executor_stream_callback(
+            task_id=task.task_id,
+            attempt_number=1,
+            progress=progress,
+            phase="conflict_repair",
+        ),
+    )
     repair_output_dir = scratch_dir / "conflict_repair"
     repair_result = repair_executor.run(
         prompt_path=prompt_path,
@@ -531,6 +552,25 @@ def _finalization_failure_decision(task: TaskContract, error: GitFinalizeError) 
 def _report(progress: Callable[[str], None] | None, message: str) -> None:
     if progress is not None:
         progress(message)
+
+
+def _executor_stream_callback(
+    *,
+    task_id: str,
+    attempt_number: int,
+    progress: Callable[[str], None] | None,
+    phase: str = "executor",
+) -> Callable[[str, str], None] | None:
+    if progress is None:
+        return None
+
+    def report(stream_name: str, line: str) -> None:
+        _report(
+            progress,
+            f"agent task={task_id} phase={phase} attempt={attempt_number} stream={stream_name} | {line}",
+        )
+
+    return report
 
 
 def _normalize_executor_metadata(result: ExecutorResult, prompt_path: Path) -> ExecutorResult:

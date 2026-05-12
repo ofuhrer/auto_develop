@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -60,6 +61,7 @@ def run_release(
     if execution_mode not in {"sequential", "parallel"}:
         raise ValueError(f"unsupported execution mode: {execution_mode}")
     config = load_project_config(project_id, config_dir, validate_repo=True)
+    _ensure_no_existing_worktrees(config.worktree_root)
     run_id = make_release_run_id(release_id, now)
     release_root = runs_dir / run_id
     release_root.mkdir(parents=True, exist_ok=True)
@@ -182,6 +184,22 @@ def _load_release_plan(config_repo_path: Path, repo_state_path: Path | None) -> 
     if not path.exists():
         return None
     return load_yaml_model(path, ReleasePlan)
+
+
+def _ensure_no_existing_worktrees(worktree_root: Path) -> None:
+    if not worktree_root.exists():
+        return
+    existing = sorted(
+        path for path in worktree_root.iterdir() if path.is_dir() and not path.name.startswith(".")
+    )
+    if not existing:
+        return
+    listed = ", ".join(str(path) for path in existing[:5])
+    suffix = "" if len(existing) <= 5 else f", ... (+{len(existing) - 5} more)"
+    raise ValueError(
+        "project worktree root is not clean before release start: "
+        f"{listed}{suffix}. Inspect or remove stale worktrees before running run-release."
+    )
 
 
 def _release_decision(decisions: list[ReviewDecision]) -> Decision:
@@ -315,11 +333,14 @@ def _multiplexed_progress(
     progress: Callable[[str], None] | None,
     log_path: Path,
 ) -> Callable[[str], None]:
+    lock = threading.Lock()
+
     def report(message: str) -> None:
         timestamp = datetime.now(UTC).isoformat()
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with log_path.open("a", encoding="utf-8") as file:
-            file.write(f"{timestamp} {message}\n")
+        with lock:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("a", encoding="utf-8") as file:
+                file.write(f"{timestamp} {message}\n")
         if progress is not None:
             progress(message)
 

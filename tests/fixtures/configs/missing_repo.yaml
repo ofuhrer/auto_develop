@@ -1,0 +1,17 @@
+project_id: missing_repo
+repo_path: /definitely/missing/auto_develop/test/repo
+default_base_branch: main
+worktree_root: /tmp/auto_develop_missing_repo_worktrees
+executor:
+  type: codex_cli
+  model: worker
+  max_walltime_minutes: 1
+verification_profiles:
+  default:
+    commands:
+      - "true"
+budget:
+  max_executor_attempts_per_task: 1
+  max_strong_model_calls_per_release: 0
+  max_changed_files_per_task: 1
+  max_diff_lines_per_task: 10

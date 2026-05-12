@@ -33,4 +33,18 @@ def load_project_config(
     if validate_repo and not config.repo_path.exists():
         raise ProjectConfigError(f"repo path does not exist: {config.repo_path}")
 
-    return config
+    return _resolve_controller_paths(config, path)
+
+
+def _resolve_controller_paths(config: ProjectConfig, config_path: Path) -> ProjectConfig:
+    if config.repo_state_path is None or config.repo_state_path.is_absolute():
+        return config
+
+    controller_root = config_path.resolve().parent.parent
+    controller_candidate = controller_root / config.repo_state_path
+    target_candidate = config.repo_path.resolve() / config.repo_state_path
+    if controller_candidate.exists() or not target_candidate.exists():
+        repo_state_path = controller_candidate
+    else:
+        repo_state_path = target_candidate
+    return config.model_copy(update={"repo_state_path": repo_state_path})

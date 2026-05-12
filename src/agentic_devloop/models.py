@@ -315,6 +315,9 @@ class ContractPlan(StrictModel):
     warnings: list[str] = Field(default_factory=list)
     budget_ledger_path: Path | None = None
     planner_prompt_path: Path | None = None
+    planner_stdout_path: Path | None = None
+    planner_stderr_path: Path | None = None
+    planner_metadata_path: Path | None = None
 
 
 class OverlapFinding(StrictModel):

@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import shlex
 from pathlib import Path
+from typing import Callable
 
 from agentic_devloop.models import ExecutorConfig, ExecutorResult
 from agentic_devloop.process import run_process
 
 
 class CodexExecutor:
-    def __init__(self, config: ExecutorConfig) -> None:
+    def __init__(
+        self,
+        config: ExecutorConfig,
+        *,
+        stream_callback: Callable[[str, str], None] | None = None,
+    ) -> None:
         self.config = config
+        self.stream_callback = stream_callback
 
     def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -30,6 +37,7 @@ class CodexExecutor:
             cwd=worktree_path,
             timeout_seconds=self.config.max_walltime_minutes * 60,
             input_text=prompt_text,
+            stream_callback=self.stream_callback,
         )
 
         stdout_path.write_text(result.stdout, encoding="utf-8")

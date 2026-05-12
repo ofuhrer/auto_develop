@@ -34,11 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     config_parser = subparsers.add_parser("config", help="Load and print project configuration.")
     config_parser.add_argument("--project", required=True, help="Project identifier.")
-    config_parser.add_argument(
-        "--config-dir",
-        default="configs",
-        help="Directory containing project config YAML files.",
-    )
+    _add_config_dir_argument(config_parser)
     config_parser.add_argument(
         "--validate-repo",
         action="store_true",
@@ -48,42 +44,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_task_parser = subparsers.add_parser("run-task", help="Run one bounded task contract.")
     run_task_parser.add_argument("--project", required=True, help="Project identifier.")
     run_task_parser.add_argument("--contract", required=True, help="Path to a task contract YAML file.")
-    run_task_parser.add_argument(
-        "--config-dir",
-        default="configs",
-        help="Directory containing project config YAML files.",
-    )
-    run_task_parser.add_argument(
-        "--runs-dir",
-        default="runs",
-        help="Directory where run evidence should be written.",
-    )
-    run_task_parser.add_argument(
-        "--verification-timeout-seconds",
-        type=int,
-        default=600,
-        help="Timeout for each verification command.",
-    )
-    run_task_parser.add_argument(
-        "--allow-dirty",
-        action="store_true",
-        help="Allow creating a worktree when the base repository has uncommitted changes.",
-    )
-    run_task_parser.add_argument(
-        "--commit-on-accept",
-        action="store_true",
-        help="Commit accepted task changes in the task worktree.",
-    )
-    run_task_parser.add_argument(
-        "--merge-on-accept",
-        action="store_true",
-        help="Commit accepted task changes and merge the task branch into the base branch.",
-    )
-    run_task_parser.add_argument(
-        "--push-on-accept",
-        action="store_true",
-        help="Commit, merge, and push accepted task changes to origin.",
-    )
+    _add_config_dir_argument(run_task_parser)
+    _add_runs_dir_argument(run_task_parser, purpose="run evidence")
+    _add_verification_timeout_argument(run_task_parser)
+    _add_allow_dirty_argument(run_task_parser, subject="a worktree")
+    _add_finalization_arguments(run_task_parser, task_scope="the task worktree")
     run_task_parser.add_argument(
         "--commit-message",
         help="Commit message to use when committing accepted task changes.",
@@ -101,101 +66,21 @@ def build_parser() -> argparse.ArgumentParser:
         dest="contracts",
         help="Contract path to run, in order. May be passed multiple times.",
     )
-    run_release_parser.add_argument(
-        "--config-dir",
-        default="configs",
-        help="Directory containing project config YAML files.",
-    )
-    run_release_parser.add_argument(
-        "--contracts-dir",
-        default="contracts",
-        help="Directory containing task contract YAML files.",
-    )
-    run_release_parser.add_argument(
-        "--runs-dir",
-        default="runs",
-        help="Directory where run evidence should be written.",
-    )
-    run_release_parser.add_argument(
-        "--verification-timeout-seconds",
-        type=int,
-        default=600,
-        help="Timeout for each verification command.",
-    )
-    run_release_parser.add_argument(
-        "--allow-dirty",
-        action="store_true",
-        help="Allow creating worktrees when the base repository has uncommitted changes.",
-    )
-    run_release_parser.add_argument(
-        "--commit-on-accept",
-        action="store_true",
-        help="Commit accepted task changes in task worktrees.",
-    )
-    run_release_parser.add_argument(
-        "--merge-on-accept",
-        action="store_true",
-        help="Commit accepted task changes and merge task branches into the base branch.",
-    )
-    run_release_parser.add_argument(
-        "--push-on-accept",
-        action="store_true",
-        help="Commit, merge, and push accepted task changes to origin.",
-    )
-    run_release_parser.add_argument(
-        "--continue-on-failure",
-        action="store_true",
-        help="Continue running remaining contracts after a task is not accepted.",
-    )
-    run_release_parser.add_argument(
-        "--execution-mode",
-        choices=["sequential", "parallel"],
-        default="sequential",
-        help="Execution scheduling mode. Parallel mode rejects broad overlaps.",
-    )
-    run_release_parser.add_argument(
-        "--debug-keep-artifacts",
-        action="store_true",
-        help="Keep task worktrees and branches after each task for debugging.",
-    )
+    _add_release_execution_arguments(run_release_parser)
 
     plan_release_parser = subparsers.add_parser(
         "plan-release",
         help="Create a conservative release contract plan from an objective.",
     )
     plan_release_parser.add_argument("--objective", required=True, help="Release objective YAML file.")
-    plan_release_parser.add_argument(
-        "--mode",
-        choices=["deterministic", "strong-model"],
-        default="deterministic",
-        help="Planning mode.",
-    )
-    plan_release_parser.add_argument(
-        "--strong-model",
-        dest="mode",
-        action="store_const",
-        const="strong-model",
-        help="Shortcut for --mode strong-model.",
-    )
+    _add_planning_mode_arguments(plan_release_parser)
     plan_release_parser.add_argument(
         "--project",
         help="Project identifier. Required for strong-model mode.",
     )
-    plan_release_parser.add_argument(
-        "--config-dir",
-        default="configs",
-        help="Directory containing project config YAML files.",
-    )
-    plan_release_parser.add_argument(
-        "--contracts-dir",
-        default="contracts",
-        help="Directory containing task contract YAML files.",
-    )
-    plan_release_parser.add_argument(
-        "--runs-dir",
-        default="runs",
-        help="Directory where planning output should be written.",
-    )
+    _add_config_dir_argument(plan_release_parser)
+    _add_contracts_dir_argument(plan_release_parser)
+    _add_runs_dir_argument(plan_release_parser, purpose="planning output")
     plan_release_parser.add_argument(
         "--inspect-proposed-contracts",
         action="store_true",
@@ -205,11 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--write-contracts-dir",
         help="Write validated contract drafts to this directory without running them.",
     )
-    plan_release_parser.add_argument(
-        "--execute-planner",
-        action="store_true",
-        help="Execute the configured planner backend instead of only writing the planner prompt.",
-    )
+    _add_execute_planner_argument(plan_release_parser, help_text="Execute the configured planner backend instead of only writing the planner prompt.")
 
     run_objective_parser = subparsers.add_parser(
         "run-objective",
@@ -217,81 +98,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_objective_parser.add_argument("--project", required=True, help="Project identifier.")
     run_objective_parser.add_argument("--objective", required=True, help="Release objective YAML file.")
-    run_objective_parser.add_argument(
-        "--mode",
-        choices=["deterministic", "strong-model"],
-        default="deterministic",
-        help="Planning mode.",
-    )
-    run_objective_parser.add_argument(
-        "--strong-model",
-        dest="mode",
-        action="store_const",
-        const="strong-model",
-        help="Shortcut for --mode strong-model.",
-    )
-    run_objective_parser.add_argument(
-        "--execute-planner",
-        action="store_true",
-        help="Execute the configured planner backend when using strong-model mode.",
-    )
-    run_objective_parser.add_argument(
-        "--config-dir",
-        default="configs",
-        help="Directory containing project config YAML files.",
-    )
-    run_objective_parser.add_argument(
-        "--contracts-dir",
-        default="contracts",
-        help="Directory containing task contract YAML files.",
-    )
-    run_objective_parser.add_argument(
-        "--runs-dir",
-        default="runs",
-        help="Directory where run evidence should be written.",
-    )
-    run_objective_parser.add_argument(
-        "--verification-timeout-seconds",
-        type=int,
-        default=600,
-        help="Timeout for each verification command.",
-    )
-    run_objective_parser.add_argument(
-        "--allow-dirty",
-        action="store_true",
-        help="Allow creating worktrees when the base repository has uncommitted changes.",
-    )
-    run_objective_parser.add_argument(
-        "--commit-on-accept",
-        action="store_true",
-        help="Commit accepted task changes in task worktrees.",
-    )
-    run_objective_parser.add_argument(
-        "--merge-on-accept",
-        action="store_true",
-        help="Commit accepted task changes and merge task branches into the base branch.",
-    )
-    run_objective_parser.add_argument(
-        "--push-on-accept",
-        action="store_true",
-        help="Commit, merge, and push accepted task changes to origin.",
-    )
-    run_objective_parser.add_argument(
-        "--continue-on-failure",
-        action="store_true",
-        help="Continue running remaining contracts after a task is not accepted.",
-    )
-    run_objective_parser.add_argument(
-        "--execution-mode",
-        choices=["sequential", "parallel"],
-        default="sequential",
-        help="Execution scheduling mode. Parallel mode rejects broad overlaps.",
-    )
-    run_objective_parser.add_argument(
-        "--debug-keep-artifacts",
-        action="store_true",
-        help="Keep task worktrees and branches after each task for debugging.",
-    )
+    _add_planning_mode_arguments(run_objective_parser)
+    _add_execute_planner_argument(run_objective_parser, help_text="Execute the configured planner backend when using strong-model mode.")
+    _add_release_execution_arguments(run_objective_parser)
 
     status_parser = subparsers.add_parser("status", help="Show orchestrator status.")
     status_parser.add_argument(
@@ -307,6 +116,114 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     return parser
+
+
+def _add_config_dir_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--config-dir",
+        default="configs",
+        help="Directory containing project config YAML files.",
+    )
+
+
+def _add_contracts_dir_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--contracts-dir",
+        default="contracts",
+        help="Directory containing task contract YAML files.",
+    )
+
+
+def _add_runs_dir_argument(parser: argparse.ArgumentParser, *, purpose: str) -> None:
+    parser.add_argument(
+        "--runs-dir",
+        default="runs",
+        help=f"Directory where {purpose} should be written.",
+    )
+
+
+def _add_verification_timeout_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--verification-timeout-seconds",
+        type=int,
+        default=600,
+        help="Timeout for each verification command.",
+    )
+
+
+def _add_allow_dirty_argument(parser: argparse.ArgumentParser, *, subject: str) -> None:
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help=f"Allow creating {subject} when the base repository has uncommitted changes.",
+    )
+
+
+def _add_finalization_arguments(parser: argparse.ArgumentParser, *, task_scope: str) -> None:
+    parser.add_argument(
+        "--commit-on-accept",
+        action="store_true",
+        help=f"Commit accepted task changes in {task_scope}.",
+    )
+    parser.add_argument(
+        "--merge-on-accept",
+        action="store_true",
+        help="Commit accepted task changes and merge task branches into the base branch.",
+    )
+    parser.add_argument(
+        "--push-on-accept",
+        action="store_true",
+        help="Commit, merge, and push accepted task changes to origin.",
+    )
+
+
+def _add_release_execution_arguments(parser: argparse.ArgumentParser) -> None:
+    _add_config_dir_argument(parser)
+    _add_contracts_dir_argument(parser)
+    _add_runs_dir_argument(parser, purpose="run evidence")
+    _add_verification_timeout_argument(parser)
+    _add_allow_dirty_argument(parser, subject="worktrees")
+    _add_finalization_arguments(parser, task_scope="task worktrees")
+    parser.add_argument(
+        "--continue-on-failure",
+        action="store_true",
+        help="Continue running remaining contracts after a task is not accepted.",
+    )
+    parser.add_argument(
+        "--execution-mode",
+        choices=["sequential", "parallel"],
+        default="sequential",
+        help="Execution scheduling mode. Parallel mode rejects broad overlaps.",
+    )
+    parser.add_argument(
+        "--debug-keep-artifacts",
+        action="store_true",
+        help="Keep task worktrees and branches after each task for debugging.",
+    )
+
+
+def _add_planning_mode_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--mode",
+        choices=["deterministic", "strong-model"],
+        default="deterministic",
+        help="Planning mode.",
+    )
+    parser.add_argument(
+        "--strong-model",
+        dest="mode",
+        action="store_const",
+        const="strong-model",
+        help="Shortcut for --mode strong-model.",
+    )
+
+
+def _add_execute_planner_argument(parser: argparse.ArgumentParser, *, help_text: str) -> None:
+    parser.add_argument(
+        "--execute-planner",
+        action="store_true",
+        help=help_text,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -529,7 +446,6 @@ def _codex_planner_backend(*, project_id: str | None, config_dir: Path, runs_dir
     return CodexPlannerBackend(
         config=planner,
         repo_path=config.repo_path,
-        output_dir=runs_dir / "planner_backend",
     )
 
 

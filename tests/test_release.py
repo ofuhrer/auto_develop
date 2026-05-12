@@ -10,6 +10,7 @@ from agentic_devloop.models import ExecutorResult, ProjectConfig, TaskContract
 from agentic_devloop.models import Decision, Reviewer, ReviewDecision
 from agentic_devloop.orchestrator import TaskRunResult, executor_config_for_task, executor_configs_for_task
 from agentic_devloop.release import (
+    _ensure_no_existing_worktrees,
     _should_preserve_task_branch,
     _should_preserve_task_worktree,
     analyze_contract_overlaps,
@@ -187,6 +188,7 @@ def test_run_release_executes_ordered_contracts_and_writes_summary(tmp_path) -> 
     assert '"task_id": "demo-0002"' in summary
     assert not result.task_results[0].worktree_path.exists()
     assert not result.task_results[1].worktree_path.exists()
+    assert not any((tmp_path / "worktrees").iterdir())
     branches = subprocess.run(
         ["git", "branch", "--list", "agent/v0.1.0/*"],
         cwd=repo,
@@ -195,6 +197,29 @@ def test_run_release_executes_ordered_contracts_and_writes_summary(tmp_path) -> 
         text=True,
     ).stdout
     assert branches.strip() == ""
+
+
+def test_release_preflight_rejects_existing_project_worktrees(tmp_path) -> None:
+    worktree_root = tmp_path / "worktrees"
+    stale = worktree_root / "stale-run"
+    stale.mkdir(parents=True)
+    (worktree_root / ".DS_Store").write_text("ignored", encoding="utf-8")
+
+    try:
+        _ensure_no_existing_worktrees(worktree_root)
+    except ValueError as error:
+        assert "project worktree root is not clean" in str(error)
+        assert str(stale) in str(error)
+    else:
+        raise AssertionError("expected stale worktree preflight failure")
+
+
+def test_release_preflight_ignores_metadata_files(tmp_path) -> None:
+    worktree_root = tmp_path / "worktrees"
+    worktree_root.mkdir()
+    (worktree_root / ".DS_Store").write_text("ignored", encoding="utf-8")
+
+    _ensure_no_existing_worktrees(worktree_root)
 
 
 def test_run_release_preserves_accepted_unfinalized_worktree(tmp_path) -> None:
