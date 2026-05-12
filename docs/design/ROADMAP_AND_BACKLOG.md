@@ -103,14 +103,14 @@ Current implementation status:
 - Release runs fail fast when the configured project worktree root contains stale worktrees or selected task branches already exist.
 - Release task worktrees and merged branches are cleaned up by default unless debug artifact retention is requested; accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches are preserved.
 - Manual recovery is supported by `agent-loop cleanup`, which dry-runs by default and can remove stale release worktrees plus `agent/<release>/*` branches with `--force`.
-- Release queues classify allowed-file overlap; minor overlap becomes a dependency, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected.
+- Release queues classify allowed-file overlap. Current scheduling remains conservative, but the target design treats overlap as a risk signal for the governor-owned execution DAG: normal source-file overlap can be parallelized, sequenced, stacked, or assigned a merge-repair plan by a high-level agent; hard deterministic rejection should be reserved for configured exclusive paths, generated artifacts, lockfiles, migrations, and out-of-scope files.
 - Project configs support `model_roles`, `model_routing`, and `model_catalog` for capability-aware routing. Default configs express the recommended hierarchy of `gpt-5.5` strategic planning, `gpt-5.2` runtime/review supervision, `gpt-5.3-codex` coding work, `gpt-5.3-codex-spark` micro repair, and `gpt-5.4-mini` cheap routing/fallback. `doctor` reports unsupported, unknown, and uncataloged role models so routing can degrade safely.
 - Executor roles support `fallback_models`; attempts are bounded by `budget.max_executor_attempts_per_task`.
 - Repeated-failure diagnosis writes `executor_attempts.json` and `failure_diagnosis.yaml` after bounded executor or verification failures; the default backend is deterministic and the diagnosis step is exposed through a replaceable seam for stronger review.
 - `agent-loop plan-release` writes deterministic contract planning scaffolds from release objectives and can execute a configured planner backend with `--execute-planner`, preserving planner stdout/stderr/metadata paths in the contract plan.
 - `agent-loop run-objective` plans from an objective, writes validated generated contracts, and runs those contracts as a release queue.
 - `agent-loop plan-backlog` analyzes the roadmap against a repository goal, emits prioritized epics, and can write the highest-priority epic as a release objective for `run-objective`.
-- Generated-contract admission rejects release mismatch, missing diff evidence, weak stop conditions, whole-repo scope, unknown verification profiles, inconsistent verification profiles, and allowed-file counts above project budget.
+- Generated-contract admission rejects hard safety violations such as release mismatch, missing diff evidence, weak stop conditions, whole-repo scope, unknown verification profiles, and inconsistent verification profiles. Allowed-file counts and diff-size pressure are budget findings; severe violations remain hard stops, while modest overages should be reviewed by the governor/supervisor agent with an auditable accept, split, rerun, or escalation decision.
 - Accepted-task finalization uses a local merge lock and rebases the worktree onto latest base before merging.
 - Contract-contained rebase conflicts get one bounded autonomous repair attempt before escalation.
 
@@ -177,7 +177,7 @@ Target operator experience:
 4. Watch the human-facing release log and intervene only for major problems.
 5. Receive a clean feature branch, pushed branch, PR candidate, or policy-approved merge, with evidence and updated repo-state memory.
 
-The system should not stop for routine worker or subsystem failures. A high-level runtime supervisor should diagnose, repair, and retry contract-contained failures such as stale editable installs, schema-invalid planner output, missing worktree import context, long-running but active workers, flaky tests, dataclass ordering mistakes, worker verification-environment confusion, over-broad documentation tasks, allowed-file overlap, budget overrun that can be fixed by task splitting, and narrow merge conflicts. Human escalation is reserved for exhausted autonomous repair, missing credentials, unsafe policy expansion, destructive operations not explicitly delegated, or no actionable work remaining.
+The system should not stop for routine worker or subsystem failures. A high-level runtime supervisor should diagnose, repair, and retry contract-contained failures such as stale editable installs, schema-invalid planner output, missing worktree import context, long-running but active workers, flaky tests, dataclass ordering mistakes, worker verification-environment confusion, over-broad documentation tasks, allowed-file overlap, soft budget overruns, and narrow merge conflicts. Human escalation is reserved for exhausted autonomous repair, missing credentials, unsafe policy expansion, destructive operations not explicitly delegated, hard invariant violations, or no actionable work remaining.
 
 Required capabilities:
 
@@ -191,8 +191,9 @@ Required capabilities:
 8. Continue until the requested epic count, budget, explicit stopping criteria, or no actionable epics remain.
 9. For validation-heavy or simulation repositories, promote new findings from benchmarks, failed validations, generated artifacts, and changed assumptions into future roadmap/backlog decisions.
 10. Diagnose and repair failed subsystem steps before stopping, including planner schema mismatches, verification-environment drift, flaky tests, and small integration conflicts.
-11. Observe long-running workers through heartbeats plus raw audit streams and decide whether to wait, inspect, interrupt, or retry.
-12. Repair failed release plans by normalizing contracts, splitting over-budget tasks, narrowing allowed-file overlap, and resuming from previously accepted work.
+11. Observe long-running workers through heartbeats, process liveness, raw audit streams, and worktree diff/file activity; classify active, quiet-alive, stalled, hung, or environment-blocked execution before deciding whether to wait, inspect, interrupt, retry, or escalate.
+12. Repair failed release plans by normalizing contracts, splitting genuinely over-budget tasks, accepting cohesive verified soft-over-budget work with evidence when appropriate, narrowing unsafe allowed-file overlap, and resuming from previously accepted work.
+13. Decide the execution DAG dynamically: run low-risk tasks in parallel, serialize or stack dependent work, allow normal source overlap when the expected reward exceeds merge risk, and create merge-repair tasks for manageable conflicts.
 
 Current implementation status:
 
@@ -206,18 +207,21 @@ Current implementation status:
 - `run-backlog` records artifact paths for backlog plans, generated objectives, contract plans, release summaries, metrics, budgets, tuning reports, and an evidence manifest.
 - The `governor-service-boundaries` dogfood run showed the exact missing layer: the deterministic kernel correctly caught environment drift, invalid generated contracts, unsafe overlap, long-running worker ambiguity, and over-budget documentation scope, but a human had to act as runtime supervisor to repair and resume.
 - The first full closed-loop run showed that the system can recover from subsystem failures, but recovery still required manual patches for planner schema mismatch, verification-environment drift, and one worker-generated dataclass ordering error.
+- The runtime-supervisor dogfood run showed that deterministic hard stops are sometimes too blunt: a verified cohesive diff only 19 lines over a 600-line budget should usually become a soft review finding, not automatic wasted work; strict exact-overlap rejection should become governor DAG judgment; worktree verification must use a configured shared runtime instead of assuming `.venv` exists in each worktree.
+- The controller/target split needs tightening. Self-development can track `repo_state`, objectives, and contracts in the `auto_develop` repo because it is also the target. External targets should keep durable state, objectives, and contracts in the target repo or a dedicated control repo. Raw `runs/` evidence is local/archival and must not be the only source of development memory, completed-epic history, or next-epic planning state.
 
 Remaining Phase 4 work:
 
-1. Add a `RuntimeSupervisor` that consumes structured release events, summaries, evidence bundles, raw logs, budget/tuning signals, and current state, then emits typed repair actions.
-2. Implement bounded repair actions for environment repair, contract normalization, task splitting, allowed-file scope narrowing, release resume, long-running-worker inspection, model escalation, and repo-state updates.
-3. Connect `RepairPolicy` to the runtime supervisor so retry/stop classification becomes an executable repair workflow with budgets and evidence.
-4. Shrink deterministic heuristic code by moving judgment-heavy recovery policy into the supervisor while preserving hard gates. Initial targets are deterministic backlog scoring, contract wording heuristics, failure log classifiers, budget-tuning prose, overlap recovery strategy, and cockpit-summary filtering.
-5. Extend the current one-epic governor boundary into a top-level `run-governor` or extended `run-backlog` loop that accepts an epic count and continues through the next N highest-priority epics.
-6. Make persistent backlog state authoritative for completed, skipped, blocked, active, and candidate epics across runs.
-7. Teach the governor to decide which workers can run in parallel and which must be chained based on dependencies, overlap, and run outcomes.
-8. Teach the governor to apply or commit policy-compliant roadmap/backlog/repo-state updates after each epic with outcome, metrics, lessons, and next recommendations.
-9. Add a bootstrap/onboarding command or checklist that turns a freshly cloned target repo plus one or two prompts into the required config, repo-state memory, objective/backlog directories, and initial doctor checks.
+1. Add an agent-governed soft-gate decision layer: deterministic review emits findings with severity, then a reviewer/supervisor agent decides accept, split, rerun, repair, or escalate for soft findings while hard invariants remain non-bypassable.
+2. Replace exact-overlap rejection as the target policy with overlap risk scoring and governor-owned DAG decisions, including explicit merge-repair plans for acceptable source overlap.
+3. Add shared verification-runtime configuration so isolated worktrees can run tests through a known Python/toolchain without requiring a per-worktree `.venv`.
+4. Add environment repair for missing `.venv`, command-not-found, missing `PYTHONPATH`, and dependency-runtime drift when project policy declares a safe repair.
+5. Improve executor liveness detection with process, output, heartbeat, and file/diff activity signals before declaring a worker stuck.
+6. Add target-artifact ownership support: project-configured artifact directories, target-repo `.auto_develop/` layout, and compact release/epic outcome summaries in tracked repo-state so deleting the controller checkout does not lose target development memory or next-epic context.
+7. Extend the current one-epic governor boundary into a top-level `run-governor` or extended `run-backlog` loop that accepts an epic count and continues through the next N highest-priority epics.
+8. Make persistent backlog state authoritative for completed, skipped, blocked, active, and candidate epics across runs.
+9. Teach the governor to apply or commit policy-compliant roadmap/backlog/repo-state updates after each epic with outcome, metrics, lessons, and next recommendations.
+10. Add a bootstrap/onboarding command or checklist that turns a freshly cloned target repo plus one or two prompts into the required config, repo-state memory, objective/backlog directories, and initial doctor checks.
 
 Architecture consolidation needed before this should grow much further:
 
@@ -226,7 +230,7 @@ Architecture consolidation needed before this should grow much further:
 3. Move backlog planning, objective handoff, and multi-epic governor control into separate services instead of growing `backlog.py`.
 4. Move CLI backend construction into application-service factories.
 5. Split schema models by domain so config, contracts, runtime state, evidence, and governor state can evolve independently.
-6. Retire procedural heuristic modules once supervisor-backed decisions exist; keep them only as deterministic test fixtures or fallback scaffolding.
+6. Retire procedural heuristic modules once supervisor-backed decisions exist; keep them only as deterministic test fixtures or fallback scaffolding. Priority candidates are exact-overlap rejection, hard budget rejection for small overages, brittle verification-command assumptions, elapsed-time-only stuck-worker interpretation, and controller-relative target artifact defaults.
 
 ## Critical Path
 

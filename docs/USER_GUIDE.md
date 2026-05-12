@@ -11,10 +11,14 @@ The usual structure is:
 ```text
 auto_develop/
   main/                    # this orchestrator repository
-  worktrees/               # temporary agent worktrees for auto_develop itself
 
 target_project/
   main/                    # normal target repository checkout
+    .auto_develop/
+      repo_state/           # tracked durable target memory
+      objectives/           # tracked/reviewable selected objectives
+      contracts/            # tracked/reviewable task contracts
+      runs/                 # ignored or archived raw run evidence
 
 target_project_worktrees/  # temporary agent worktrees for the target project
 ```
@@ -26,6 +30,23 @@ The core objects are:
 - Task contract: describes one bounded implementation task with allowed files, forbidden changes, required evidence, verification, and stop conditions.
 - Release run: executes a queue of task contracts and integrates accepted work into a feature branch.
 - Evidence bundle: stores prompts, executor output, verification output, review decisions, diffs, and finalization metadata.
+
+Artifact ownership matters. The `auto_develop` source checkout should be replaceable. For external target projects, store durable target-specific state in the target repository or in a dedicated control repository, not in the `auto_develop` implementation repo. The exception is self-development: when `auto_develop` is the target, its own `repo_state/`, `objectives/`, and `contracts/` are correctly tracked in this repo.
+
+Durable target artifacts:
+
+- `.auto_develop/repo_state/<project>/`;
+- `.auto_develop/objectives/`;
+- `.auto_develop/contracts/`;
+- compact release/epic outcome summaries used by the next backlog-planning run.
+
+Generated/local artifacts:
+
+- `.auto_develop/runs/` raw evidence, unless you intentionally archive it;
+- temporary worktrees;
+- virtual environments, caches, and raw worker scratch files.
+
+If you delete and reclone only the `auto_develop` controller checkout, you can continue implementing the target repository's next epic only if the target repo or a dedicated control repo contains the durable artifacts above. Raw `runs/` evidence is useful for audit, but should not be the only source of project memory, completed-epic history, or next-epic planning state.
 
 The default Git model is:
 
@@ -86,7 +107,7 @@ Do not place the worktree root inside the target repository. This avoids acciden
 
 ## Step 3: Create A Project Config
 
-Create `configs/<project>.yaml` in the `auto_develop/main` repository.
+Create `configs/<project>.yaml` in the `auto_develop/main` repository or in a separate operator/control repository. For long-lived target development, prefer storing target-specific durable artifacts in the target repository and passing explicit artifact directories to commands.
 
 Example:
 
@@ -95,7 +116,7 @@ project_id: my_project
 repo_path: /path/to/target_project/main
 default_base_branch: main
 worktree_root: /path/to/target_project_worktrees
-repo_state_path: repo_state/my_project
+repo_state_path: .auto_develop/repo_state/my_project
 
 executor:
   type: codex_cli
@@ -172,13 +193,13 @@ model_routing:
 verification_profiles:
   default:
     commands:
-      - /path/to/target_project/main/.venv/bin/python -m pytest
+      - cd /path/to/target_project/main && PYTHONPATH={worktree}/src .venv/bin/python -m pytest
   code_only:
     commands:
-      - /path/to/target_project/main/.venv/bin/python -m pytest
+      - cd /path/to/target_project/main && PYTHONPATH={worktree}/src .venv/bin/python -m pytest
   documentation:
     commands:
-      - /path/to/target_project/main/.venv/bin/python -m pytest
+      - cd /path/to/target_project/main && PYTHONPATH={worktree}/src .venv/bin/python -m pytest
 
 budget:
   max_executor_attempts_per_task: 2
@@ -208,6 +229,19 @@ Important config fields:
 - `verification_profiles`: named command sets task contracts can reference.
 - `budget`: deterministic limits used during planning and review.
 
+Worktrees normally do not contain their own `.venv`. Prefer verification commands that use a configured shared runtime from the main checkout while pointing imports or source paths at the task worktree. The `{worktree}` placeholder is the intended convention for worktree-aware commands; until every executor path expands it, use explicit absolute paths or wrapper scripts that receive the worktree path from project config. Avoid commands such as `.venv/bin/python` that assume the virtual environment exists inside each isolated worktree.
+
+Recommended durable target directories:
+
+```bash
+mkdir -p /path/to/target_project/main/.auto_develop/repo_state/my_project
+mkdir -p /path/to/target_project/main/.auto_develop/objectives
+mkdir -p /path/to/target_project/main/.auto_develop/contracts
+mkdir -p /path/to/target_project/main/.auto_develop/runs
+```
+
+Commit `.auto_develop/repo_state`, `.auto_develop/objectives`, and `.auto_develop/contracts` when they define durable development state. Ignore or externally archive `.auto_develop/runs` unless the project deliberately keeps run evidence in Git.
+
 ### Model Policy
 
 The recommended hierarchy is:
@@ -234,7 +268,7 @@ agent-loop doctor \
 
 ## Step 5: Write An Objective
 
-An objective describes a release-sized goal. Store it under `objectives/`.
+An objective describes a release-sized goal. For self-development, store it under `objectives/`. For external targets, prefer `.auto_develop/objectives/` in the target repository.
 
 Example `objectives/my-feature-1.yaml`:
 
@@ -269,13 +303,13 @@ agent-loop plan-backlog \
   --write-objective
 ```
 
-This writes `runs/<timestamp>_<project>_backlog/backlog_plan.json` and, when `--write-objective` is set, an objective YAML for the highest-priority epic. The backlog plan can also include `roadmap_updates` and `repo_state_updates` that the current governor boundary can consume for follow-up state updates after runs; the broader always-on refresh loop is still planned.
+This writes `runs/<timestamp>_<project>_backlog/backlog_plan.json` and, when `--write-objective` is set, an objective YAML for the highest-priority epic. For external targets, pass `--runs-dir /path/to/target_project/main/.auto_develop/runs` and `--objectives-dir /path/to/target_project/main/.auto_develop/objectives`. The backlog plan can also include `roadmap_updates` and `repo_state_updates` that the current governor boundary can consume for follow-up state updates after runs; the broader always-on refresh loop is still planned.
 
-For self-development, `auto_develop` keeps this memory under `repo_state/auto_develop/`, including `architecture_summary.md`, `active_constraints.yaml`, `known_failures.md`, `release_plan.yaml`, and `backlog_state.yaml`.
+For self-development, `auto_develop` keeps this memory under `repo_state/auto_develop/`, including `architecture_summary.md`, `active_constraints.yaml`, `known_failures.md`, `release_plan.yaml`, and `backlog_state.yaml`. For external targets, use `.auto_develop/repo_state/<project>/` in the target repository or an equivalent durable control repository.
 
 ## Step 6: Create Or Generate Task Contracts
 
-A task contract is the unit of worker execution. It must be narrow enough that an agent can complete it autonomously.
+A task contract is the unit of worker execution. It must be narrow enough that an agent can complete it autonomously. For external targets, store accepted/generated contracts in `.auto_develop/contracts/` in the target repository or control repository.
 
 Example `contracts/my-feature-0001.yaml`:
 
@@ -434,7 +468,7 @@ agent-loop run-release \
   --merge-on-accept
 ```
 
-Sequential execution is the default. Parallel execution uses explicit `depends_on` and inferred file-overlap dependencies:
+Sequential execution is the default. Parallel execution currently uses explicit `depends_on` and conservative inferred file-overlap dependencies:
 
 ```bash
 agent-loop run-release \
@@ -446,9 +480,11 @@ agent-loop run-release \
 
 `run-release` defaults to the integration branch `feature/<release>`. Accepted task branches are merged into that feature branch when `--merge-on-accept` or `--push-on-accept` is set.
 
+Overlap handling is evolving. The current scheduler is intentionally cautious, but the target autonomous workflow is not "no overlap at all." The governor should minimize overlap, classify overlap risk, and decide whether tasks can run in parallel, must be chained, should use stacked branches, or need an explicit merge-repair plan. Deterministic code should only hard-block unsafe overlap such as generated artifacts, lockfiles, migrations, configured exclusive paths, forbidden paths, or files outside task scope.
+
 After the run, inspect `release_metrics.json`, `release_budget.json`, and `release_tuning.md` alongside the release log. The budget ledger records usage, task-size outliers, verification bottlenecks, and waste signals; the tuning report translates those signals into guidance for the next run.
 
-If the report shows routing pressure, reduce task size or adjust `model_routing` and `budget.max_changed_files_per_task`, `budget.max_diff_lines_per_task`, or `budget.max_context_chars_per_task` before launching the next release.
+If the report shows routing pressure, reduce task size or adjust `model_routing` and `budget.max_changed_files_per_task`, `budget.max_diff_lines_per_task`, or `budget.max_context_chars_per_task` before launching the next release. Small budget overages should be treated as review findings rather than automatic waste: a reviewer/supervisor agent should decide whether a cohesive verified diff is acceptable, whether to split follow-up work, or whether to rerun with a narrower contract.
 
 Common release modes:
 

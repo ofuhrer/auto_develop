@@ -1,6 +1,6 @@
 # Agentic Devloop
 
-`agentic-devloop` is an autonomous-first local CLI orchestrator for agentic software development. A governor agent reads repository documentation, roadmap, artifacts, and goals to choose the next high-reward epic; worker agents implement bounded contracts in isolated worktrees; deterministic tools verify results; and a runtime supervisor should diagnose, repair, and resume contract-contained failures without routine human intervention. The orchestrator records evidence, updates state, and finalizes accepted work according to configured policy.
+`agentic-devloop` is an autonomous-first local CLI orchestrator for agentic software development. A governor agent reads repository documentation, roadmap, artifacts, and goals to choose the next high-reward epic; worker agents implement bounded contracts in isolated worktrees; deterministic tools enforce hard invariants and run verification; and a runtime supervisor should diagnose, repair, and resume contract-contained failures without routine human intervention. Soft findings such as modest budget overages, normal source-file overlap, retry strategy, model escalation, and environment repair are intended to be decided by the governor or supervisor agent with auditable rationale rather than by brittle deterministic rejection. The orchestrator records evidence, updates state, and finalizes accepted work according to configured policy.
 
 The CLI entry point is:
 
@@ -45,6 +45,8 @@ Run tests:
 6. Review evidence under `runs/`, including `release_metrics.json`, `release_budget.json`, `release_tuning.md`, `failure_diagnosis.yaml`, and `executor_attempts.json` for failed tasks.
 7. Let the governor and runtime supervisor use budget, tuning, validation, and artifact evidence to repair recoverable failures and update roadmap/backlog state before the next run.
 8. Push the feature branch or merge to `main` when the configured project policy allows autonomous finalization.
+
+For external target repositories, keep durable target development memory with the target, not with the `auto_develop` implementation checkout. A good default is `<target>/.auto_develop/repo_state`, `<target>/.auto_develop/objectives`, and `<target>/.auto_develop/contracts` for tracked state, with raw runs ignored or externally archived.
 
 Example:
 

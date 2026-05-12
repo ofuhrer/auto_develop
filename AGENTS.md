@@ -22,7 +22,7 @@ Keep changes aligned with that purpose. Prefer pragmatic, testable orchestration
 - `configs/`: local project configs used for smoke tests and examples.
 - `contracts/`: task contract examples and local test contracts.
 - `objectives/`: release objective examples.
-- `repo_state/`: local release state used by orchestration examples.
+- `repo_state/`: durable state for `auto_develop` self-development and examples. External target projects should keep their durable state in the target repo or a dedicated control repo.
 - `docs/README.md`: documentation index and current implementation summary.
 - `docs/USER_GUIDE.md`: user-facing operational guide.
 - `docs/DEVELOPMENT.md`: maintainer setup, testing, smoke-test, and documentation workflow.
@@ -74,7 +74,7 @@ git diff --check
 - Keep code typed where practical, following the existing dataclass and Pydantic model style.
 - Keep modules small and purpose-specific.
 - Prefer explicit error messages over silent fallbacks.
-- Use deterministic behavior for orchestration decisions whenever possible.
+- Use deterministic behavior for hard safety invariants, evidence collection, Git operations, and verification execution. Treat judgment-heavy choices as agent-governed soft decisions when the architecture provides a typed evidence path.
 - Keep CLI output machine-readable where existing commands already return JSON.
 - Avoid broad exception swallowing unless the resulting evidence clearly records the failure.
 - Keep comments rare and focused on non-obvious orchestration behavior.
@@ -85,7 +85,7 @@ Preserve these behavior contracts unless intentionally changing them with tests 
 
 - `run-task` executes one contract in one isolated worktree.
 - `run-release` owns `feature/<release>` by default and merges accepted task branches into that integration branch, not directly into `main`.
-- `run-release --execution-mode parallel` must respect explicit `depends_on` edges and inferred file-overlap dependencies.
+- `run-release --execution-mode parallel` must respect explicit `depends_on` edges and current inferred file-overlap dependencies. The target design is governor-owned DAG selection: overlap should become a risk signal and hard rejection should be reserved for configured unsafe paths, generated artifacts, lockfiles, migrations, forbidden paths, or out-of-scope files.
 - `run-release` must fail fast on stale worktrees or selected stale task branches unless the user explicitly cleans them up.
 - `cleanup` must dry-run by default and only remove artifacts with `--force`.
 - `cleanup --include-integration-branch` must be explicit before deleting `feature/<release>`.
@@ -94,6 +94,7 @@ Preserve these behavior contracts unless intentionally changing them with tests 
 ## Git And Artifact Safety
 
 - Do not commit generated runtime evidence from `runs/` unless the user explicitly requests it.
+- Do not add new target-specific durable state for external repositories to the `auto_develop` source repo unless it is explicitly meant as a tracked example. Prefer the target repo's `.auto_develop/` control directory or a dedicated control repo.
 - Do not commit virtual environments, build artifacts, caches, or local worktrees.
 - Do not delete preserved worktrees or branches unless the user explicitly asks or a cleanup command is being implemented/tested in a temp repo.
 - Do not use destructive Git commands such as `git reset --hard` or `git checkout -- <file>` unless the user explicitly requests them.
@@ -108,6 +109,8 @@ For code changes, run at least:
 .venv/bin/python -m pytest
 git diff --check
 ```
+
+When testing worktree execution, remember that isolated worktrees usually do not contain `.venv`. Verification commands should use the configured shared runtime or an absolute Python path from the main checkout while pointing imports/source paths at the worktree. Do not add new contracts that assume `.venv/bin/python` exists inside each task worktree.
 
 For CLI changes, also run a help smoke test:
 

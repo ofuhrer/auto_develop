@@ -138,13 +138,21 @@ cheap deterministic checks first
 -> frontier model only for planning, review, or failure diagnosis
 ```
 
-Current implementation supports configurable task execution roles through `model_roles` and `model_routing`. Worker roles may define `fallback_models`, and every executor attempt is recorded in evidence. Release queues classify overlapping allowed-file scopes before execution: minor overlap becomes a sequencing dependency, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected. In parallel mode the orchestrator builds a DAG from explicit `depends_on` fields and inferred overlap dependencies, submits ready tasks concurrently, monitors completions, and schedules newly unblocked tasks as outcomes arrive. Release-level planning supports deterministic scaffolding, strong-model budget reservation, explicit planner backend execution with planner stdout/stderr/metadata evidence, and `run-objective` composition from objective to generated contracts to release execution. Generated-contract admission rejects unsafe release IDs, missing diff evidence, weak stop conditions, whole-repo file scope, unknown or inconsistent verification profiles, and allowed-file counts above project budget. The `RepairPolicy` seam classifies failures for the current one-epic loop, and the runtime supervisor now turns those classifications into bounded repair proposals, resume intents, inspection summaries, escalation recommendations, and repo-state update proposals while still deferring all hard-gate enforcement to deterministic validators.
+Current implementation supports configurable task execution roles through `model_roles` and `model_routing`. Worker roles may define `fallback_models`, and every executor attempt is recorded in evidence. Release queues classify overlapping allowed-file scopes before execution. The current implementation still uses conservative overlap gates in places, but the target architecture treats overlap as a risk signal for a governor-owned execution DAG, not as an unconditional rejection rule. Minor overlap can run in parallel, sequence, or stack depending on the governor's dependency analysis; exact overlap in normal source files should usually require an explicit agent rationale and merge-repair plan rather than an automatic stop. Deterministic code should only hard-block overlap for paths that are unsafe by policy, such as generated artifacts, lockfiles, migrations, configured exclusive paths, or files outside contract scope. In parallel mode the orchestrator builds a DAG from explicit `depends_on` fields and inferred overlap dependencies, submits ready tasks concurrently, monitors completions, and schedules newly unblocked tasks as outcomes arrive. Release-level planning supports deterministic scaffolding, strong-model budget reservation, explicit planner backend execution with planner stdout/stderr/metadata evidence, and `run-objective` composition from objective to generated contracts to release execution. Generated-contract admission rejects hard safety violations such as unsafe release IDs, missing diff evidence, weak stop conditions, and whole-repo file scope. Budget and size pressure should be recorded as soft or hard findings depending on severity; a reviewer/supervisor agent should decide whether to accept, split, rerun, or escalate soft violations. The `RepairPolicy` seam classifies failures for the current one-epic loop, and the runtime supervisor now turns those classifications into bounded repair proposals, resume intents, inspection summaries, escalation recommendations, and repo-state update proposals while still deferring hard invariant enforcement to deterministic validators.
 
 Some deterministic subsystems should become thinner after the supervisor exists:
 deterministic backlog scoring becomes fallback scaffolding, failure diagnosis
 becomes evidence packaging plus typed categories, budget tuning becomes numeric
-ledger generation, overlap analysis becomes a signal rather than a full recovery
-policy, and human log formatting becomes a projection of structured events.
+ledger generation, overlap analysis becomes a risk report rather than a full
+recovery policy, and human log formatting becomes a projection of structured
+events.
+
+The boundary is:
+
+- hard deterministic invariants: Git isolation, forbidden paths, destructive-operation policy, credential/network policy, evidence preservation, command timeout ceilings, generated-artifact exclusion, and final merge target protection;
+- soft agent-governed findings: modest budget overages, source-file overlap, task splitting, model escalation, retry versus abandon, environment repair, and whether a cohesive verified diff should be accepted despite a sizing warning.
+
+A soft override must write evidence containing the finding, risk assessment, decision, rationale, and fallback plan. It must not bypass hard validators; it can only choose a repair path or accept a soft exception.
 
 ## Model Policy
 
@@ -170,7 +178,7 @@ The `doctor` command is the preflight entry point for release governance. It che
 
 Merge finalization uses a local lock, rebases the task worktree onto the orchestrator-owned integration branch, then merges the accepted task branch into that feature branch. The feature branch, not `main`, is the release integration unit. Release finalization can then merge the feature branch into `main`, push the feature branch for PR review, or merge and push `main`. Contract-contained rebase conflicts get one bounded autonomous repair attempt followed by verification and one finalization retry. Remaining conflicts are surfaced as evidence.
 
-Release runs write a human-cockpit `release.log` for live monitoring and retain full raw agent streams in `release.raw.log`. The cockpit log is curated and styled for `tail -f`: it uses ANSI color plus emojis, reports task objectives, allowed scope, executor attempts and selected models, long-running worker heartbeats, verification, review decisions, finalization, intervention hints, and a final release summary. Arbitrary worker stderr, plugin warnings, code snippets, and test literals stay out of `release.log`; full worker stdout/stderr remains available in the raw log for audit and debugging. A release refuses to start when the configured project worktree root already contains worktrees or selected task branches already exist. Release cleanup removes task worktrees plus merged task branches by default. Accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches are preserved so accepted work remains reachable. Debug mode can retain all artifacts when post-mortem inspection is needed. Each release also writes `release_review.md`, `release_metrics.json`, `release_budget.json`, and `release_tuning.md`.
+Release runs write a human-cockpit `release.log` for live monitoring and retain full raw agent streams in `release.raw.log`. The cockpit log is curated and styled for `tail -f`: it uses ANSI color plus emojis, reports task objectives, allowed scope, executor attempts and selected models, long-running worker heartbeats, verification, review decisions, finalization, intervention hints, and a final release summary. Arbitrary worker stderr, plugin warnings, code snippets, and test literals stay out of `release.log`; full worker stdout/stderr remains available in the raw log for audit and debugging. Long-running workers should be classified from multiple signals, not elapsed time alone: process liveness, stdout/stderr activity, file/diff activity, executor heartbeat age, wall-clock budget, and tool/model events when available. The runtime supervisor should distinguish active work, quiet-but-alive work, stalled work, hung processes, and environment-blocked execution before deciding to wait, inspect, restart, escalate, or stop. A release refuses to start when the configured project worktree root already contains worktrees or selected task branches already exist. Release cleanup removes task worktrees plus merged task branches by default. Accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches are preserved so accepted work remains reachable. Debug mode can retain all artifacts when post-mortem inspection is needed. Each release also writes `release_review.md`, `release_metrics.json`, `release_budget.json`, and `release_tuning.md`.
 
 `release_metrics.json` is the cost-analysis artifact. It records per-task prompt characters, context characters, output characters, executor attempt count, model attempt totals, verification time, changed-file counts, and diff size. These metrics are deliberately provider-agnostic character-count proxies until model usage metadata is available from the executor backend. `release_budget.json` captures the budget ledger, including usage, task summaries, model attempts, task-size outliers, verification bottlenecks, and waste signals. `release_tuning.md` turns that ledger into next-run guidance for routing and task sizing.
 
@@ -200,6 +208,42 @@ repo_state/
 ```
 
 Only relevant slices may be injected into task prompts. Compression is allowed for logs and history, but not for equations, validation rules, numerical tolerances, benchmark definitions, or task acceptance criteria.
+
+## Artifact Ownership
+
+`auto_develop` has two roles that must not be confused:
+
+- controller implementation: the `auto_develop` source repository and installed CLI;
+- target control plane: the target repository's durable development memory, objectives, contracts, and run artifacts.
+
+For self-development, both roles point at the same Git repository, so storing `repo_state/auto_develop`, `objectives/`, and `contracts/` in this repository is correct. For any external target repository, target-specific artifacts should not be committed to the `auto_develop` source repository. They should live in the target repository or in a dedicated target-control repository.
+
+Recommended external-target layout:
+
+```text
+target_repo/
+  .auto_develop/
+    repo_state/<project>/      # tracked durable memory
+    objectives/                # tracked selected/reusable release objectives
+    contracts/                 # tracked accepted task contracts
+    runs/                      # ignored or externally archived raw evidence
+```
+
+Durable and tracked:
+
+- project-specific `repo_state`;
+- selected objectives that define intended work;
+- accepted/generated contracts that define executed work;
+- compact release and epic outcome summaries needed for future backlog planning after controller checkout deletion;
+- roadmap/backlog updates and active constraints.
+
+Generated and usually untracked:
+
+- raw `runs/` evidence, worker logs, prompts, diffs, and scratch files;
+- temporary worktrees;
+- executor caches and virtual environments.
+
+The current CLI supports this layout by passing explicit `--contracts-dir`, `--objectives-dir`, and `--runs-dir` paths and by configuring `repo_state_path` relative to the target repository when the controller does not have a matching path. The target architecture should make this less error-prone by adding project-configured artifact directories and by persisting compact release and epic outcome state into tracked `repo_state`, so deleting and recloning the controller checkout does not lose the target project's development memory or the ability to choose the next epic.
 
 ## Repository Validation Constraints
 

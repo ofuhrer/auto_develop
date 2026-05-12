@@ -359,8 +359,8 @@ Finalization conflicts are captured in evidence. Contract-contained rebase confl
 3. Resolve an ordered contract queue from explicit `--contract` arguments or `repo_state/<project>/release_plan.yaml`.
 4. Fail fast if any task branch for the selected release queue already exists.
 5. Create or reuse the orchestrator-owned integration branch, defaulting to `feature/<release>`, from the configured base branch.
-6. Classify `allowed_files` overlap.
-7. Build an execution DAG from explicit `depends_on` edges and inferred overlap dependencies.
+6. Classify `allowed_files` overlap into a structured overlap-risk report.
+7. Build an execution DAG from explicit `depends_on` edges and inferred overlap dependencies. The current implementation is conservative; the target governor may choose parallel, sequential, stacked-branch, or merge-repair execution for normal source-file overlap when it records an explicit rationale and fallback plan.
 8. In sequential mode, run the queue in order; in parallel mode, submit currently-ready tasks, monitor completions, and dynamically submit newly unblocked tasks.
 9. Base task branches on the integration branch and merge accepted task branches back into that integration branch when task finalization is requested.
 10. Stop after the first non-accepted task unless `--continue-on-failure` is set.
@@ -368,6 +368,42 @@ Finalization conflicts are captured in evidence. Contract-contained rebase confl
 12. Mirror filtered progress to `runs/<release-run-id>/release.log` and full raw agent streams to `release.raw.log`.
 13. Remove task worktrees and merged task branches unless `--debug-keep-artifacts` is set; preserve accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches.
 14. Persist `runs/<release-run-id>/release_summary.json` and `release_review.md`.
+
+### Artifact Path Ownership
+
+Default CLI paths are controller-relative:
+
+- `configs/`;
+- `objectives/`;
+- `contracts/`;
+- `runs/`.
+
+That default is acceptable for self-development because the controller repository and target repository are the same checkout. For external targets it is only a convenience default. Durable target-specific artifacts should be stored under the target repository or a dedicated target-control repository, not in the `auto_develop` source repository.
+
+Recommended path policy for external targets:
+
+```text
+<target-repo>/.auto_develop/repo_state/<project>/
+<target-repo>/.auto_develop/objectives/
+<target-repo>/.auto_develop/contracts/
+<target-repo>/.auto_develop/runs/
+```
+
+Tracked in target Git:
+
+- `repo_state/<project>/*`;
+- selected objectives;
+- task contracts that were accepted into a release queue;
+- compact release/epic outcome summaries needed for future backlog planning and next-epic selection.
+
+Ignored or externally archived:
+
+- raw `runs/` evidence;
+- task worktrees;
+- raw worker streams and scratch files;
+- caches and virtual environments.
+
+Current limitation: the next backlog-planning run can read roadmap and repo-state memory, but detailed release outcomes mostly live in raw `runs/` artifacts unless manually summarized into repo-state. If raw runs are deleted with the controller checkout, development history and next-epic context may be lost unless the outcome has been compacted into tracked target memory. Separately, release continuation can infer completed release tasks from `runs/*_<release>_release/release_summary.json`, which is useful for step-by-step reruns but is not the primary long-term state model. The target design should persist compact `repo_state/<project>/release_history` and `epic_history` updates after each accepted task/release and should add project-configured `objectives_dir`, `contracts_dir`, and `runs_dir` defaults to avoid relying on controller-relative paths.
 
 ### Release Cleanup Command
 
@@ -393,7 +429,7 @@ This command executes already-defined contracts. Objective-level planning and ex
 6. In `--mode strong-model`, reserve a strong-model budget ledger entry and write `planner_prompt.md`.
 7. With `--execute-planner`, run the configured planner backend, persist planner stdout/stderr/metadata paths, parse structured JSON output, and validate generated contracts.
 
-Generated contracts must match the release ID, require diff evidence, include a scope or verification stop condition, and must not request whole-repo file scope. When project config is available, generated contracts must reference existing verification profiles, keep profile/task-type choices consistent, and must not exceed `budget.max_changed_files_per_task` allowed-file entries.
+Generated contracts must match the release ID, require diff evidence, include a scope or verification stop condition, and must not request whole-repo file scope. When project config is available, generated contracts must reference existing verification profiles and keep profile/task-type choices consistent. Allowed-file counts, expected diff size, and task-size pressure are admission findings: severe violations remain hard stops, while modest overages should be surfaced for reviewer/supervisor judgment instead of being treated as automatic failure.
 
 ### `run-objective` Flow
 
@@ -410,8 +446,43 @@ The planner backend expects the governor to validate generated planning artifact
 
 1. Check `contract_plan.json` against the release objective and existing contract set.
 2. If strong-model planning was requested, inspect `planner_prompt.md` for the draft inputs and release scope.
-3. Confirm that any proposed follow-up contracts remain bounded by `allowed_files`, `forbidden_changes`, and the release budget.
+3. Confirm that any proposed follow-up contracts remain bounded by `allowed_files`, `forbidden_changes`, and release budget findings.
 4. Only then write or accept explicit task contracts and pass them to `run-release`.
+
+### Soft Gates And Agent Decisions
+
+Deterministic review must distinguish hard invariants from soft policy findings.
+
+Hard invariants are enforced by code and cannot be bypassed by an agent:
+
+- changes outside `allowed_files`;
+- forbidden paths or generated runtime artifacts;
+- destructive operations outside delegated policy;
+- missing evidence required for auditability;
+- verification commands that cannot be run or repaired under configured environment policy;
+- unsafe finalization target or unresolved merge conflict;
+- credential, network, or remote-execution use not allowed by project policy.
+
+Soft findings are emitted as structured evidence and delegated to the governor, reviewer, or runtime supervisor:
+
+- modest diff-line or changed-file budget overage;
+- normal source-file overlap between workers;
+- task cohesion versus task splitting;
+- retry with same model versus escalation;
+- accepting verified work after a size warning;
+- environment-command repair when a configured shared runtime exists.
+
+An agent override for a soft finding must persist:
+
+1. the finding and severity;
+2. affected files/tasks;
+3. risk assessment;
+4. decision;
+5. rationale;
+6. fallback or rollback plan;
+7. validators rerun after the decision.
+
+This keeps the system autonomous without letting model judgment bypass hard safety constraints.
 
 ### Finalization Locking
 
@@ -448,7 +519,7 @@ The diagnosis request includes:
 - changed files from the worktree;
 - executor and verification log excerpts.
 
-The default backend is deterministic. It classifies the failure from the recorded evidence and writes `failure_diagnosis.yaml` with the diagnosis category, confidence, evidence excerpts, recommendation, and retry or escalation guidance. The same backend seam can be replaced later with a model-backed reviewer, but the evidence shape should remain the same.
+The default backend is deterministic. It classifies the failure from the recorded evidence and writes `failure_diagnosis.yaml` with the diagnosis category, confidence, evidence excerpts, recommendation, and retry or escalation guidance. The target path keeps this deterministic backend as evidence packaging and fallback scaffolding, then lets a model-backed supervisor decide among bounded recovery actions for soft failures.
 
 Before retrying or escalating a failed task, inspect:
 
@@ -461,6 +532,27 @@ Before retrying or escalating a failed task, inspect:
 - `git_diff.patch`.
 
 Use `guidance.retryable` and `guidance.escalate` as the primary control points for deciding whether to rerun the task, narrow scope, or hand the failure to stronger review.
+
+### Executor Liveness And Environment Repair
+
+Stuck executors are not identified by wall-clock age alone. The runtime should record:
+
+- process liveness and exit status;
+- last stdout/stderr activity;
+- last file write or diff activity inside the worktree;
+- heartbeat timestamps from the executor wrapper;
+- elapsed wall-clock time versus soft and hard limits;
+- whether the worker is blocked by a missing command, missing environment, network, or credentials.
+
+The supervisor should classify executor state as:
+
+- `active`: recent log, tool, or file activity;
+- `quiet_alive`: process alive but no recent output;
+- `stalled`: no output and no file/diff activity past threshold;
+- `hung`: exceeded hard timeout;
+- `environment_blocked`: command/runtime/dependency unavailable under current worktree.
+
+For `environment_blocked`, the preferred repair is policy-driven command/runtime normalization. Worktrees should not be required to contain their own `.venv`. Project config should define a shared verification runtime or command wrapper, and verification should inject `PYTHONPATH=<worktree>/src` while using the configured Python executable. A repair may rewrite `.venv/bin/python` inside a worktree to the configured shared runtime only when project policy permits it, and must record the original command, repaired command, reason, and retry result.
 
 ### `plan-backlog` Flow
 

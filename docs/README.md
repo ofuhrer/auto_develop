@@ -16,7 +16,7 @@ The project prioritizes:
 
 1. Fast, bounded, pragmatic development loops.
 2. Autonomous-first planning and execution inside explicit contracts.
-3. Deterministic verification before trust.
+3. Deterministic hard invariants before trust, with agent-governed judgment for soft findings.
 4. Auditable evidence for every accepted change.
 5. Safe Git integration through isolated worktrees and feature branches.
 6. Continuous roadmap/backlog refresh from artifacts, validation evidence, metrics, and domain learnings.
@@ -39,14 +39,14 @@ Implemented capabilities include:
 - structured stop evidence when a hard gate, unavailable model, invalid release-resume request, or exhausted retry budget blocks repair;
 - deterministic verification command execution;
 - evidence bundle collection;
-- deterministic review and persisted decisions;
+- deterministic review findings and persisted decisions;
 - repeated-failure diagnosis evidence (`executor_attempts.json` and `failure_diagnosis.yaml`) with deterministic classification by default and a replaceable backend seam for stronger review;
 - role-based model routing;
 - repo-state context injection;
 - `run-task`, `run-release`, `plan-backlog`, `plan-release`, `run-objective`, `status`, and `cleanup` commands;
 - `run-backlog` for chaining backlog planning into objective and release execution;
 - release-level feature branch integration through `feature/<release>`;
-- dynamic release DAG scheduling from `depends_on` and file-overlap analysis;
+- dynamic release DAG scheduling from `depends_on` and file-overlap analysis, currently conservative and targeted to evolve into governor-owned overlap risk decisions;
 - structured `runtime_supervisor/` evidence during repair/resume runs, including release events, retry budgets, repair evidence, and release-summary references;
 - human-cockpit `release.log`, raw audit `release.raw.log`, `release_metrics.json`, `release_budget.json`, and `release_tuning.md`;
 - default cleanup of merged task worktrees and branches;
@@ -57,7 +57,10 @@ Important remaining gaps:
 
 - multi-epic governor looping beyond the current one-epic service boundary;
 - always-on state refresh across repeated epic cycles;
-- reduction of deterministic heuristic code once supervisor-backed decisions are available; candidate areas include backlog scoring, contract-normalization heuristics, failure classification, budget-tuning prose, overlap recovery policy, and cockpit-summary filtering;
+- reduction of deterministic heuristic code once supervisor-backed decisions are available; candidate areas include backlog scoring, contract-normalization heuristics, failure classification, budget-tuning prose, exact-overlap rejection, hard rejection for small budget overages, brittle verification-command assumptions, and cockpit-summary filtering;
+- shared verification-runtime policy so isolated worktrees can run tests without per-worktree virtual environments;
+- executor liveness classification from process, output, heartbeat, and file/diff activity rather than elapsed time alone;
+- target-artifact ownership: external targets should keep durable `.auto_develop/repo_state`, objectives, contracts, and compact outcome history in the target repo or a dedicated control repo, not in the `auto_develop` source checkout;
 - stronger model-based repeated-failure diagnosis backend;
 - richer semantic merge-conflict repair and broader repair strategies;
 - automated pull-request creation;

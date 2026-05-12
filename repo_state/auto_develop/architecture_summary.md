@@ -10,11 +10,12 @@ Current flow:
 4. The planner decomposes the objective into bounded task contracts.
 5. Release execution creates isolated task worktrees and branches.
 6. Worker agents implement inside task contracts.
-7. Deterministic verification and review gate acceptance.
+7. Deterministic verification gates hard invariants and emits structured findings.
 8. Accepted work is finalized according to configured autonomous finalization policy.
 9. A runtime supervisor diagnoses recoverable failures from structured events, evidence, raw logs, budgets, tuning signals, and backlog-state references.
 10. The supervisor applies bounded repair actions such as environment repair, planner-contract normalization, task splitting or scope narrowing, release resume, long-running worker inspection, model escalation, and repo-state update proposals.
-11. The release path records structured stop evidence and the broader governor/backlog refresh loop remains planned until the N-epic flow is implemented.
+11. A reviewer/supervisor agent should decide soft findings such as modest budget overage, normal source-file overlap, retry strategy, environment repair, model escalation, and task splitting; deterministic code remains authoritative for hard invariants.
+12. The release path records structured stop evidence and the broader governor/backlog refresh loop remains planned until the N-epic flow is implemented.
 
 The orchestrator owns policy, state, budgets, verification, evidence, roadmap governance, and finalization. Worker agents own implementation inside narrow task contracts. Humans provide goals and hard safety boundaries rather than routine approvals.
 
@@ -34,6 +35,10 @@ Code-reduction direction:
    budget tuning, long-running-worker interpretation, and repo-state updates.
 3. Retain old deterministic heuristics only as test scaffolding or fallback
    behavior once typed supervisor actions exist.
+4. Reclassify exact source overlap and small budget overages as soft findings
+   for agent judgment; keep hard stops for forbidden paths, generated artifacts,
+   configured exclusive paths, missing evidence, unsafe finalization, and
+   unrepaired verification/runtime failures.
 
 Target flow:
 
@@ -41,4 +46,4 @@ Target flow:
 2. The operator requests a number of epics to implement.
 3. The governor loops over the next highest-value epics.
 4. The runtime supervisor repairs and retries contract-contained subsystem failures without routine human gates.
-5. The loop stops only for major problems: exhausted autonomous repair, missing credentials, unsafe policy expansion, destructive operations not delegated, budget limits, no actionable work, or completion of the requested epic count.
+5. The loop stops only for major problems: exhausted autonomous repair, missing credentials, unsafe policy expansion, destructive operations not delegated, hard budget or invariant limits, no actionable work, or completion of the requested epic count.

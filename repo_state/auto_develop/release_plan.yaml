@@ -9,6 +9,8 @@ current_tasks:
 next_steps:
   - Keep the structured release event stream, retry budgets, repair evidence, and stop reasons aligned with the shipped runtime-supervisor behavior.
   - Preserve the implemented repair/resume seam while the broader N-epic governor loop remains planned until it is actually implemented.
-  - Identify procedural heuristics that can be retired once supervisor actions and the broader governor loop exist: deterministic backlog scoring, contract wording checks, log-pattern failure classification, budget-tuning prose, overlap recovery branching, and cockpit-summary filtering.
-  - Keep deterministic gates authoritative; the supervisor must repair inputs and rerun gates, not bypass them.
+  - Identify procedural heuristics that can be retired once supervisor actions and the broader governor loop exist: deterministic backlog scoring, contract wording checks, log-pattern failure classification, budget-tuning prose, exact-overlap rejection, hard rejection for small budget overages, environment-command assumptions, and cockpit-summary filtering.
+  - Keep deterministic gates authoritative for hard invariants; let the supervisor or reviewer agent decide soft findings such as modest budget overage, source-file overlap, model escalation, retry strategy, and environment repair with auditable rationale.
+  - Add shared verification-runtime policy so isolated worktrees can run tests without requiring a per-worktree .venv.
+  - Add executor liveness classification from process, output, heartbeat, and file/diff activity before declaring workers stuck.
   - Document the shipped runtime supervisor behavior while keeping the multi-epic governor loop planned.
