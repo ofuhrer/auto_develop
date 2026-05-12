@@ -144,14 +144,20 @@ def run_release(
     if overlap_report.findings:
         _report(progress, f"event=overlap_findings count={len(overlap_report.findings)}")
 
-    task_inputs = list(zip(selected_contracts, selected_tasks))
     completed_task_ids = _completed_release_task_ids(
         runs_dir=runs_dir,
         release_id=release_id,
         integration_branch=feature_branch,
     )
+    task_inputs: list[tuple[Path, TaskContract]] = []
+    skipped_completed_task_ids: list[str] = []
+    for contract_path, task in zip(selected_contracts, selected_tasks):
+        if task.task_id in completed_task_ids:
+            skipped_completed_task_ids.append(task.task_id)
+            continue
+        task_inputs.append((contract_path, task))
     dependencies = _release_dependency_map(
-        selected_tasks,
+        [task for _, task in task_inputs],
         overlap_report,
         completed_task_ids=completed_task_ids,
     )
@@ -160,6 +166,12 @@ def run_release(
             progress,
             "event=completed_release_dependencies tasks="
             + json.dumps(sorted(completed_task_ids), sort_keys=True),
+        )
+    if skipped_completed_task_ids:
+        _report(
+            progress,
+            "event=completed_release_tasks_skipped tasks="
+            + json.dumps(sorted(skipped_completed_task_ids), sort_keys=True),
         )
     if dependencies:
         _report(progress, "event=execution_dag dependencies=" + json.dumps(dependencies, sort_keys=True))

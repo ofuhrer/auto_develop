@@ -112,6 +112,51 @@ class FlakyVerificationExecutor(FakeExecutor):
         )
 
 
+class FlakyTaskVerificationExecutor(FakeExecutor):
+    def __init__(self, task_id: str) -> None:
+        self._task_id = task_id
+        self._attempts = 0
+
+    @property
+    def attempts(self) -> int:
+        return self._attempts
+
+    def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        prompt_text = prompt_path.read_text(encoding="utf-8")
+        if f"task_id: {self._task_id}" in prompt_text:
+            self._attempts += 1
+            docs_dir = worktree_path / "docs"
+            if self._attempts == 1:
+                if docs_dir.exists():
+                    for child in docs_dir.iterdir():
+                        child.unlink()
+                    docs_dir.rmdir()
+            else:
+                output_file = docs_dir / f"{self._task_id}.md"
+                output_file.parent.mkdir(parents=True, exist_ok=True)
+                output_file.write_text(f"# {self._task_id}\n", encoding="utf-8")
+        else:
+            return super().run(prompt_path=prompt_path, worktree_path=worktree_path, output_dir=output_dir)
+
+        stdout_path = output_dir / "executor_stdout.log"
+        stderr_path = output_dir / "executor_stderr.log"
+        stdout_path.write_text(
+            f"flaky task verification executor task={self._task_id} attempt={self._attempts}\n",
+            encoding="utf-8",
+        )
+        stderr_path.write_text("", encoding="utf-8")
+        return ExecutorResult(
+            command=["flaky-task-verification-executor"],
+            exit_code=0,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            duration_seconds=0.01,
+            backend="fake",
+            model=None,
+        )
+
+
 class FailingExecutor:
     def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -533,6 +578,68 @@ def test_run_release_supervisor_repairs_verification_and_resumes(tmp_path) -> No
     assert attempt["applier_stop_evidence"] is None
     assert "event=repair_succeeded task=demo-0001 attempt=1" in result.log_path.read_text(encoding="utf-8")
     assert result.task_results[0].run_id.endswith("_retry2")
+
+
+def test_run_release_continues_with_completed_dependencies_during_repair_resume(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+    _write_yaml(
+        contracts_dir / "demo-0002.yaml",
+        _task_contract("demo-0002", allowed_files=["docs/demo-0002.md"]).model_copy(
+            update={"depends_on": ["demo-0001"]}
+        ).model_dump(mode="json"),
+    )
+
+    prior_bundle = tmp_path / "runs" / "20260512T000000Z_v0.1.0_task_demo-0001" / "task_bundle"
+    prior_bundle.mkdir(parents=True, exist_ok=True)
+    accepted_marker = prior_bundle / "accepted_marker.txt"
+    accepted_marker.write_text("preserve-me\n", encoding="utf-8")
+    prior_summary_dir = tmp_path / "runs" / "20260512T000000Z_v0.1.0_release"
+    prior_summary_dir.mkdir(parents=True, exist_ok=True)
+    (prior_summary_dir / "release_summary.json").write_text(
+        json.dumps(
+            {
+                "release_id": "v0.1.0",
+                "integration_branch": "feature/v0.1.0",
+                "tasks": [
+                    {
+                        "task_id": "demo-0001",
+                        "decision": "accepted",
+                        "merged": True,
+                        "bundle_path": str(prior_bundle),
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    executor = FlakyTaskVerificationExecutor("demo-0002")
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=executor,
+        merge_on_accept=True,
+    )
+
+    assert result.decision == Decision.ACCEPTED
+    assert [task.decision.task_id for task in result.task_results] == ["demo-0002"]
+    assert executor.attempts == 2
+    log = result.log_path.read_text(encoding="utf-8")
+    assert 'event=completed_release_tasks_skipped tasks=["demo-0001"]' in log
+    assert "event=repair_succeeded task=demo-0002 attempt=1" in log
+    assert accepted_marker.read_text(encoding="utf-8") == "preserve-me\n"
+    assert accepted_marker.exists()
 
 
 def test_run_release_supervisor_stops_on_unsafe_repair(tmp_path) -> None:
