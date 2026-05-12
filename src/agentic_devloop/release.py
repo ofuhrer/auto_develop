@@ -38,6 +38,8 @@ from agentic_devloop.runtime_state import write_json
 from agentic_devloop.security import redact_text, validate_identifier
 from agentic_devloop.yaml_io import load_yaml_model
 
+# Agent execution is API-bound more often than CPU-bound, so keep the default worker cap
+# conservative until per-project tuning is configurable.
 MAX_PARALLEL_RELEASE_WORKERS = 4
 
 

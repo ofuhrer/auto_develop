@@ -249,6 +249,7 @@ def test_evidence_collection_redacts_sensitive_values(tmp_path) -> None:
     assert "[REDACTED]" in bundle.executor_stdout_path.read_text(encoding="utf-8")
     assert "[REDACTED]" in bundle.verification_log_path.read_text(encoding="utf-8")
     assert "[REDACTED]" in bundle.git_diff_path.read_text(encoding="utf-8")
+    assert "ghp_abcdefghijklmnopqrstuvwxyz654321" not in bundle.git_diff_path.read_text(encoding="utf-8")
 
 
 def task_budget():

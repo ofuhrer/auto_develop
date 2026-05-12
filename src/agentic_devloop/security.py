@@ -8,6 +8,8 @@ from typing import Any
 # The 64-character cap leaves room for prefixes like feature/, agent/, and timestamps.
 SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
+# This intentionally focuses on compact env-style secrets; quoted multi-word values are
+# redacted by the token/url patterns below when they match known credential formats.
 _INLINE_SECRET_RE = re.compile(
     r"(?im)\b([A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|ACCESS_KEY)[A-Z0-9_]*)\b(\s*[:=]\s*)([^\s]+)"
 )

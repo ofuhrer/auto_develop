@@ -180,8 +180,14 @@ class TaskContract(StrictModel):
     verification: VerificationSpec
     stop_conditions: list[str] = Field(min_length=1)
     non_goals: list[str] = Field(default_factory=list)
-    validation_assumptions: list[str] = Field(default_factory=list)
-    scientific_assumptions: list[str] = Field(default_factory=list)
+    validation_assumptions: list[str] = Field(
+        default_factory=list,
+        description="Preferred generic field for benchmark or validation assumptions.",
+    )
+    scientific_assumptions: list[str] = Field(
+        default_factory=list,
+        description="Legacy compatibility alias for validation_assumptions; keep values identical when both are set.",
+    )
     fixture_changes_allowed: bool = False
     tolerance_changes_allowed: bool = False
     benchmark_delta_required: bool = False
