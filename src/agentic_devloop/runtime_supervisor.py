@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
+
+from pydantic import ValidationError
+
+from agentic_devloop.models import ContractPlan, TaskContract
 
 
 class ReleaseEventKind(StrEnum):
@@ -82,6 +88,13 @@ class RuntimeSupervisorStopReason(StrEnum):
     MISSING_CREDENTIALS = "missing_credentials"
     CONTRACT_BOUNDARY_VIOLATION = "contract_boundary_violation"
     UNSAFE_POLICY_EXPANSION = "unsafe_policy_expansion"
+
+
+class RuntimeSupervisorApplierStopKind(StrEnum):
+    BROADENS_ALLOWED_FILES = "broadens_allowed_files"
+    EXCEEDS_RETRY_BUDGET = "exceeds_retry_budget"
+    BYPASSES_HARD_GATE = "bypasses_hard_gate"
+    OUTSIDE_TEMP_EVIDENCE_PATH = "outside_temp_evidence_path"
 
 
 class RepairActionKind(StrEnum):
@@ -166,6 +179,90 @@ class ModelEscalationAction:
 class RepoStateUpdateProposalAction:
     source_evidence_paths: tuple[Path, ...]
     action_kind: RepairActionKind = RepairActionKind.REPO_STATE_UPDATE_PROPOSAL
+
+
+@dataclass(frozen=True)
+class RuntimeSupervisorApplierStopEvidence:
+    action_kind: RepairActionKind
+    kind: RuntimeSupervisorApplierStopKind
+    reason: str
+
+
+@dataclass(frozen=True)
+class PlannerContractNormalizationProposal:
+    normalized_plan: ContractPlan
+    source_evidence_paths: tuple[Path, ...]
+    action_kind: RepairActionKind = RepairActionKind.PLANNER_CONTRACT_NORMALIZATION
+
+
+@dataclass(frozen=True)
+class TaskSplitOrScopeNarrowingProposal:
+    original_task_id: str
+    narrowed_allowed_files: tuple[str, ...]
+    split_task_ids: tuple[str, ...] = ()
+    source_evidence_paths: tuple[Path, ...] = ()
+    action_kind: RepairActionKind = RepairActionKind.TASK_SPLIT_OR_SCOPE_NARROWING
+
+
+@dataclass(frozen=True)
+class VerificationEnvironmentRepairEvidenceProposal:
+    evidence_capture_path: Path
+    capture_commands: tuple[str, ...]
+    source_evidence_paths: tuple[Path, ...]
+    action_kind: RepairActionKind = RepairActionKind.ENVIRONMENT_REPAIR
+
+
+@dataclass(frozen=True)
+class ReleaseResumeIntent:
+    action_id: str
+    retry_budget: int
+    stop_reason_fallback: RuntimeSupervisorStopReason
+    source_evidence_paths: tuple[Path, ...]
+    action_kind: RepairActionKind = RepairActionKind.RELEASE_RESUME
+
+
+@dataclass(frozen=True)
+class LongRunningWorkerInspectionSummary:
+    summary: str
+    active: bool
+    source_evidence_paths: tuple[Path, ...]
+    action_kind: RepairActionKind = RepairActionKind.LONG_RUNNING_WORKER_INSPECTION
+
+
+@dataclass(frozen=True)
+class ModelEscalationRecommendation:
+    current_model: str
+    recommended_model: str
+    reason: str
+    source_evidence_paths: tuple[Path, ...]
+    action_kind: RepairActionKind = RepairActionKind.MODEL_ESCALATION
+
+
+@dataclass(frozen=True)
+class RepoStateUpdateProposal:
+    update_summary: str
+    proposed_changes: tuple[str, ...]
+    source_evidence_paths: tuple[Path, ...]
+    action_kind: RepairActionKind = RepairActionKind.REPO_STATE_UPDATE_PROPOSAL
+
+
+RepairProposal = (
+    PlannerContractNormalizationProposal
+    | TaskSplitOrScopeNarrowingProposal
+    | VerificationEnvironmentRepairEvidenceProposal
+    | ReleaseResumeIntent
+    | LongRunningWorkerInspectionSummary
+    | ModelEscalationRecommendation
+    | RepoStateUpdateProposal
+)
+
+
+@dataclass(frozen=True)
+class RuntimeSupervisorApplierResult:
+    action_kind: RepairActionKind
+    applied: bool
+    proposal: RepairProposal | None = None
+    stop_evidence: RuntimeSupervisorApplierStopEvidence | None = None
 
 
 RepairAction = (
@@ -257,6 +354,196 @@ class RuntimeSupervisor:
 
         raise ValueError(f"Unhandled repair decision classification: {classification}")
 
+    def apply_planner_contract_normalization(
+        self,
+        *,
+        source_evidence_paths: tuple[Path, ...],
+        candidate_plan: ContractPlan | dict[str, Any],
+    ) -> RuntimeSupervisorApplierResult:
+        try:
+            normalized = ContractPlan.model_validate(candidate_plan)
+            normalized = ContractPlan.model_validate(normalized.model_dump(mode="python"))
+        except ValidationError:
+            return RuntimeSupervisorApplierResult(
+                action_kind=RepairActionKind.PLANNER_CONTRACT_NORMALIZATION,
+                applied=False,
+                stop_evidence=RuntimeSupervisorApplierStopEvidence(
+                    action_kind=RepairActionKind.PLANNER_CONTRACT_NORMALIZATION,
+                    kind=RuntimeSupervisorApplierStopKind.BYPASSES_HARD_GATE,
+                    reason="Planner normalization failed ContractPlan/TaskContract validation.",
+                ),
+            )
+        return RuntimeSupervisorApplierResult(
+            action_kind=RepairActionKind.PLANNER_CONTRACT_NORMALIZATION,
+            applied=True,
+            proposal=PlannerContractNormalizationProposal(
+                normalized_plan=normalized,
+                source_evidence_paths=source_evidence_paths,
+            ),
+        )
+
+    def apply_task_split_or_scope_narrowing(
+        self,
+        *,
+        source_evidence_paths: tuple[Path, ...],
+        original_contract: TaskContract,
+        narrowed_allowed_files: Sequence[str],
+        split_task_ids: Sequence[str] = (),
+    ) -> RuntimeSupervisorApplierResult:
+        original_scope = set(original_contract.allowed_files)
+        narrowed_scope = set(narrowed_allowed_files)
+        if not narrowed_scope or not narrowed_scope.issubset(original_scope):
+            return RuntimeSupervisorApplierResult(
+                action_kind=RepairActionKind.TASK_SPLIT_OR_SCOPE_NARROWING,
+                applied=False,
+                stop_evidence=RuntimeSupervisorApplierStopEvidence(
+                    action_kind=RepairActionKind.TASK_SPLIT_OR_SCOPE_NARROWING,
+                    kind=RuntimeSupervisorApplierStopKind.BROADENS_ALLOWED_FILES,
+                    reason="Scope narrowing proposal is not a non-empty subset of original allowed_files.",
+                ),
+            )
+        return RuntimeSupervisorApplierResult(
+            action_kind=RepairActionKind.TASK_SPLIT_OR_SCOPE_NARROWING,
+            applied=True,
+            proposal=TaskSplitOrScopeNarrowingProposal(
+                original_task_id=original_contract.task_id,
+                narrowed_allowed_files=tuple(narrowed_allowed_files),
+                split_task_ids=tuple(split_task_ids),
+                source_evidence_paths=source_evidence_paths,
+            ),
+        )
+
+    def apply_verification_environment_repair_evidence_capture(
+        self,
+        *,
+        source_evidence_paths: tuple[Path, ...],
+        temporary_evidence_dir: Path,
+        evidence_capture_path: Path,
+        capture_commands: Sequence[str],
+    ) -> RuntimeSupervisorApplierResult:
+        if not _is_relative_to(evidence_capture_path, temporary_evidence_dir):
+            return RuntimeSupervisorApplierResult(
+                action_kind=RepairActionKind.ENVIRONMENT_REPAIR,
+                applied=False,
+                stop_evidence=RuntimeSupervisorApplierStopEvidence(
+                    action_kind=RepairActionKind.ENVIRONMENT_REPAIR,
+                    kind=RuntimeSupervisorApplierStopKind.OUTSIDE_TEMP_EVIDENCE_PATH,
+                    reason="Verification environment repair evidence path is outside temporary evidence directory.",
+                ),
+            )
+        return RuntimeSupervisorApplierResult(
+            action_kind=RepairActionKind.ENVIRONMENT_REPAIR,
+            applied=True,
+            proposal=VerificationEnvironmentRepairEvidenceProposal(
+                evidence_capture_path=evidence_capture_path,
+                capture_commands=tuple(capture_commands),
+                source_evidence_paths=source_evidence_paths,
+            ),
+        )
+
+    def apply_release_resume_intent(
+        self,
+        *,
+        source_evidence_paths: tuple[Path, ...],
+        action_id: str | None,
+        retry_budget: int | None,
+        stop_reason_fallback: RuntimeSupervisorStopReason | None,
+    ) -> RuntimeSupervisorApplierResult:
+        if not action_id or retry_budget is None or stop_reason_fallback is None:
+            return RuntimeSupervisorApplierResult(
+                action_kind=RepairActionKind.RELEASE_RESUME,
+                applied=False,
+                stop_evidence=RuntimeSupervisorApplierStopEvidence(
+                    action_kind=RepairActionKind.RELEASE_RESUME,
+                    kind=RuntimeSupervisorApplierStopKind.BYPASSES_HARD_GATE,
+                    reason="Release resume requires action_id, retry_budget, and stop_reason_fallback.",
+                ),
+            )
+        if retry_budget < 0:
+            return RuntimeSupervisorApplierResult(
+                action_kind=RepairActionKind.RELEASE_RESUME,
+                applied=False,
+                stop_evidence=RuntimeSupervisorApplierStopEvidence(
+                    action_kind=RepairActionKind.RELEASE_RESUME,
+                    kind=RuntimeSupervisorApplierStopKind.EXCEEDS_RETRY_BUDGET,
+                    reason="Release resume retry_budget must be >= 0.",
+                ),
+            )
+        return RuntimeSupervisorApplierResult(
+            action_kind=RepairActionKind.RELEASE_RESUME,
+            applied=True,
+            proposal=ReleaseResumeIntent(
+                action_id=action_id,
+                retry_budget=retry_budget,
+                stop_reason_fallback=stop_reason_fallback,
+                source_evidence_paths=source_evidence_paths,
+            ),
+        )
+
+    def apply_long_running_worker_inspection(
+        self,
+        *,
+        source_evidence_paths: tuple[Path, ...],
+        summary: str,
+        active: bool,
+    ) -> RuntimeSupervisorApplierResult:
+        return RuntimeSupervisorApplierResult(
+            action_kind=RepairActionKind.LONG_RUNNING_WORKER_INSPECTION,
+            applied=True,
+            proposal=LongRunningWorkerInspectionSummary(
+                summary=summary,
+                active=active,
+                source_evidence_paths=source_evidence_paths,
+            ),
+        )
+
+    def apply_model_escalation_recommendation(
+        self,
+        *,
+        source_evidence_paths: tuple[Path, ...],
+        current_model: str,
+        recommended_model: str,
+        reason: str,
+        retry_budget_remaining: int,
+    ) -> RuntimeSupervisorApplierResult:
+        if retry_budget_remaining <= 0:
+            return RuntimeSupervisorApplierResult(
+                action_kind=RepairActionKind.MODEL_ESCALATION,
+                applied=False,
+                stop_evidence=RuntimeSupervisorApplierStopEvidence(
+                    action_kind=RepairActionKind.MODEL_ESCALATION,
+                    kind=RuntimeSupervisorApplierStopKind.EXCEEDS_RETRY_BUDGET,
+                    reason="Model escalation requires remaining retry budget.",
+                ),
+            )
+        return RuntimeSupervisorApplierResult(
+            action_kind=RepairActionKind.MODEL_ESCALATION,
+            applied=True,
+            proposal=ModelEscalationRecommendation(
+                current_model=current_model,
+                recommended_model=recommended_model,
+                reason=reason,
+                source_evidence_paths=source_evidence_paths,
+            ),
+        )
+
+    def apply_repo_state_update_proposal(
+        self,
+        *,
+        source_evidence_paths: tuple[Path, ...],
+        update_summary: str,
+        proposed_changes: Sequence[str],
+    ) -> RuntimeSupervisorApplierResult:
+        return RuntimeSupervisorApplierResult(
+            action_kind=RepairActionKind.REPO_STATE_UPDATE_PROPOSAL,
+            applied=True,
+            proposal=RepoStateUpdateProposal(
+                update_summary=update_summary,
+                proposed_changes=tuple(proposed_changes),
+                source_evidence_paths=source_evidence_paths,
+            ),
+        )
+
 
 def _stop_reason_text(reason: RuntimeSupervisorStopReason) -> str:
     if reason == RuntimeSupervisorStopReason.MISSING_CREDENTIALS:
@@ -269,3 +556,11 @@ def _stop_reason_text(reason: RuntimeSupervisorStopReason) -> str:
         return "Autonomous repair budget is exhausted."
 
     raise ValueError(f"Unhandled stop reason: {reason}")
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True

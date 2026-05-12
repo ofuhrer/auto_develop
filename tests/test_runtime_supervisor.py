@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from agentic_devloop.runtime_supervisor import (
+    RuntimeSupervisorApplierStopKind,
     RepairActionKind,
     RepairDecisionClassification,
     RuntimeSupervisor,
@@ -20,6 +21,7 @@ from agentic_devloop.runtime_supervisor import (
     ReleaseSummaryReference,
     TuningReportPaths,
 )
+from agentic_devloop.models import TaskContract
 
 
 def _input(classification: RepairDecisionClassification, *, attempt: int, max_retries: int) -> RuntimeSupervisorInput:
@@ -175,3 +177,106 @@ def test_invalid_retry_budget_inputs_raise(attempt: int, max_retries: int) -> No
                 max_retries=max_retries,
             )
         )
+
+
+def _contract(*, allowed_files: list[str]) -> TaskContract:
+    return TaskContract.model_validate(
+        {
+            "task_id": "rs-0002",
+            "release_id": "runtime-supervisor-repair-loop",
+            "title": "Runtime supervisor repair",
+            "task_type": "code_only",
+            "budget_class": "M",
+            "objective": "Repair",
+            "allowed_files": allowed_files,
+            "required_evidence": ["git diff"],
+            "verification": {"profile": "code_only"},
+            "stop_conditions": ["stop"],
+        }
+    )
+
+
+def test_task_scope_narrowing_stops_when_scope_broadens() -> None:
+    supervisor = RuntimeSupervisor()
+    source_paths = _input(RepairDecisionClassification.TASK_SCOPE_OVERBROAD, attempt=1, max_retries=3).source_evidence_paths
+
+    result = supervisor.apply_task_split_or_scope_narrowing(
+        source_evidence_paths=source_paths,
+        original_contract=_contract(allowed_files=["src/a.py", "tests/a.py"]),
+        narrowed_allowed_files=["src/a.py", "docs/new.md"],
+    )
+
+    assert result.applied is False
+    assert result.stop_evidence is not None
+    assert result.stop_evidence.kind == RuntimeSupervisorApplierStopKind.BROADENS_ALLOWED_FILES
+
+
+def test_model_escalation_stops_when_retry_budget_exhausted() -> None:
+    supervisor = RuntimeSupervisor()
+    source_paths = _input(
+        RepairDecisionClassification.MODEL_CAPABILITY_MISMATCH,
+        attempt=3,
+        max_retries=3,
+    ).source_evidence_paths
+
+    result = supervisor.apply_model_escalation_recommendation(
+        source_evidence_paths=source_paths,
+        current_model="gpt-5.4-mini",
+        recommended_model="gpt-5.5",
+        reason="executor failure",
+        retry_budget_remaining=0,
+    )
+
+    assert result.applied is False
+    assert result.stop_evidence is not None
+    assert result.stop_evidence.kind == RuntimeSupervisorApplierStopKind.EXCEEDS_RETRY_BUDGET
+
+
+def test_release_resume_stops_without_hard_gate_fields() -> None:
+    supervisor = RuntimeSupervisor()
+    source_paths = _input(RepairDecisionClassification.RELEASE_RESUMABLE, attempt=1, max_retries=3).source_evidence_paths
+
+    result = supervisor.apply_release_resume_intent(
+        source_evidence_paths=source_paths,
+        action_id=None,
+        retry_budget=1,
+        stop_reason_fallback=RuntimeSupervisorStopReason.EXHAUSTED_RETRY_BUDGET,
+    )
+
+    assert result.applied is False
+    assert result.stop_evidence is not None
+    assert result.stop_evidence.kind == RuntimeSupervisorApplierStopKind.BYPASSES_HARD_GATE
+
+
+def test_planner_contract_normalization_produces_typed_proposal() -> None:
+    supervisor = RuntimeSupervisor()
+    source_paths = _input(
+        RepairDecisionClassification.PLANNER_CONTRACT_NON_NORMALIZED,
+        attempt=1,
+        max_retries=3,
+    ).source_evidence_paths
+    valid_plan = {
+        "release_id": "runtime-supervisor-repair-loop",
+        "planner": "strong-model",
+        "generated_contracts": [
+            {
+                "task_id": "rs-0002",
+                "title": "title",
+                "objective": "objective",
+                "rationale": "rationale",
+                "suggested_contract": _contract(allowed_files=["src/agentic_devloop/runtime_supervisor.py"]).model_dump(
+                    mode="python"
+                ),
+            }
+        ],
+        "warnings": ["schema normalized"],
+    }
+
+    result = supervisor.apply_planner_contract_normalization(
+        source_evidence_paths=source_paths,
+        candidate_plan=valid_plan,
+    )
+
+    assert result.applied is True
+    assert result.proposal is not None
+    assert result.proposal.action_kind == RepairActionKind.PLANNER_CONTRACT_NORMALIZATION
