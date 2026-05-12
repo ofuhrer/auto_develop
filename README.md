@@ -1,6 +1,6 @@
 # Agentic Devloop
 
-`agentic-devloop` is an autonomous-first local CLI orchestrator for agentic software development. A governor agent reads repository documentation, roadmap, artifacts, and goals to choose the next high-reward epic; worker agents implement bounded contracts in isolated worktrees; deterministic tools verify results; and the orchestrator records evidence, updates state, and finalizes accepted work according to configured policy.
+`agentic-devloop` is an autonomous-first local CLI orchestrator for agentic software development. A governor agent reads repository documentation, roadmap, artifacts, and goals to choose the next high-reward epic; worker agents implement bounded contracts in isolated worktrees; deterministic tools verify results; and a runtime supervisor should diagnose, repair, and resume contract-contained failures without routine human intervention. The orchestrator records evidence, updates state, and finalizes accepted work according to configured policy.
 
 The CLI entry point is:
 
@@ -43,7 +43,7 @@ Run tests:
 4. Run `agent-loop doctor` for preflight diagnostics when launching governed release execution.
 5. Monitor `runs/<release-run-id>/release.log` while the release is running.
 6. Review evidence under `runs/`, including `release_metrics.json`, `release_budget.json`, `release_tuning.md`, `failure_diagnosis.yaml`, and `executor_attempts.json` for failed tasks.
-7. Let the governor use budget, tuning, validation, and artifact evidence to update roadmap/backlog state before the next run.
+7. Let the governor and runtime supervisor use budget, tuning, validation, and artifact evidence to repair recoverable failures and update roadmap/backlog state before the next run.
 8. Push the feature branch or merge to `main` when the configured project policy allows autonomous finalization.
 
 Example:

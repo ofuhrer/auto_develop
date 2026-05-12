@@ -20,9 +20,10 @@
   validated `BacklogPlan`.
 - `run-backlog` now chains selected-epic backlog planning into objective,
   contract, and release execution for one epic.
-- The next gap is turning this into a persistent multi-epic autonomous loop:
-  backlog state, objective/contract generation, release execution, autonomous
-  repair/retry, and repo-state updates after each epic.
+- The next gap is runtime supervision: structured release observation,
+  autonomous repair action selection, bounded repair execution, and release
+  resume. The persistent multi-epic loop should build on that instead of
+  stopping whenever planner, environment, contract, or budget repair is needed.
 
 ## Closed-loop run learning: run-backlog autonomous loop
 
@@ -67,6 +68,48 @@
 - The useful learning from the docs task is to preserve the distinction
   between implemented `GovernorLoop`, `StateStore`, and `RepairPolicy` seams
   and the still-planned multi-epic loop.
+
+## Release learning: missing runtime supervisor
+
+- The `governor-service-boundaries` dogfood run showed that the deterministic
+  kernel is doing useful work: it caught stale environment state, schema-invalid
+  generated contracts, unsafe allowed-file overlap, long-running worker
+  ambiguity, and a documentation task that exceeded the changed-file budget.
+- Those findings should not stop a human-out-of-the-loop system. They should
+  become inputs to a runtime supervisor agent that observes structured events,
+  release summaries, evidence bundles, raw logs, budgets, and tuning signals.
+- The supervisor should own bounded repair actions:
+  - repair environment or console-script drift;
+  - normalize semantically useful but invalid planner contracts;
+  - split over-budget contracts;
+  - narrow allowed-file overlap without weakening scheduler safety;
+  - inspect long-running workers through raw logs and heartbeats;
+  - resume from previously accepted tasks instead of rerunning them;
+  - update repo-state with learnings after accepted or failed releases.
+- Deterministic invariants should remain hard gates. The supervisor may propose
+  or apply bounded repairs, but repaired artifacts must still pass admission,
+  verification, review, and finalization policy.
+
+## Architecture learning: reduce heuristic code with supervisor tools
+
+- Several modules contain procedural heuristics that exist because no high-level
+  supervisor currently owns judgment-heavy recovery:
+  - `backlog.py` has deterministic roadmap extraction and scoring that should
+    become fallback/test scaffolding once the governor agent is reliable.
+  - `planning.py` has generated-contract wording heuristics that should become
+    contract-normalization repair actions followed by deterministic admission.
+  - `release.py` mixes scheduling, overlap response, human-log formatting,
+    release summaries, metrics, budget handling, continuation, and finalization;
+    overlap and needs-revision recovery should move to supervisor actions.
+  - `failure_diagnosis.py` has brittle log-pattern classification that should
+    become evidence packaging plus supervisor-backed diagnosis.
+  - `budget.py` should keep numeric ledgers and hard budget checks, but tuning
+    recommendations and task-resizing plans should be supervisor decisions.
+  - `doctor.py` should keep deterministic diagnostics, but environment repair
+    should be a bounded supervisor action.
+- This is a maintenance reduction strategy, not a safety relaxation. Remove
+  procedural judgment only when the replacement is a typed supervisor action
+  that reruns deterministic gates.
 
 ## Architectural review: consolidation needed
 

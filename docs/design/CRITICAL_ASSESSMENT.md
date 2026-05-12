@@ -26,18 +26,19 @@ The main risk is unbounded autonomy, not autonomy itself. The system should be a
 - The implementation currently concentrates too many responsibilities in a few large modules. `release.py` owns release coordination, scheduling, logging, summaries, metrics, cleanup, dependency analysis, and finalization. `orchestrator.py` owns task execution, model routing, verification, evidence, review, finalization, and conflict repair. This slows evolution toward a multi-epic governor.
 - The implementation now exposes a one-epic `GovernorLoop` boundary, a typed `StateStore` seam, and a `RepairPolicy` seam, but the broader multi-epic governor still has to prove those boundaries across repeated cycles.
 - The current state model is still intentionally narrow. The typed `StateStore` seam improves persistence discipline, but the longer-running backlog memory for active epics, completed epics, retry counts, blocked work, and governor decisions still needs the full multi-epic loop.
-- The system now has a repair decision seam, but not a full autonomous repair policy. Planner schema drift, verification-environment drift, flaky tests, and small worker bugs are still outside a repeated-repair loop that can continue across many epics.
+- The system now has a repair decision seam, but not a runtime supervisor. The deterministic kernel correctly detects invalid generated contracts, unsafe overlap, over-budget tasks, verification-environment drift, stale editable installs, long-running workers, and needs-revision outcomes, but those events still require a high-level agent to diagnose, repair, and resume.
 - The CLI is not a thin boundary. It wires backend construction and workflow-specific behavior that should move into application services as the command set grows.
 
 ## Architectural Refactoring Priorities
 
 High-priority seams:
 
-- Extend the `GovernorLoop` from the current one-epic service boundary to a multi-epic "run the next N epics" loop with stopping criteria, retry policy, and state refresh.
+- Add a `RuntimeSupervisor` above the deterministic release kernel. It should observe structured events and evidence, diagnose failures, choose bounded repair actions, and resume execution without routine human intervention.
+- Extend the `GovernorLoop` from the current one-epic service boundary to a multi-epic "run the next N epics" loop with stopping criteria, retry policy, runtime supervision, and state refresh.
 - Extend the `StateStore` API over repo-state files, run summaries, active releases, completed/blocked epics, and known learnings into authoritative multi-epic state.
 - Extract release scheduling, cockpit reporting, finalization, and metrics from `release.py`.
 - Extract task execution, evidence, finalization, and repair from `orchestrator.py`.
-- Extend `RepairPolicy` so it can map failure categories to schema normalization, verification repair, stronger-model diagnosis, retry, or stop across repeated epic cycles.
+- Extend `RepairPolicy` so it can map failure categories to executable repair actions: schema normalization, contract splitting, scope narrowing, environment repair, long-running-worker inspection, stronger-model diagnosis, retry, or stop across repeated epic cycles.
 
 Medium-priority seams:
 
@@ -45,6 +46,56 @@ Medium-priority seams:
 - Generalize legacy `scientific_*` naming to validation terminology with compatibility aliases.
 - Move CLI backend construction into service factories.
 - Define a target-repository profile for instructions, validation policy, generated artifact rules, and finalization policy.
+
+## Candidate Code Reduction Through Agentic Supervision
+
+The project should not replace hard safety gates with model judgment. It can,
+however, remove or shrink procedural code that currently tries to approximate
+judgment, diagnosis, prioritization, or repair. Those regions are expensive to
+maintain because they accumulate special cases from every dogfood run.
+
+Keep as deterministic code:
+
+- Git worktree/branch creation, cleanup, merge locks, and finalization policy.
+- Contract schema validation and hard admission checks.
+- Verification command execution and result capture.
+- Evidence bundle writing and immutable artifact paths.
+- Budget counters and hard budget enforcement.
+- Secret, destructive-operation, and policy-boundary checks.
+
+Refactor toward runtime-supervisor decisions:
+
+- Deterministic backlog extraction and scoring in `backlog.py`. Keep deterministic
+  mode only as a small test fixture/fallback; let the governor agent own epic
+  discovery and prioritization from docs, repo-state, and run artifacts.
+- Heuristic generated-contract quality checks in `planning.py`, especially
+  wording-based checks such as "must include a scope or verification stop
+  condition." Keep the safety admission gate, but route semantically useful
+  invalid contracts to a contract-normalization repair action instead of
+  growing string heuristics.
+- File-overlap response policy in `release.py`. Keep overlap detection as a hard
+  signal, but let the runtime supervisor decide whether to serialize, split,
+  narrow scope, or replan contracts instead of encoding every recovery strategy
+  in scheduler code.
+- Deterministic failure classification in `failure_diagnosis.py`. Keep evidence
+  collection and typed categories, but replace brittle log-pattern diagnosis
+  with a supervisor-backed diagnostic backend that can inspect evidence and
+  choose a bounded repair action.
+- Budget and tuning prose in `budget.py`. Keep numeric ledgers and budget
+  enforcement, but let the supervisor synthesize tuning recommendations,
+  task-size adjustments, model-routing changes, and next-run contract splits.
+- Human cockpit formatting and worker-summary filtering in `release.py`. Keep
+  raw event emission and audit logs, but make curated human/supervisor summaries
+  data-driven so formatting does not grow into another policy engine.
+- Environment-specific preflight repair around editable installs, venv paths,
+  and `PYTHONPATH`. Keep `doctor` diagnostics deterministic, but let the
+  supervisor execute bounded environment-repair recipes before declaring a
+  release blocked.
+
+The target shape is a smaller deterministic kernel plus explicit agent-facing
+tools. The kernel emits facts and enforces invariants; the runtime supervisor
+interprets facts, proposes repairs, applies approved bounded actions, and reruns
+the kernel.
 
 ## Pragmatic Simplifications for v1
 

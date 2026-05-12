@@ -1,14 +1,15 @@
-release_id: governor-service-boundaries
-active_objective: Extract explicit GovernorLoop, StateStore, and RepairPolicy service boundaries so multi-epic autonomous execution can grow without overloading backlog.py, release.py, orchestrator.py, and cli.py.
+release_id: runtime-supervisor-repair-loop
+active_objective: Add a runtime supervisor that observes release events and evidence, diagnoses recoverable failures, applies bounded repair actions, and resumes execution without routine human intervention.
 current_tasks:
-  - governor-state-store-seam
-  - governor-repair-policy-seam
-  - governor-loop-one-epic-service
-  - governor-service-docs-and-state-notes
+  - runtime-supervisor-events
+  - runtime-supervisor-policy-actions
+  - runtime-supervisor-repair-executors
+  - runtime-supervisor-resume-loop
+  - runtime-supervisor-docs-state
 next_steps:
-  - Run doctor for release governor-service-boundaries.
-  - Run governor-state-store-seam and governor-repair-policy-seam first; they are independent and can run in parallel if overlap analysis permits.
-  - Run governor-loop-one-epic-service after both seams are accepted.
-  - Run governor-service-docs-and-state-notes last to document only behavior that was actually implemented.
-  - Keep the multi-epic governor work planned until the code supports it; do not promote state notes into a claim that the N-epic loop has shipped.
-  - After the release, update backlog_state.yaml, release_plan.yaml, and roadmap/backlog docs from release evidence.
+  - Define a machine-readable release event stream that mirrors the human cockpit log but is suitable for supervisor decisions.
+  - Connect RepairPolicy categories to typed repair actions with retry budgets and stop reasons.
+  - Implement bounded repair executors for environment repair, contract normalization, contract splitting, scope narrowing, release resume, long-running-worker inspection, model escalation, and repo-state updates.
+  - Identify procedural heuristics that can be retired once supervisor actions exist: deterministic backlog scoring, contract wording checks, log-pattern failure classification, budget-tuning prose, overlap recovery branching, and cockpit-summary filtering.
+  - Keep deterministic gates authoritative; the supervisor must repair inputs and rerun gates, not bypass them.
+  - Document the supervisor as planned until implementation and tests land.

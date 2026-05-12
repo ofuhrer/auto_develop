@@ -2,14 +2,14 @@
 
 ## Core Objective
 
-Build an autonomous-first external control layer around existing coding agents. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, roadmap governance, and explicitly configured finalization. Coding agents own implementation inside narrow contracts. Deterministic tools own acceptance evidence. Humans define goals, credentials, and hard safety constraints; they should not be routine approval gates inside the development loop.
+Build an autonomous-first external control layer around existing coding agents. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, roadmap governance, and explicitly configured finalization. A high-level runtime supervisor owns diagnosis, bounded repair, and continuation for contract-contained subsystem failures. Coding agents own implementation inside narrow contracts. Deterministic tools own acceptance evidence. Humans define goals, credentials, and hard safety constraints; they should not be routine approval gates inside the development loop.
 
 The target operating model is intentionally terse for the human:
 
 1. Provide one or two onboarding prompts for a freshly cloned `auto_develop` repo and the target repository.
 2. Configure the target repository goal, repository instructions, credentials, and hard policy boundaries.
 3. Invoke a high-level development loop with the number of epics to implement.
-4. Let the governor select epics, decompose work, run workers, repair subsystem failures, update state, and continue.
+4. Let the governor and runtime supervisor select epics, decompose work, run workers, repair subsystem failures, update state, and continue.
 5. Stop only for major problems: exhausted autonomous repair, missing credentials, unsafe policy expansion, destructive operations not explicitly delegated, or no actionable work remaining.
 
 ## Target Use Case
@@ -36,7 +36,7 @@ Do not build an unconstrained autonomous agent loop. Use explicit state machines
 
 ## Autonomy Policy
 
-The default posture is autonomous-first and agentic-first. Once a repository goal and safety policy are configured, the governor should read docs and roadmap state, select the next highest-reward epic, decompose it, run bounded workers, verify, review, update state, and continue until the requested epic count, budget, or explicit stopping criteria are reached. The implemented control plane is narrower than that target: it now has a one-epic `GovernorLoop` service boundary, a typed `StateStore` seam, and a `RepairPolicy` seam for bounded failure decisions. The broader N-epic loop and always-on state refresh are planned extensions on top of those seams.
+The default posture is autonomous-first and agentic-first. Once a repository goal and safety policy are configured, the governor should read docs and roadmap state, select the next highest-reward epic, decompose it, run bounded workers, verify, review, update state, and continue until the requested epic count, budget, or explicit stopping criteria are reached. The runtime supervisor should observe release events and evidence, classify recoverable failures, apply bounded repair actions, and resume execution. The implemented control plane is narrower than that target: it now has a one-epic `GovernorLoop` service boundary, a typed `StateStore` seam, and a `RepairPolicy` seam for bounded failure decisions. The runtime supervisor, broader N-epic loop, and always-on state refresh are planned extensions on top of those seams.
 
 Human stopping points are exceptions, not workflow milestones:
 
@@ -48,6 +48,17 @@ Human stopping points are exceptions, not workflow milestones:
 - Approving destructive or irreversible operations that were not explicitly delegated.
 
 Agents must not stop for routine implementation choices, formatting fixes, local verification, log collection, evidence packaging, flaky local tests, missing path-context in a generated contract, or a failed worker attempt when the issue is contract-contained and repairable. Those are inputs to autonomous diagnosis, repair, retry, and state update.
+
+The deterministic kernel must remain strict about invariants: no skipped verification, no silent policy expansion, no broad file-scope changes, no unapproved destructive operations, and no acceptance based only on worker claims. The runtime supervisor may repair contracts, environment setup, task splits, and retry plans, but repaired artifacts must pass deterministic admission and verification before execution continues.
+
+Autonomy should reduce code where the code is only approximating judgment. The
+kernel should expose facts and enforce invariants; the runtime supervisor should
+own reasoning-heavy choices such as whether planner output is repairable, how to
+split an over-budget contract, whether a long-running worker is active or stuck,
+which model to escalate to, and how to update roadmap memory after a failed run.
+Avoid growing deterministic heuristic code for those choices when a bounded
+agent action plus a hard validator can produce the same safety outcome with less
+maintenance.
 
 ## Execution State Machine
 
@@ -116,7 +127,13 @@ cheap deterministic checks first
 -> frontier model only for planning, review, or failure diagnosis
 ```
 
-Current implementation supports configurable task execution roles through `model_roles` and `model_routing`. Worker roles may define `fallback_models`, and every executor attempt is recorded in evidence. Release queues classify overlapping allowed-file scopes before execution: minor overlap becomes a sequencing dependency, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected. In parallel mode the orchestrator builds a DAG from explicit `depends_on` fields and inferred overlap dependencies, submits ready tasks concurrently, monitors completions, and schedules newly unblocked tasks as outcomes arrive. Release-level planning supports deterministic scaffolding, strong-model budget reservation, explicit planner backend execution with planner stdout/stderr/metadata evidence, and `run-objective` composition from objective to generated contracts to release execution. Generated-contract admission rejects unsafe release IDs, missing diff evidence, weak stop conditions, whole-repo file scope, unknown or inconsistent verification profiles, and allowed-file counts above project budget. The new `RepairPolicy` seam classifies failures for the current one-epic loop, but the full autonomous repair strategy across repeated epics is still a future control point.
+Current implementation supports configurable task execution roles through `model_roles` and `model_routing`. Worker roles may define `fallback_models`, and every executor attempt is recorded in evidence. Release queues classify overlapping allowed-file scopes before execution: minor overlap becomes a sequencing dependency, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected. In parallel mode the orchestrator builds a DAG from explicit `depends_on` fields and inferred overlap dependencies, submits ready tasks concurrently, monitors completions, and schedules newly unblocked tasks as outcomes arrive. Release-level planning supports deterministic scaffolding, strong-model budget reservation, explicit planner backend execution with planner stdout/stderr/metadata evidence, and `run-objective` composition from objective to generated contracts to release execution. Generated-contract admission rejects unsafe release IDs, missing diff evidence, weak stop conditions, whole-repo file scope, unknown or inconsistent verification profiles, and allowed-file counts above project budget. The new `RepairPolicy` seam classifies failures for the current one-epic loop, but the runtime supervisor that converts those classifications into contract normalization, environment repair, task splitting, scope narrowing, waiting, retry, or stop actions is still a future control point.
+
+Some deterministic subsystems should become thinner after the supervisor exists:
+deterministic backlog scoring becomes fallback scaffolding, failure diagnosis
+becomes evidence packaging plus typed categories, budget tuning becomes numeric
+ledger generation, overlap analysis becomes a signal rather than a full recovery
+policy, and human log formatting becomes a projection of structured events.
 
 ## Model Policy
 

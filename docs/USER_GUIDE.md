@@ -256,7 +256,7 @@ acceptance_criteria:
 
 Use objectives for planning. Use contracts for execution.
 
-The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the current governor service chooses one epic at a time, produces an objective, and feeds the existing objective/contract/release machinery. Multi-epic looping and fully automated state refresh are planned extensions beyond the current one-epic governor boundary.
+The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the current governor service chooses one epic at a time, produces an objective, and feeds the existing objective/contract/release machinery. The next planned control layer is a runtime supervisor that can diagnose recoverable release failures, apply bounded repairs, and resume without routine human intervention. Multi-epic looping and fully automated state refresh are planned extensions beyond the current one-epic governor boundary.
 
 Use backlog planning first:
 
@@ -1020,7 +1020,7 @@ Then decide whether to repair manually, narrow the contract, or rerun from a cle
 
 ## Current Limits
 
-`auto_develop` is useful for bounded autonomous development today. The active direction is a complete autonomous project governor: it should choose epics from docs/roadmap/state, decompose them, run workers, verify, update memory, and continue until configured stopping criteria are reached.
+`auto_develop` is useful for bounded autonomous development today. The active direction is a complete autonomous project governor with runtime supervision: it should choose epics from docs/roadmap/state, decompose them, run workers, verify, repair contract-contained failures, update memory, and continue until configured stopping criteria are reached.
 
 Current important limits:
 

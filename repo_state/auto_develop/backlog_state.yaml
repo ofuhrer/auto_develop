@@ -1,19 +1,20 @@
-active_goal: Enable a freshly onboarded auto_develop checkout and target repository to run a high-level autonomous development loop for the next N highest-value epics, stopping only for major problems after autonomous repair is exhausted.
+active_goal: Enable a freshly onboarded auto_develop checkout and target repository to run a high-level autonomous development loop for the next N highest-value epics, with a runtime supervisor that diagnoses, repairs, and resumes contract-contained subsystem failures without routine human intervention.
 governor_mode: autonomous_first
-current_focus: governor-loop-service-boundaries
-active_epic: governor-loop-service-boundaries
+current_focus: runtime-supervisor-repair-loop
+active_epic: runtime-supervisor-repair-loop
 completed_epics:
   - release-governor-1
   - adaptive-model-hierarchy
   - run-backlog
+  - governor-loop-service-boundaries
 blocked_epics: []
 candidate_epics:
-  - id: governor-loop-service-boundaries
-    title: Extract governor loop service boundaries for multi-epic autonomous execution.
-    rationale: Architecture review and backlog planning selected this as the enabling increment before adding the N-epic governor loop.
+  - id: runtime-supervisor-repair-loop
+    title: Add runtime supervisor for autonomous repair and release continuation.
+    rationale: The governor-service-boundaries dogfood run showed that the deterministic kernel catches important issues, but a high-level agent must own diagnosis, bounded repair, and resume decisions.
   - id: multi-epic-run-governor
     title: Run the next N highest-priority epics autonomously.
-    rationale: Converts one-epic run-backlog into the intended high-level development loop.
+    rationale: Converts one-epic run-backlog into the intended high-level development loop after runtime supervision can recover routine failures.
   - id: persistent-backlog-state
     title: Track completed, skipped, blocked, and active epics across runs.
     rationale: Prevents duplicate work and lets the governor reason over long-running development history.
@@ -29,7 +30,10 @@ candidate_epics:
 last_reviewed: 2026-05-12
 notes:
   - The governor-loop-service-boundaries epic has now extracted GovernorLoop, StateStore, and RepairPolicy seams for one-epic autonomous execution, state persistence, and repair classification.
-  - The next planned increment is the product-facing multi-epic loop; that work should stay marked as planned until the code supports it.
+  - The next planned increment is runtime-supervisor-repair-loop, not the N-epic loop directly.
+  - The supervisor should turn structured release events into typed repair actions for stale editable installs, planner contract normalization, allowed-file overlap repair, over-budget task splitting, long-running-worker inspection, release resume, and repo-state updates.
+  - Code-reduction target: retire deterministic heuristics for backlog scoring, contract wording repair, failure classification, budget-tuning prose, and overlap recovery once equivalent supervisor actions rerun hard validators.
+  - The product-facing multi-epic loop should follow after runtime supervision can recover routine failures.
   - Documentation and state-note updates must stay implementation-true and avoid describing the N-epic governor as already shipped.
   - Service extraction is an enabling increment for autonomous roadmap-driven execution and repair, not cosmetic cleanup.
   - Human review is an escalation boundary, not a routine planning gate.

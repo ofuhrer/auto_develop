@@ -10,7 +10,7 @@ This directory contains user, maintainer, and design documentation for `agentic-
 
 ## Project Summary
 
-`agentic-devloop` is an autonomous-first orchestration layer around coding agents. The current governor path is split into a one-epic `GovernorLoop` service, a typed `StateStore` persistence seam, and a `RepairPolicy` decision seam. Those seams own roadmap/backlog analysis for the current epic, state persistence, and bounded repair decisions. The broader multi-epic governor loop and fully automated state refresh remain planned. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, and configured Git finalization. Coding agents own implementation inside narrow task contracts.
+`agentic-devloop` is an autonomous-first orchestration layer around coding agents. The current governor path is split into a one-epic `GovernorLoop` service, a typed `StateStore` persistence seam, and a `RepairPolicy` decision seam. Those seams own roadmap/backlog analysis for the current epic, state persistence, and bounded repair decisions. The next architectural priority is a runtime supervisor that observes release events, diagnoses recoverable failures, applies bounded repair actions, and resumes execution without routine human intervention. The broader multi-epic governor loop and fully automated state refresh remain planned. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, and configured Git finalization. Coding agents own implementation inside narrow task contracts.
 
 The project prioritizes:
 
@@ -20,7 +20,8 @@ The project prioritizes:
 4. Auditable evidence for every accepted change.
 5. Safe Git integration through isolated worktrees and feature branches.
 6. Continuous roadmap/backlog refresh from artifacts, validation evidence, metrics, and domain learnings.
-7. Domain conservatism for validation, benchmarks, fixtures, and tolerances.
+7. Autonomous runtime supervision for contract-contained failures.
+8. Domain conservatism for validation, benchmarks, fixtures, and tolerances.
 
 ## Current Implementation
 
@@ -32,7 +33,7 @@ Implemented capabilities include:
 - `doctor` preflight diagnostics for repo cleanliness, stale worktrees, release-branch collisions, and routing warnings;
 - one-epic `GovernorLoop` service boundaries for selected-epic execution and follow-up state refresh inputs;
 - typed `StateStore` persistence over repo-state files and run summaries;
-- `RepairPolicy` decision seams for classifying failures into normalize, retry, repair, escalate, or stop;
+- `RepairPolicy` decision seams for classifying failures into retry or stop decisions;
 - deterministic verification command execution;
 - evidence bundle collection;
 - deterministic review and persisted decisions;
@@ -51,6 +52,8 @@ Implemented capabilities include:
 Important remaining gaps:
 
 - multi-epic governor looping beyond the current one-epic service boundary;
+- runtime supervisor loop that turns planner/schema, environment, budget, overlap, long-running-worker, and needs-revision events into bounded repair actions;
+- reduction of deterministic heuristic code once supervisor-backed decisions are available; candidate areas include backlog scoring, contract-normalization heuristics, failure classification, budget-tuning prose, overlap recovery policy, and cockpit-summary filtering;
 - fully automated state refresh across repeated epic cycles;
 - stronger model-based repeated-failure diagnosis backend;
 - richer semantic merge-conflict repair and broader repair strategies;
