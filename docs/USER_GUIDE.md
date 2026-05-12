@@ -440,11 +440,14 @@ Typical evidence files include:
 - verification output;
 - changed-file list;
 - diff;
+- failure diagnosis evidence when executor or verification failures exceed bounded retries;
 - deterministic review;
 - finalization metadata;
 - conflict-repair evidence when applicable.
 
 Do not treat an accepted decision as a substitute for human review on important projects. It means the task passed deterministic gates and stayed within the contract.
+
+When a task fails, inspect `failure_diagnosis.yaml` first. It records the failure category, confidence, recommendation, and retry or escalation guidance derived from the same evidence bundle.
 
 ## Step 11: Finalize Or Review The Feature Branch
 
@@ -816,6 +819,34 @@ agent-loop run-task \
 ```
 
 Also inspect `release.log`, `release.raw.log`, and per-task verification evidence.
+
+### Repeated Failure Diagnosis
+
+When a task fails after bounded executor attempts or verification retries, the orchestrator writes `failure_diagnosis.yaml` next to `executor_attempts.json` in the task evidence bundle.
+
+The default diagnosis path is deterministic. It classifies the failure from the recorded contract metadata, executor attempts, verification results, changed files, and log excerpts, then writes a reproducible recommendation with `guidance.retryable` and `guidance.escalate`.
+
+A model-backed diagnosis backend can be swapped into the same backend seam later, but it should consume the same bounded request and evidence bundle. The difference is review strength, not evidence shape: the deterministic path is reproducible locally, while a model-backed path would provide a stronger interpretive pass over the same artifacts.
+
+Before retrying or escalating a task, inspect:
+
+- `failure_diagnosis.yaml`;
+- `executor_attempts.json`;
+- `verification.log`;
+- `executor_stdout.log`;
+- `executor_stderr.log`;
+- `changed_files.txt`;
+- `git_diff.patch`.
+
+Use the diagnosis guidance to decide the next step:
+
+- `contract_mismatch`: narrow the contract or move changes back into the allowed file set before retrying.
+- `verification_failure`: fix the underlying verification failure and rerun the task.
+- `timeout`: reduce scope or increase walltime before retrying.
+- `model_quota`: retry with a fallback model or after the quota resets.
+- `executor_error`: inspect the executor logs before deciding whether to retry.
+
+If `guidance.escalate` is true, stop looping and hand the task to human review or stronger-model review instead of retrying blindly.
 
 ### Merge Or Rebase Conflicts
 

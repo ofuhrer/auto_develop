@@ -385,6 +385,32 @@ Unresolved rebase conflicts and merge conflicts are persisted through `conflict_
 
 `agent-loop status` reads existing evidence bundles and prints recent run summaries with run ID, task ID, decision, and bundle path.
 
+### Failure-Diagnosis Flow
+
+When `run-task` or release execution exhausts bounded executor attempts or hits a verification failure, the orchestrator records a failure diagnosis alongside the rest of the task evidence.
+
+The diagnosis request includes:
+
+- contract metadata;
+- executor result and recorded attempts;
+- verification results;
+- changed files from the worktree;
+- executor and verification log excerpts.
+
+The default backend is deterministic. It classifies the failure from the recorded evidence and writes `failure_diagnosis.yaml` with the diagnosis category, confidence, evidence excerpts, recommendation, and retry or escalation guidance. The same backend seam can be replaced later with a model-backed reviewer, but the evidence shape should remain the same.
+
+Before retrying or escalating a failed task, inspect:
+
+- `failure_diagnosis.yaml`;
+- `executor_attempts.json`;
+- `verification.log`;
+- `executor_stdout.log`;
+- `executor_stderr.log`;
+- `changed_files.txt`;
+- `git_diff.patch`.
+
+Use `guidance.retryable` and `guidance.escalate` as the primary control points for deciding whether to rerun the task, narrow scope, or hand the failure to stronger review.
+
 ### Scientific Evidence
 
 For benchmark and scientific validation tasks, deterministic review records:

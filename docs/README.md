@@ -31,6 +31,7 @@ Implemented capabilities include:
 - deterministic verification command execution;
 - evidence bundle collection;
 - deterministic review and persisted decisions;
+- repeated-failure diagnosis evidence (`executor_attempts.json` and `failure_diagnosis.yaml`) with deterministic classification by default and a replaceable backend seam for stronger review;
 - role-based model routing;
 - repo-state context injection;
 - `run-task`, `run-release`, `plan-release`, `run-objective`, `status`, and `cleanup` commands;
@@ -43,7 +44,7 @@ Implemented capabilities include:
 
 Important remaining gaps:
 
-- stronger model-based repeated-failure diagnosis;
+- stronger model-based repeated-failure diagnosis backend;
 - richer semantic merge-conflict repair;
 - automated pull-request creation;
 - remote execution adapters, including Balfrin/SLURM artifact collection;
