@@ -4,6 +4,14 @@
 
 Build an autonomous-first external control layer around existing coding agents. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, roadmap governance, and explicitly configured finalization. Coding agents own implementation inside narrow contracts. Deterministic tools own acceptance evidence. Humans define goals, credentials, and hard safety constraints; they should not be routine approval gates inside the development loop.
 
+The target operating model is intentionally terse for the human:
+
+1. Provide one or two onboarding prompts for a freshly cloned `auto_develop` repo and the target repository.
+2. Configure the target repository goal, repository instructions, credentials, and hard policy boundaries.
+3. Invoke a high-level development loop with the number of epics to implement.
+4. Let the governor select epics, decompose work, run workers, repair subsystem failures, update state, and continue.
+5. Stop only for major problems: exhausted autonomous repair, missing credentials, unsafe policy expansion, destructive operations not explicitly delegated, or no actionable work remaining.
+
 ## Target Use Case
 
 Initial target repositories include validation-heavy software projects such as `rust_rockfall`:
@@ -28,7 +36,7 @@ Do not build an unconstrained autonomous agent loop. Use explicit state machines
 
 ## Autonomy Policy
 
-The default posture is autonomous-first and agentic-first. Once a repository goal and safety policy are configured, the governor should read docs and roadmap state, select the next highest-reward epic, decompose it, run bounded workers, verify, review, update state, and continue until budget or explicit stopping criteria are reached.
+The default posture is autonomous-first and agentic-first. Once a repository goal and safety policy are configured, the governor should read docs and roadmap state, select the next highest-reward epic, decompose it, run bounded workers, verify, review, update state, and continue until the requested epic count, budget, or explicit stopping criteria are reached.
 
 Human stopping points are exceptions, not workflow milestones:
 
@@ -39,7 +47,7 @@ Human stopping points are exceptions, not workflow milestones:
 - Reviewing repeated failures only after bounded strong-model diagnosis and repair attempts are exhausted.
 - Approving destructive or irreversible operations that were not explicitly delegated.
 
-Agents must not stop for routine implementation choices, formatting fixes, local verification, log collection, or evidence packaging.
+Agents must not stop for routine implementation choices, formatting fixes, local verification, log collection, evidence packaging, flaky local tests, missing path-context in a generated contract, or a failed worker attempt when the issue is contract-contained and repairable. Those are inputs to autonomous diagnosis, repair, retry, and state update.
 
 ## Execution State Machine
 

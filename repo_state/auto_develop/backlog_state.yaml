@@ -1,22 +1,31 @@
-active_goal: Move toward fully autonomous roadmap-driven development.
+active_goal: Enable a freshly onboarded auto_develop checkout and target repository to run a high-level autonomous development loop for the next N highest-value epics, stopping only for major problems after autonomous repair is exhausted.
 governor_mode: autonomous_first
-current_focus: roadmap-governor
+current_focus: multi-epic-governor-loop
 active_epic: null
 completed_epics:
   - release-governor-1
   - adaptive-model-hierarchy
+  - run-backlog
 blocked_epics: []
 candidate_epics:
-  - id: run-backlog
-    title: Chain governor planning into objective execution.
-    rationale: Enables the highest-level loop to select an epic and execute it without a manually supplied objective.
+  - id: multi-epic-run-governor
+    title: Run the next N highest-priority epics autonomously.
+    rationale: Converts one-epic run-backlog into the intended high-level development loop.
   - id: persistent-backlog-state
     title: Track completed, skipped, blocked, and active epics across runs.
     rationale: Prevents duplicate work and lets the governor reason over long-running development history.
+  - id: autonomous-repair-retry
+    title: Repair and retry contract-contained subsystem failures before stopping.
+    rationale: Full-pass dogfooding showed planner schema drift, verification environment drift, and small worker bugs should be fixed by the system.
   - id: governor-state-refresh
     title: Apply roadmap and repo-state updates after each epic.
     rationale: Ensures new learnings from artifacts, validation, metrics, and documentation feed the next planning cycle.
+  - id: onboarding-bootstrap
+    title: Bootstrap a freshly cloned target repository from one or two onboarding prompts.
+    rationale: The target operator experience is minimal setup followed by a high-level epic-count loop.
 last_reviewed: 2026-05-12
 notes:
   - Human review is an escalation boundary, not a routine planning gate.
   - The governor should read release artifacts, metrics, budget ledgers, tuning reports, and validation outputs before choosing the next epic.
+  - The system should stop only for major problems such as exhausted autonomous repair, missing credentials, unsafe policy expansion, destructive operations not delegated, or no actionable work.
+  - Routine worker failures, invalid-but-useful planner output, flaky tests, and small local code errors should become autonomous repair/retry inputs.

@@ -18,6 +18,41 @@
 - `plan-backlog --mode strong-model --execute-planner` can invoke a governor
   agent that reads docs, roadmap, repo-state memory, and goals, then emits a
   validated `BacklogPlan`.
-- The next gap is chaining this into a persistent autonomous loop: backlog
-  state, objective/contract generation, release execution, and repo-state
-  updates after each epic.
+- `run-backlog` now chains selected-epic backlog planning into objective,
+  contract, and release execution for one epic.
+- The next gap is turning this into a persistent multi-epic autonomous loop:
+  backlog state, objective/contract generation, release execution, autonomous
+  repair/retry, and repo-state updates after each epic.
+
+## Closed-loop run learning: run-backlog autonomous loop
+
+- A full step-by-step dogfood run successfully merged the
+  `run-backlog-autonomous-loop` feature into `main`.
+- `plan-backlog` produced a useful selected epic and objective. Strong-model
+  `plan-release` then produced semantically useful task decomposition but
+  schema-invalid contract JSON. The system should repair or normalize such
+  planner output autonomously before stopping.
+- Single-contract continuation initially failed because dependencies were only
+  validated against the current invocation. Release continuation now reads
+  prior accepted and merged task ids from matching `release_summary.json`
+  artifacts.
+- Worktree verification failed when project config used the main checkout's
+  virtualenv without forcing `PYTHONPATH=src`. The `auto_develop` config now
+  makes worktree-local imports explicit.
+- Verification evidence for failures was too thin: `verification.log` captured
+  exit code, timeout, and duration, but not enough command stdout/stderr to
+  diagnose pytest failures without reapplying patches manually.
+- Worker summaries often reported that tests could not run inside isolated
+  worker sandboxes, while orchestrator verification could run them from the
+  configured environment. This is acceptable, but the cockpit log should make
+  the distinction explicit.
+- One worker produced a small dataclass field-order bug. This is exactly the
+  kind of local type/syntax failure the high-level loop should repair and retry
+  without human intervention.
+- A timing-based concurrency assertion was flaky after the run. Tests that
+  validate orchestration behavior should prefer direct concurrency observation
+  over wall-clock thresholds.
+- Accepted reruns after manual commits can produce release summaries with
+  `merged: true` and `commit_hash: null` because the diff was already present
+  on the integration branch. This edge case is acceptable for dependency
+  tracking but should be represented more clearly in release review output.

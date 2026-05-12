@@ -167,7 +167,17 @@ Remaining Phase 3 work is now small:
 
 Goal:
 
-Let the governor agent own the upstream development loop: read the roadmap, documentation, repository state, run artifacts, and repository goal; infer the next backlog epics; prioritize them by expected reward; select one epic; decompose it into objectives, contracts, and worker tasks; run the work; review the result; update roadmap/backlog state; and repeat.
+Let the governor agent own the upstream development loop: read the roadmap, documentation, repository state, run artifacts, and repository goal; infer the next backlog epics; prioritize them by expected reward; select one or more epics; decompose them into objectives, contracts, and worker tasks; run the work; review the result; update roadmap/backlog state; and repeat.
+
+Target operator experience:
+
+1. Freshly clone `auto_develop` and the target repository.
+2. Give the coding agent one or two onboarding prompts that identify both repositories, the target repo's goal, and hard safety/policy boundaries.
+3. Run one high-level command that says, effectively, "implement the next N highest-value epics."
+4. Watch the human-facing release log and intervene only for major problems.
+5. Receive a clean feature branch, pushed branch, PR candidate, or policy-approved merge, with evidence and updated repo-state memory.
+
+The system should not stop for routine worker failures. A high-level agent should diagnose, repair, and retry contract-contained failures such as schema-invalid planner output, missing worktree import context, flaky tests, dataclass ordering mistakes, worker verification-environment confusion, and narrow merge conflicts. Human escalation is reserved for exhausted autonomous repair, missing credentials, unsafe policy expansion, destructive operations not explicitly delegated, or no actionable work remaining.
 
 Required capabilities:
 
@@ -178,8 +188,9 @@ Required capabilities:
 5. Generate contracts for that objective through `plan-release`.
 6. Run the resulting release through `run-objective` or `run-release`.
 7. Update repo-state memory and backlog state after each accepted or failed epic.
-8. Continue until budget, explicit stopping criteria, or no actionable epics remain.
+8. Continue until the requested epic count, budget, explicit stopping criteria, or no actionable epics remain.
 9. For validation-heavy or simulation repositories, promote new findings from benchmarks, failed validations, generated artifacts, and changed assumptions into future roadmap/backlog decisions.
+10. Diagnose and repair failed subsystem steps before stopping, including planner schema mismatches, verification-environment drift, flaky tests, and small integration conflicts.
 
 Current implementation status:
 
@@ -187,13 +198,21 @@ Current implementation status:
 - `BacklogPlan` now carries `roadmap_updates` and `repo_state_updates` so the governor can surface learned roadmap/backlog changes from docs, artifacts, metrics, and validation evidence.
 - Deterministic `plan-backlog` remains available as fallback/test scaffolding, not as the target autonomous governor behavior.
 - Objective-to-contract and contract-to-release execution already exist through `plan-release`, `run-objective`, and `run-release`.
+- `agent-loop run-backlog` chains backlog planning, selected-epic objective creation or reuse, objective-to-contract planning, and release execution for one selected epic.
+- Release continuation now recognizes previously accepted and merged tasks for the same release from prior `release_summary.json` artifacts, enabling step-by-step reruns.
+- `run-backlog` records artifact paths for backlog plans, generated objectives, contract plans, release summaries, metrics, budgets, tuning reports, and an evidence manifest.
+- The first full closed-loop run showed that the system can recover from subsystem failures, but recovery still required manual patches for planner schema mismatch, verification-environment drift, and one worker-generated dataclass ordering error.
 
 Remaining Phase 4 work:
 
-1. Add a persistent backlog state file so completed, skipped, blocked, and active epics are tracked across runs.
-2. Add a higher-level `run-backlog` command that chains `plan-backlog` -> `run-objective` for one selected epic.
-3. Teach the governor to generate sub-task contracts directly from the selected epic and decide which workers can run in parallel.
-4. Teach the governor to apply or commit policy-compliant roadmap/backlog/repo-state updates after each epic with outcome, metrics, and next recommendations.
+1. Add a top-level `run-governor` or extended `run-backlog` loop that accepts an epic count and continues through the next N highest-priority epics.
+2. Make persistent backlog state authoritative for completed, skipped, blocked, active, and candidate epics across runs.
+3. Teach the governor to generate and normalize sub-task contracts directly from the selected epic, including schema repair/retry when planner output is semantically useful but invalid.
+4. Teach the governor to decide which workers can run in parallel and which must be chained based on dependencies, overlap, and run outcomes.
+5. Add autonomous repair loops for contract-contained subsystem failures before stopping: verification-environment drift, flaky tests, small syntax/type errors, task-summary/actual-diff mismatches, and narrow merge conflicts.
+6. Teach the governor to apply or commit policy-compliant roadmap/backlog/repo-state updates after each epic with outcome, metrics, lessons, and next recommendations.
+7. Add a bootstrap/onboarding command or checklist that turns a freshly cloned target repo plus one or two prompts into the required config, repo-state memory, objective/backlog directories, and initial doctor checks.
+8. Improve evidence for failed verification by preserving command stdout/stderr and concise failure excerpts, not just exit codes.
 
 ## Critical Path
 
