@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,7 +9,9 @@ from agentic_devloop.evidence import (
     EvidenceCollector,
     write_conflict_repair_result,
     write_failure_diagnosis,
+    write_release_soft_gate_decisions,
     write_review_decision,
+    write_task_soft_gate_decision,
 )
 from agentic_devloop.models import (
     ConflictRepairResult,
@@ -18,6 +21,12 @@ from agentic_devloop.models import (
     FailureDiagnosisInput,
     FailureDiagnosisSourceMetadata,
     FailureEvidenceExcerpt,
+    ReleaseSoftGateDecisionRecord,
+    SoftGateDecision,
+    SoftGateDecisionOutcome,
+    SoftGateFinding,
+    SoftGateSeverity,
+    TaskSoftGateDecisionRecord,
     TaskContract,
     TaskRun,
     TaskState,
@@ -186,6 +195,82 @@ def test_write_failure_diagnosis_preserves_legacy_dict_payload(tmp_path) -> None
     assert "final_exit_code: 1" in contents
     assert "attempts:" in contents
     assert "recommendation: Inspect logs and retry." in contents
+
+
+def test_write_task_soft_gate_decision_writes_stable_json(tmp_path) -> None:
+    bundle_root = tmp_path / "runs" / "rr-0001"
+    bundle_root.mkdir(parents=True)
+    bundle = load_bundle(bundle_root)
+    record = TaskSoftGateDecisionRecord(
+        task_id="rr-0001",
+        finding=SoftGateFinding(
+            finding_id="finding-001",
+            severity=SoftGateSeverity.HIGH,
+            risk="Potentially unsafe overlap if merged in parallel.",
+            recommended_actions=["Sequence merge", "Rerun overlap validator"],
+            evidence_paths=[bundle_root / "overlap_report.json"],
+        ),
+        decision=SoftGateDecision(
+            finding_id="finding-001",
+            decision=SoftGateDecisionOutcome.ACCEPT_WITH_MITIGATION,
+            rationale="The overlap is manageable with serial merge ordering.",
+            fallback_plan="Split task scope if overlap remains broad.",
+            validators_rerun=["overlap_check", "admission_check"],
+            evidence_paths=[bundle_root / "review_notes.md"],
+        ),
+    )
+
+    updated_bundle = write_task_soft_gate_decision(bundle, record)
+    assert updated_bundle.soft_gate_decision_path is not None
+    payload = json.loads(updated_bundle.soft_gate_decision_path.read_text(encoding="utf-8"))
+
+    assert payload["finding"]["finding_id"] == "finding-001"
+    assert payload["finding"]["severity"] == "high"
+    assert "overlap" in payload["finding"]["risk"]
+    assert payload["decision"]["decision"] == "accept_with_mitigation"
+    assert payload["decision"]["rationale"]
+    assert payload["decision"]["fallback_plan"]
+    assert payload["decision"]["validators_rerun"] == ["overlap_check", "admission_check"]
+    assert payload["decision"]["evidence_paths"] == [str(bundle_root / "review_notes.md")]
+
+
+def test_write_release_soft_gate_decisions_writes_stable_json(tmp_path) -> None:
+    release_bundle_path = tmp_path / "runs" / "release-001"
+    release_bundle_path.mkdir(parents=True)
+    record = ReleaseSoftGateDecisionRecord(
+        release_id="release-001",
+        decisions=[
+            TaskSoftGateDecisionRecord(
+                task_id="rr-0001",
+                finding=SoftGateFinding(
+                    finding_id="finding-001",
+                    severity=SoftGateSeverity.MODERATE,
+                    risk="Minor budget overage risk.",
+                    recommended_actions=["Accept with mitigation"],
+                    evidence_paths=[release_bundle_path / "budget_report.json"],
+                ),
+                decision=SoftGateDecision(
+                    finding_id="finding-001",
+                    decision=SoftGateDecisionOutcome.ACCEPT,
+                    rationale="Overage is within normal variance.",
+                    fallback_plan="Escalate on repeated overage.",
+                    validators_rerun=["budget_check"],
+                    evidence_paths=[release_bundle_path / "review-rr-0001.md"],
+                ),
+            )
+        ],
+    )
+
+    path = write_release_soft_gate_decisions(release_bundle_path, record)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert path.name == "soft_gate_decisions.json"
+    assert payload["release_id"] == "release-001"
+    assert payload["decisions"][0]["finding"]["finding_id"] == "finding-001"
+    assert payload["decisions"][0]["finding"]["severity"] == "moderate"
+    assert payload["decisions"][0]["decision"]["decision"] == "accept"
+    assert payload["decisions"][0]["decision"]["fallback_plan"] == "Escalate on repeated overage."
+    assert payload["decisions"][0]["decision"]["validators_rerun"] == ["budget_check"]
 
 
 def task_budget():

@@ -333,6 +333,7 @@ class EvidenceBundle(StrictModel):
     decision_path: Path | None = None
     finalization_path: Path | None = None
     conflict_repair_path: Path | None = None
+    soft_gate_decision_path: Path | None = None
 
 
 class FailureDiagnosisInput(StrictModel):
@@ -419,6 +420,64 @@ class ReviewDecision(StrictModel):
     rationale: str = Field(min_length=1)
     risks: list[str] = Field(default_factory=list)
     follow_up_tasks: list[str] = Field(default_factory=list)
+
+
+class SoftGateSeverity(StrEnum):
+    LOW = "low"
+    MODERATE = "moderate"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class SoftGateDecisionOutcome(StrEnum):
+    ACCEPT = "accept"
+    ACCEPT_WITH_MITIGATION = "accept_with_mitigation"
+    DEFER = "defer"
+    SPLIT_TASK = "split_task"
+    ESCALATE = "escalate"
+    REJECT = "reject"
+
+
+class SoftGateFinding(StrictModel):
+    finding_id: str = Field(min_length=1)
+    severity: SoftGateSeverity
+    risk: str = Field(min_length=1)
+    recommended_actions: list[str] = Field(default_factory=list)
+    evidence_paths: list[Path] = Field(default_factory=list)
+
+    @field_validator("recommended_actions")
+    @classmethod
+    def recommended_actions_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("recommended actions must not be empty")
+        return values
+
+
+class SoftGateDecision(StrictModel):
+    finding_id: str = Field(min_length=1)
+    decision: SoftGateDecisionOutcome
+    rationale: str = Field(min_length=1)
+    fallback_plan: str = Field(min_length=1)
+    validators_rerun: list[str] = Field(default_factory=list)
+    evidence_paths: list[Path] = Field(default_factory=list)
+
+    @field_validator("validators_rerun")
+    @classmethod
+    def validators_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("validators rerun entries must not be empty")
+        return values
+
+
+class TaskSoftGateDecisionRecord(StrictModel):
+    task_id: str = Field(min_length=1)
+    finding: SoftGateFinding
+    decision: SoftGateDecision
+
+
+class ReleaseSoftGateDecisionRecord(StrictModel):
+    release_id: str = Field(min_length=1)
+    decisions: list[TaskSoftGateDecisionRecord] = Field(default_factory=list)
 
 
 class GeneratedContract(StrictModel):

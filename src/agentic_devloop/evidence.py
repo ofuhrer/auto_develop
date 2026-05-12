@@ -11,7 +11,9 @@ from agentic_devloop.models import (
     EvidenceBundle,
     FailureDiagnosis,
     ExecutorResult,
+    ReleaseSoftGateDecisionRecord,
     ReviewDecision,
+    TaskSoftGateDecisionRecord,
     TaskContract,
     TaskRun,
 )
@@ -204,6 +206,66 @@ def write_scientific_outputs(
         updates["remote_dispatch_path"] = remote_dispatch_path
 
     return bundle.model_copy(update=updates)
+
+
+def write_task_soft_gate_decision(
+    bundle: EvidenceBundle,
+    record: TaskSoftGateDecisionRecord,
+) -> EvidenceBundle:
+    soft_gate_decision_path = bundle.bundle_path / "soft_gate_decision.json"
+    payload = {
+        "task_id": record.task_id,
+        "finding": {
+            "finding_id": record.finding.finding_id,
+            "severity": record.finding.severity.value,
+            "risk": record.finding.risk,
+            "recommended_actions": record.finding.recommended_actions,
+            "evidence_paths": [str(path) for path in record.finding.evidence_paths],
+        },
+        "decision": {
+            "finding_id": record.decision.finding_id,
+            "decision": record.decision.decision.value,
+            "rationale": record.decision.rationale,
+            "fallback_plan": record.decision.fallback_plan,
+            "validators_rerun": record.decision.validators_rerun,
+            "evidence_paths": [str(path) for path in record.decision.evidence_paths],
+        },
+    }
+    soft_gate_decision_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return bundle.model_copy(update={"soft_gate_decision_path": soft_gate_decision_path})
+
+
+def write_release_soft_gate_decisions(
+    release_bundle_path: Path,
+    record: ReleaseSoftGateDecisionRecord,
+) -> Path:
+    release_soft_gate_path = release_bundle_path / "soft_gate_decisions.json"
+    payload = {
+        "release_id": record.release_id,
+        "decisions": [
+            {
+                "task_id": decision.task_id,
+                "finding": {
+                    "finding_id": decision.finding.finding_id,
+                    "severity": decision.finding.severity.value,
+                    "risk": decision.finding.risk,
+                    "recommended_actions": decision.finding.recommended_actions,
+                    "evidence_paths": [str(path) for path in decision.finding.evidence_paths],
+                },
+                "decision": {
+                    "finding_id": decision.decision.finding_id,
+                    "decision": decision.decision.decision.value,
+                    "rationale": decision.decision.rationale,
+                    "fallback_plan": decision.decision.fallback_plan,
+                    "validators_rerun": decision.decision.validators_rerun,
+                    "evidence_paths": [str(path) for path in decision.decision.evidence_paths],
+                },
+            }
+            for decision in record.decisions
+        ],
+    }
+    release_soft_gate_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return release_soft_gate_path
 
 
 def _decision_yaml(decision: ReviewDecision) -> str:

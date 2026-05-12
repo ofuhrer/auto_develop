@@ -22,6 +22,10 @@ from agentic_devloop.models import (
     ReleaseObjective,
     ReviewDecision,
     Reviewer,
+    SoftGateDecision,
+    SoftGateDecisionOutcome,
+    SoftGateFinding,
+    SoftGateSeverity,
     TaskContract,
     TaskRun,
     TaskState,
@@ -221,6 +225,52 @@ def test_budget_tuning_report_renders_guidance() -> None:
     assert "Budget tuning guidance for v1.2.3" in rendered
     assert "fallback model gpt-5.4-mini" in rendered
     assert "Split or narrow task demo-0001" in rendered
+
+
+def test_soft_gate_models_validate_required_fields() -> None:
+    finding = SoftGateFinding(
+        finding_id="overlap-001",
+        severity=SoftGateSeverity.MODERATE,
+        risk="Potential merge conflict from file overlap.",
+        recommended_actions=["Reorder tasks", "Rerun overlap validator"],
+        evidence_paths=[Path("runs/demo/overlap_report.json")],
+    )
+    decision = SoftGateDecision(
+        finding_id="overlap-001",
+        decision=SoftGateDecisionOutcome.ACCEPT_WITH_MITIGATION,
+        rationale="Overlap is narrow and mitigated by sequencing.",
+        fallback_plan="Split the task if rerun still reports broad overlap.",
+        validators_rerun=["overlap_check", "contract_scope_check"],
+        evidence_paths=[Path("runs/demo/soft_gate_review.md")],
+    )
+
+    assert finding.finding_id == "overlap-001"
+    assert decision.decision == SoftGateDecisionOutcome.ACCEPT_WITH_MITIGATION
+
+
+def test_soft_gate_models_reject_unknown_fields() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        SoftGateFinding.model_validate(
+            {
+                "finding_id": "budget-001",
+                "severity": "low",
+                "risk": "Small overage.",
+                "recommended_actions": ["Track overage."],
+                "unexpected_field": True,
+            }
+        )
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        SoftGateDecision.model_validate(
+            {
+                "finding_id": "budget-001",
+                "decision": "accept",
+                "rationale": "Within expected variance.",
+                "fallback_plan": "Escalate if repeated.",
+                "validators_rerun": ["budget_check"],
+                "unknown": "value",
+            }
+        )
 
 
 def _budget() -> Budget:
