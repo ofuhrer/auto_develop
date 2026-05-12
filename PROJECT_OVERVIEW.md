@@ -53,3 +53,24 @@ Agents should stop and ask for human direction only when one of these happens:
 Create a pragmatic autonomous development loop that can execute release-sized objectives by decomposing them into bounded, verifiable tasks. Use cheap execution models where possible and reserve frontier models for planning, review, and failed-task diagnosis.
 
 The v1 loop should reduce manual orchestration without allowing agent drift, task collapse, verification weakening, or unreviewed scientific changes.
+
+## Current Implementation
+
+The repo now contains a minimal executable loop behind `agent-loop run-task`.
+
+Implemented:
+
+- Project and contract schema validation.
+- Project config loading.
+- Git worktree creation.
+- Contract-based prompt generation.
+- Codex CLI executor wrapper.
+- Verification command runner.
+- Evidence bundle collection.
+- Deterministic review with persisted `decision.yaml`.
+
+Not yet completed:
+
+- A real synthetic run against `rust_rockfall`.
+- Sprint 0 review based on actual executor evidence.
+- Merge or pull-request automation.

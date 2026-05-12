@@ -22,6 +22,7 @@ def run_process(
     cwd: Path,
     timeout_seconds: int,
     shell: bool = False,
+    input_text: str | None = None,
 ) -> ProcessOutput:
     started_at = time.monotonic()
     try:
@@ -32,6 +33,7 @@ def run_process(
             text=True,
             capture_output=True,
             shell=shell,
+            input=input_text,
             check=False,
         )
         return ProcessOutput(

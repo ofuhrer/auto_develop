@@ -4,8 +4,9 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agentic_devloop.evidence import EvidenceCollector
+from agentic_devloop.evidence import EvidenceCollector, write_review_decision
 from agentic_devloop.models import ExecutorResult, TaskContract, TaskRun, TaskState
+from agentic_devloop.review import deterministic_review
 from agentic_devloop.yaml_io import load_yaml_model
 
 
@@ -79,3 +80,28 @@ def test_evidence_collector_writes_complete_bundle(tmp_path) -> None:
     assert bundle.run_state_path.exists()
     assert bundle.git_diff_path.read_text(encoding="utf-8")
     assert bundle.changed_files_path.read_text(encoding="utf-8") == "README.md\n"
+
+    decision = deterministic_review(
+        task=task,
+        budget=task_budget(),
+        changed_files=["tests/test_public_real_site_conditional_pilot_run.py"],
+        diff_text="+assert report\n",
+        verification_exit_codes=[0],
+    )
+    updated_bundle = write_review_decision(bundle, decision)
+
+    assert updated_bundle.decision_path is not None
+    assert updated_bundle.decision_path.exists()
+    assert updated_bundle.review_path is not None
+    assert updated_bundle.review_path.exists()
+
+
+def task_budget():
+    from agentic_devloop.models import Budget
+
+    return Budget(
+        max_executor_attempts_per_task=2,
+        max_strong_model_calls_per_release=10,
+        max_changed_files_per_task=8,
+        max_diff_lines_per_task=600,
+    )

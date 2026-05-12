@@ -34,3 +34,21 @@ Check the CLI:
 agent-loop --help
 agent-loop --version
 ```
+
+Load a project config:
+
+```bash
+agent-loop config --project rust_rockfall
+```
+
+Run one bounded task:
+
+```bash
+agent-loop run-task \
+  --project rust_rockfall \
+  --contract contracts/rr-0001.yaml
+```
+
+`run-task` creates an isolated worktree, writes an executor prompt, runs the configured executor, runs the contract verification commands, collects an evidence bundle, and writes `decision.yaml`.
+
+Before running against `rust_rockfall`, update [configs/rust_rockfall.yaml](configs/rust_rockfall.yaml) so `repo_path` and `worktree_root` point to real local paths.

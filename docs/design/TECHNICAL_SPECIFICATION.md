@@ -185,31 +185,47 @@ follow_up_tasks:
 
 ## CLI Interface
 
-Initial CLI shape:
+Current CLI shape:
 
 ```bash
 agent-loop init --project rust_rockfall --repo ~/dev/rust_rockfall
 
-agent-loop plan \
-  --project rust_rockfall \
-  --objective objectives/v0.8.0.md
+agent-loop config \
+  --project rust_rockfall
 
-agent-loop run-next \
+agent-loop config \
   --project rust_rockfall \
-  --release v0.8.0
+  --validate-repo
 
-agent-loop verify \
+agent-loop run-task \
   --project rust_rockfall \
-  --task rr-0001
+  --contract contracts/rr-0001.yaml
 
-agent-loop review \
-  --project rust_rockfall \
-  --task rr-0001
-
-agent-loop status \
-  --project rust_rockfall \
-  --release v0.8.0
+agent-loop status
 ```
+
+Planned later commands:
+
+- `agent-loop plan`
+- `agent-loop run-next`
+- `agent-loop verify`
+- `agent-loop review`
+
+### `run-task` Flow
+
+`agent-loop run-task` currently performs the first end-to-end orchestration path:
+
+1. Load and validate `ProjectConfig`.
+2. Load and validate `TaskContract`.
+3. Create a Git worktree and task branch.
+4. Write `executor_prompt.md` from the task contract.
+5. Run the configured executor.
+6. Run task verification commands.
+7. Collect evidence into `runs/<run-id>/<task-id>/evidence/`.
+8. Run deterministic review.
+9. Persist `decision.yaml` and `review.md`.
+
+The command does not merge changes or create a pull request.
 
 ## Project Adapter Interface
 

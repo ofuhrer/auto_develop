@@ -289,6 +289,14 @@ Sprint objective:
 
 Create the smallest useful external orchestrator skeleton that can run one bounded Codex task in a Git worktree and collect evidence.
 
+Current implementation status:
+
+- Tasks 0.1 through 0.8 have an executable foundation.
+- `agent-loop run-task` wires config loading, contract loading, worktree creation, prompt generation, executor invocation, verification, evidence collection, and deterministic review.
+- `decision.yaml` and `review.md` are persisted inside the evidence bundle.
+- Task 0.9 still requires a real `rust_rockfall` path and an actual low-risk Codex run.
+- Task 0.10 should be written only after Task 0.9 produces real run evidence.
+
 ### Task 0.1: Create Repository Skeleton
 
 Create external repo structure:
@@ -327,6 +335,11 @@ Acceptance:
 - Sample YAML files validate.
 - Invalid missing fields fail clearly.
 
+Implemented:
+
+- Pydantic schemas in `src/agentic_devloop/models.py`.
+- Sample YAML in `configs/`, `objectives/`, and `contracts/`.
+
 ### Task 0.3: Implement Project Config Loader
 
 Add config support for `rust_rockfall`.
@@ -336,6 +349,11 @@ Acceptance:
 - CLI can load and print normalized project config.
 - Repo path validation works.
 - Missing repo fails safely.
+
+Implemented:
+
+- `agent-loop config --project rust_rockfall`
+- `agent-loop config --project rust_rockfall --validate-repo`
 
 ### Task 0.4: Implement Worktree Manager
 
@@ -406,6 +424,25 @@ Acceptance:
 - Produces `decision.yaml`.
 - Rejects forbidden file changes.
 - Rejects failed verification.
+
+Implemented:
+
+- Deterministic review in `src/agentic_devloop/review.py`.
+- Decision persistence in `src/agentic_devloop/evidence.py`.
+
+### Integration: `run-task`
+
+`agent-loop run-task` now connects Tasks 0.2 through 0.8 into one command.
+
+Example:
+
+```bash
+agent-loop run-task \
+  --project rust_rockfall \
+  --contract contracts/rr-0001.yaml
+```
+
+Before using this against a real repository, update `configs/rust_rockfall.yaml` with a real `repo_path` and `worktree_root`.
 
 ### Task 0.9: Run Synthetic Task
 

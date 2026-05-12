@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agentic_devloop import __version__
 from agentic_devloop.config import ProjectConfigError, load_project_config
+from agentic_devloop.orchestrator import run_task
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,6 +39,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fail if the configured repository path does not exist.",
     )
 
+    run_task_parser = subparsers.add_parser("run-task", help="Run one bounded task contract.")
+    run_task_parser.add_argument("--project", required=True, help="Project identifier.")
+    run_task_parser.add_argument("--contract", required=True, help="Path to a task contract YAML file.")
+    run_task_parser.add_argument(
+        "--config-dir",
+        default="configs",
+        help="Directory containing project config YAML files.",
+    )
+    run_task_parser.add_argument(
+        "--runs-dir",
+        default="runs",
+        help="Directory where run evidence should be written.",
+    )
+    run_task_parser.add_argument(
+        "--verification-timeout-seconds",
+        type=int,
+        default=600,
+        help="Timeout for each verification command.",
+    )
+    run_task_parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="Allow creating a worktree when the base repository has uncommitted changes.",
+    )
+
     subparsers.add_parser("status", help="Show orchestrator status.")
 
     return parser
@@ -65,9 +91,35 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(config.model_dump(mode="json"), indent=2))
         return 0
 
+    if args.command == "run-task":
+        try:
+            result = run_task(
+                project_id=args.project,
+                contract_path=Path(args.contract),
+                config_dir=Path(args.config_dir),
+                runs_dir=Path(args.runs_dir),
+                verification_timeout_seconds=args.verification_timeout_seconds,
+                allow_dirty=args.allow_dirty,
+            )
+        except Exception as error:
+            parser.exit(2, f"error: {error}\n")
+
+        print(json.dumps(_task_run_result(result), indent=2))
+        return 0
+
     if args.command == "status":
         print("No runs found.")
         return 0
 
     parser.print_help()
     return 0
+
+
+def _task_run_result(result) -> dict[str, str]:
+    return {
+        "run_id": result.run_id,
+        "worktree_path": str(result.worktree_path),
+        "bundle_path": str(result.bundle_path),
+        "decision": result.decision.decision,
+        "rationale": result.decision.rationale,
+    }

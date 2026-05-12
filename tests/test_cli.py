@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from agentic_devloop.cli import main
 
 
@@ -29,3 +31,13 @@ def test_config_prints_project_config(capsys) -> None:
 
     assert exit_code == 0
     assert '"project_id": "rust_rockfall"' in captured.out
+
+
+def test_run_task_command_is_registered(capsys) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["run-task", "--help"])
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 0
+    assert "--contract" in captured.out

@@ -4,15 +4,8 @@ import json
 import shutil
 from pathlib import Path
 
-from agentic_devloop.models import EvidenceBundle, ExecutorResult, TaskContract, TaskRun
-from agentic_devloop.process import run_process
-
-
-def _git_text(worktree_path: Path, args: list[str]) -> str:
-    result = run_process(["git", *args], cwd=worktree_path, timeout_seconds=60)
-    if result.exit_code != 0:
-        raise RuntimeError(result.stderr.strip() or result.stdout.strip())
-    return result.stdout
+from agentic_devloop.git_state import changed_files, diff_patch
+from agentic_devloop.models import EvidenceBundle, ExecutorResult, ReviewDecision, TaskContract, TaskRun
 
 
 class EvidenceCollector:
@@ -53,9 +46,9 @@ class EvidenceCollector:
             json.dumps(run_state.model_dump(mode="json"), indent=2) + "\n",
             encoding="utf-8",
         )
-        git_diff_path.write_text(_git_text(worktree_path, ["diff", "--patch"]), encoding="utf-8")
+        git_diff_path.write_text(diff_patch(worktree_path), encoding="utf-8")
         changed_files_path.write_text(
-            _git_text(worktree_path, ["diff", "--name-only"]),
+            "\n".join(changed_files(worktree_path)) + "\n",
             encoding="utf-8",
         )
 
@@ -72,3 +65,43 @@ class EvidenceCollector:
             changed_files_path=changed_files_path,
             verification_log_path=verification_bundle_log_path,
         )
+
+
+def write_review_decision(bundle: EvidenceBundle, decision: ReviewDecision) -> EvidenceBundle:
+    decision_path = bundle.bundle_path / "decision.yaml"
+    review_path = bundle.bundle_path / "review.md"
+
+    decision_path.write_text(
+        _decision_yaml(decision),
+        encoding="utf-8",
+    )
+    review_path.write_text(
+        "\n".join(
+            [
+                f"# Review: {decision.task_id}",
+                "",
+                f"- Decision: `{decision.decision}`",
+                f"- Reviewer: `{decision.reviewer}`",
+                f"- Rationale: {decision.rationale}",
+                "",
+                "## Risks",
+                "",
+                *[f"- {risk}" for risk in decision.risks],
+                *(["- None recorded."] if not decision.risks else []),
+                "",
+                "## Follow-up Tasks",
+                "",
+                *[f"- {task}" for task in decision.follow_up_tasks],
+                *(["- None recorded."] if not decision.follow_up_tasks else []),
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return bundle.model_copy(update={"decision_path": decision_path, "review_path": review_path})
+
+
+def _decision_yaml(decision: ReviewDecision) -> str:
+    import yaml
+
+    return yaml.safe_dump(decision.model_dump(mode="json"), sort_keys=False)

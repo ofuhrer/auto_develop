@@ -20,13 +20,16 @@ class CodexExecutor:
             "exec",
             "--model",
             self.config.model,
-            "--file",
-            str(prompt_path),
+            "--sandbox",
+            "workspace-write",
+            "-",
         ]
+        prompt_text = prompt_path.read_text(encoding="utf-8")
         result = run_process(
             command,
             cwd=worktree_path,
             timeout_seconds=self.config.max_walltime_minutes * 60,
+            input_text=prompt_text,
         )
 
         stdout_path.write_text(result.stdout, encoding="utf-8")
