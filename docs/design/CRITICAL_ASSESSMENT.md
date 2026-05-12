@@ -24,19 +24,20 @@ The main risk is unbounded autonomy, not autonomy itself. The system should be a
 - Subprocess isolation is not a real sandbox.
 - A generic adapter interface may become too abstract before two real target repositories exist.
 - The implementation currently concentrates too many responsibilities in a few large modules. `release.py` owns release coordination, scheduling, logging, summaries, metrics, cleanup, dependency analysis, and finalization. `orchestrator.py` owns task execution, model routing, verification, evidence, review, finalization, and conflict repair. This slows evolution toward a multi-epic governor.
-- The current state model is artifact-scanning plus YAML files. That is inspectable, but it is not yet an authoritative state store for active epics, completed epics, retry counts, blocked work, and governor decisions.
-- The system has diagnostics for failures, but not a general repair policy. Planner schema drift, verification-environment drift, flaky tests, and small worker bugs are still outside a unified autonomous repair/retry loop.
+- The implementation now exposes a one-epic `GovernorLoop` boundary, a typed `StateStore` seam, and a `RepairPolicy` seam, but the broader multi-epic governor still has to prove those boundaries across repeated cycles.
+- The current state model is still intentionally narrow. The typed `StateStore` seam improves persistence discipline, but the longer-running backlog memory for active epics, completed epics, retry counts, blocked work, and governor decisions still needs the full multi-epic loop.
+- The system now has a repair decision seam, but not a full autonomous repair policy. Planner schema drift, verification-environment drift, flaky tests, and small worker bugs are still outside a repeated-repair loop that can continue across many epics.
 - The CLI is not a thin boundary. It wires backend construction and workflow-specific behavior that should move into application services as the command set grows.
 
 ## Architectural Refactoring Priorities
 
 High-priority seams:
 
-- Extract a `GovernorLoop` that owns "run the next N epics", stopping criteria, retry policy, and state refresh.
-- Extract a `StateStore` API over repo-state files, run summaries, active releases, completed/blocked epics, and known learnings.
+- Extend the `GovernorLoop` from the current one-epic service boundary to a multi-epic "run the next N epics" loop with stopping criteria, retry policy, and state refresh.
+- Extend the `StateStore` API over repo-state files, run summaries, active releases, completed/blocked epics, and known learnings into authoritative multi-epic state.
 - Extract release scheduling, cockpit reporting, finalization, and metrics from `release.py`.
 - Extract task execution, evidence, finalization, and repair from `orchestrator.py`.
-- Add a `RepairPolicy` that maps failure categories to schema normalization, verification repair, stronger-model diagnosis, retry, or stop.
+- Extend `RepairPolicy` so it can map failure categories to schema normalization, verification repair, stronger-model diagnosis, retry, or stop across repeated epic cycles.
 
 Medium-priority seams:
 

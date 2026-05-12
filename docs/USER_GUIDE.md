@@ -256,7 +256,7 @@ acceptance_criteria:
 
 Use objectives for planning. Use contracts for execution.
 
-The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the governor agent should choose the next epic, produce an objective, and feed the existing objective/contract/release machinery.
+The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the current governor service chooses one epic at a time, produces an objective, and feeds the existing objective/contract/release machinery. Multi-epic looping and fully automated state refresh are planned extensions beyond the current one-epic governor boundary.
 
 Use backlog planning first:
 
@@ -269,7 +269,7 @@ agent-loop plan-backlog \
   --write-objective
 ```
 
-This writes `runs/<timestamp>_<project>_backlog/backlog_plan.json` and, when `--write-objective` is set, an objective YAML for the highest-priority epic. The backlog plan can also include `roadmap_updates` and `repo_state_updates` that the governor should use to refresh project memory after runs.
+This writes `runs/<timestamp>_<project>_backlog/backlog_plan.json` and, when `--write-objective` is set, an objective YAML for the highest-priority epic. The backlog plan can also include `roadmap_updates` and `repo_state_updates` that the current governor boundary can consume for follow-up state updates after runs; the broader always-on refresh loop is still planned.
 
 For self-development, `auto_develop` keeps this memory under `repo_state/auto_develop/`, including `architecture_summary.md`, `active_constraints.yaml`, `known_failures.md`, `release_plan.yaml`, and `backlog_state.yaml`.
 
@@ -668,7 +668,7 @@ Key options:
 - `--mode strong-model --execute-planner`: have the configured planner agent choose and prioritize epics from the documentation, roadmap, and goal.
 - `--write-objective`: write the selected epic into `objectives/`.
 
-Use this command before `plan-release` or `run-objective` when the next development epic should be selected by the roadmap-governor agent instead of manually supplied. Deterministic mode is only a fallback and test scaffold. The governor should also use run artifacts, validation findings, metrics, and tuning reports to update roadmap/backlog state between cycles.
+Use this command before `plan-release` or `run-objective` when the next development epic should be selected by the roadmap-governor agent instead of manually supplied. Deterministic mode is only a fallback and test scaffold. The current governor path can use run artifacts, validation findings, metrics, and tuning reports to inform the next one-epic cycle; fully automated repeated-cycle refresh is still planned.
 
 Key options:
 
@@ -788,6 +788,8 @@ Relationship to nearby commands:
 - `run-backlog` performs backlog planning first, then selects the requested epic or the planner-selected epic, reuses `objectives/<suggested_release_id>.yaml` when it already exists, or writes that objective file when it does not.
 - `run-objective` skips backlog selection and starts from an existing objective file.
 - `run-backlog` forwards the usual release execution and finalization flags, so `--commit-on-accept`, `--merge-on-accept`, `--push-on-accept`, and `--release-finalize` still control task commits and release finalization.
+
+`run-backlog` is intentionally one epic per invocation. A multi-epic governor command is planned but not yet the documented user workflow.
 
 Run-backlog evidence records artifact paths when produced, including:
 - backlog plan (`backlog_plan.json`);
