@@ -6,7 +6,9 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from agentic_devloop.budget import build_budget_ledger, build_tuning_report
 from agentic_devloop.models import (
+    Budget,
     Decision,
     EvidenceBundle,
     FailureDiagnosis,
@@ -155,3 +157,74 @@ def test_failure_diagnosis_model_rejects_invalid_confidence() -> None:
                 "source_metadata": {"backend": "codex_cli"},
             }
         )
+
+
+def test_budget_ledger_captures_usage_and_signals() -> None:
+    ledger = build_budget_ledger(release_metrics=_budget_metrics(), budget=_budget())
+    usage = {entry.name: entry for entry in ledger.usage}
+
+    assert ledger.release_id == "v1.2.3"
+    assert usage["changed_files_per_task"].actual == 7
+    assert usage["context_chars_per_task"].utilization == 0.933
+    assert ledger.model_attempts[0].model == "gpt-5.3-codex-spark"
+    assert any(outlier.task_id == "demo-0001" and outlier.metric == "changed_files" for outlier in ledger.task_size_outliers)
+    assert any(signal.kind == "waste_signal" for signal in ledger.waste_signals)
+
+
+def test_budget_tuning_report_renders_guidance() -> None:
+    report = build_tuning_report(ledger=build_budget_ledger(release_metrics=_budget_metrics(False), budget=_budget()))
+    rendered = report.render_markdown()
+
+    assert "Budget tuning guidance for v1.2.3" in rendered
+    assert "fallback model gpt-5.4-mini" in rendered
+    assert "Split or narrow task demo-0001" in rendered
+
+
+def _budget() -> Budget:
+    return Budget(
+        max_executor_attempts_per_task=2,
+        max_strong_model_calls_per_release=5,
+        max_changed_files_per_task=8,
+        max_diff_lines_per_task=600,
+        max_context_chars_per_task=30_000,
+    )
+
+
+def _budget_metrics(include_second_task: bool = True) -> dict[str, object]:
+    tasks = [
+        {
+            "task_id": "demo-0001",
+            "decision": "accepted",
+            "bundle_path": "runs/2026-05-12_v1.2.3/demo-0001",
+            "context_chars": 28000,
+            "prompt_chars": 4200,
+            "stdout_chars": 100,
+            "stderr_chars": 40,
+            "diff_lines": 540,
+            "changed_file_count": 7,
+            "verification_command_count": 4,
+            "verification_duration_seconds": 12.0,
+            "executor_attempts": [
+                {"attempt": 1, "model": "gpt-5.3-codex-spark", "exit_code": 1, "duration_seconds": 2.0, "prompt_chars": 2400, "stdout_chars": 25, "stderr_chars": 10},
+                {"attempt": 2, "model": "gpt-5.4-mini", "exit_code": 0, "duration_seconds": 1.1, "prompt_chars": 2600, "stdout_chars": 95, "stderr_chars": 50},
+            ],
+        }
+    ]
+    if include_second_task:
+        tasks.append(
+            {
+                "task_id": "demo-0002",
+                "decision": "accepted",
+                "bundle_path": "runs/2026-05-12_v1.2.3/demo-0002",
+                "context_chars": 5000,
+                "prompt_chars": 800,
+                "stdout_chars": 20,
+                "stderr_chars": 10,
+                "diff_lines": 20,
+                "changed_file_count": 1,
+                "verification_command_count": 1,
+                "verification_duration_seconds": 1.0,
+                "executor_attempts": [{"attempt": 1, "model": "gpt-5.4-mini", "exit_code": 0, "duration_seconds": 0.3, "prompt_chars": 800, "stdout_chars": 20, "stderr_chars": 10}],
+            }
+        )
+    return {"release_id": "v1.2.3", "model_attempts": {"gpt-5.3-codex-spark": {"attempts": 1, "successful_attempts": 0, "failed_attempts": 1, "duration_seconds": 2.5, "prompt_chars": 2400, "stdout_chars": 25, "stderr_chars": 10}, "gpt-5.4-mini": {"attempts": 2, "successful_attempts": 2, "failed_attempts": 0, "duration_seconds": 1.1, "prompt_chars": 2600, "stdout_chars": 95, "stderr_chars": 50}}, "strong_model_calls": 3, "tasks": tasks}
