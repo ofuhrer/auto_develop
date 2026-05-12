@@ -33,6 +33,7 @@ class BacklogPlanResult:
 class BacklogRunResult:
     selected_epic_id: str
     plan_path: Path
+    backlog_plan_path: Path
     plan: BacklogPlan
     objective_path: Path
     objective: ReleaseObjective
@@ -333,6 +334,7 @@ def run_backlog(
     return BacklogRunResult(
         selected_epic_id=epic.epic_id,
         plan_path=plan_result.plan_path,
+        backlog_plan_path=plan_result.plan_path,
         plan=plan,
         objective_path=objective_path,
         generated_objective_path=objective_path if created_objective else None,

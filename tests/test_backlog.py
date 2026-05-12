@@ -355,6 +355,7 @@ def test_run_backlog_selects_one_epic_reuses_objective_and_runs_release(tmp_path
 
     assert result.selected_epic_id == "epic-0001"
     assert result.plan_path.exists()
+    assert result.backlog_plan_path == result.plan_path
     assert result.objective_path == existing_objective
     assert result.generated_objective_path is None
     assert result.objective.release_id == "demo-agent-selected-governor"
@@ -373,6 +374,79 @@ def test_run_backlog_selects_one_epic_reuses_objective_and_runs_release(tmp_path
     assert result.evidence_manifest is not None
     assert result.evidence_manifest.backlog_plan_path == result.plan_path
     assert result.evidence_manifest.generated_objective_path is None
+    assert result.evidence_manifest.contract_plan_path == result.contract_plan_path
+    assert result.evidence_manifest.release_summary_path == result.release_summary_path
+    assert result.evidence_manifest.release_metrics_path == result.release_metrics_path
+    assert result.evidence_manifest.release_budget_path == result.release_budget_path
+    assert result.evidence_manifest.release_tuning_path == result.release_tuning_path
+
+
+def test_run_backlog_records_generated_objective_path_when_objective_is_created(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# demo\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "worker",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {
+                "planner": {
+                    "type": "codex_cli",
+                    "model": "planner",
+                    "max_walltime_minutes": 5,
+                }
+            },
+            "model_routing": {"default_role": "planner"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    roadmap = tmp_path / "ROADMAP.md"
+    roadmap.write_text("# Roadmap\n\nRemaining work:\n\n1. Add run-backlog.\n", encoding="utf-8")
+    objectives_dir = tmp_path / "objectives"
+
+    result = run_backlog(
+        project_id="demo",
+        goal="Let an agent choose the next epic.",
+        roadmap_path=roadmap,
+        selected_epic_id="epic-0001",
+        config_dir=config_dir,
+        contracts_dir=tmp_path / "contracts",
+        runs_dir=tmp_path / "runs",
+        objectives_dir=objectives_dir,
+        mode="strong-model",
+        planner_backend=FakeBacklogBackend(tmp_path),
+        objective_planner_backend=FakeObjectivePlannerBackend(),
+        executor=FakeExecutor(),
+    )
+
+    assert result.generated_objective_path == result.objective_path
+    assert result.generated_objective_path is not None and result.generated_objective_path.exists()
+    assert result.evidence_manifest is not None
+    assert result.evidence_manifest.backlog_plan_path == result.backlog_plan_path
+    assert result.evidence_manifest.generated_objective_path == result.generated_objective_path
     assert result.evidence_manifest.contract_plan_path == result.contract_plan_path
     assert result.evidence_manifest.release_summary_path == result.release_summary_path
     assert result.evidence_manifest.release_metrics_path == result.release_metrics_path
