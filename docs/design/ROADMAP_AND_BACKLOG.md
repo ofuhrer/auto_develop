@@ -92,18 +92,19 @@ Current implementation status:
 - Executor prompts inject selected external context from repo-state files.
 - Context size is bounded by `budget.max_context_chars_per_task`.
 - Evidence bundles persist `model_call_metadata.json` with prompt/output character counts.
+- `agent-loop doctor` reports repo cleanliness, stale worktrees, release-branch collisions, and routing warnings before a governed release starts.
 - `agent-loop status` reads existing evidence bundles and reports recent run summaries.
 - `agent-loop run-release` executes existing contracts from explicit `--contract` arguments or `repo_state/<project>/release_plan.yaml`.
 - Parallel release mode builds a dynamic execution DAG from explicit dependencies and file-overlap dependencies, submits ready tasks concurrently, and schedules newly unblocked tasks as results arrive.
 - Release runs use an orchestrator-owned integration branch by default (`feature/<release>`); accepted task branches merge into that feature branch before optional final merge or push.
 - `agent-loop run-release` writes an activity-oriented multiplexed `release.log` for monitoring with `tail -f`, appends a final release summary, and preserves full raw agent streams in `release.raw.log`.
-- Release runs write `release_metrics.json` with model-attempt, context, prompt, output, verification, diff, and changed-file metrics for cost and task-sizing analysis.
+- Release runs write `release_metrics.json`, `release_budget.json`, and `release_tuning.md`; the budget ledger records model-attempt, context, prompt, output, verification, diff, and changed-file metrics, while the tuning report turns those signals into next-run routing and task-sizing guidance.
 - Release runs write a `release_review.md` artifact.
 - Release runs fail fast when the configured project worktree root contains stale worktrees or selected task branches already exist.
 - Release task worktrees and merged branches are cleaned up by default unless debug artifact retention is requested; accepted unfinalized worktrees, unmerged accepted branches, and failed-finalization branches are preserved.
 - Manual recovery is supported by `agent-loop cleanup`, which dry-runs by default and can remove stale release worktrees plus `agent/<release>/*` branches with `--force`.
 - Release queues classify allowed-file overlap; minor overlap becomes a dependency, broad overlap blocks parallel mode, and exact same concrete-file overlap is rejected.
-- Project configs support `model_roles` and `model_routing` for cheap-worker and stronger-model task execution routing. The default example configs avoid unsupported worker primaries observed in closed-loop testing and route workers to `gpt-5.4-mini` by default.
+- Project configs support `model_roles` and `model_routing` for cheap-worker and stronger-model task execution routing. The default example configs avoid unsupported worker primaries observed in closed-loop testing, route workers to `gpt-5.4-mini` by default, and give `doctor` a way to flag wasteful or unsupported routing before release execution.
 - Executor roles support `fallback_models`; attempts are bounded by `budget.max_executor_attempts_per_task`.
 - Repeated-failure diagnosis writes `executor_attempts.json` and `failure_diagnosis.yaml` after bounded executor or verification failures; the default backend is deterministic and the diagnosis step is exposed through a replaceable seam for stronger review.
 - `agent-loop plan-release` writes deterministic contract planning scaffolds from release objectives and can execute a configured planner backend with `--execute-planner`, preserving planner stdout/stderr/metadata paths in the contract plan.
