@@ -55,6 +55,30 @@ executor:
   model: gpt-5.3-codex-spark
   max_walltime_minutes: 25
 
+model_roles:
+  worker:
+    type: codex_cli
+    model: gpt-5.3-codex-spark
+    max_walltime_minutes: 25
+  reviewer:
+    type: codex_cli
+    model: gpt-5.5
+    max_walltime_minutes: 20
+  planner:
+    type: codex_cli
+    model: gpt-5.5
+    max_walltime_minutes: 20
+
+model_routing:
+  default_role: worker
+  task_type_roles:
+    scientific_validation: reviewer
+    release_preparation: reviewer
+  budget_class_roles:
+    L: reviewer
+    XL: planner
+  escalation_role: reviewer
+
 verification_profiles:
   default:
     commands:
@@ -218,6 +242,10 @@ agent-loop run-task \
   --contract contracts/ad-0001.yaml \
   --push-on-accept
 
+agent-loop run-release \
+  --project auto_develop \
+  --release sprint-0
+
 agent-loop status
 
 agent-loop status --limit 5
@@ -252,6 +280,18 @@ By default, the command does not merge changes or create a pull request. Autonom
 - `--push-on-accept`: commit, merge, and push the base branch to `origin`.
 
 Merge conflicts currently stop the command and leave the base repository in Git's conflict state for follow-up resolution.
+
+### `run-release` Flow
+
+`agent-loop run-release` is the first release-level orchestration path:
+
+1. Load and validate `ProjectConfig`.
+2. Resolve an ordered contract queue from explicit `--contract` arguments or `repo_state/<project>/release_plan.yaml`.
+3. Run each contract through the existing `run-task` state machine.
+4. Stop after the first non-accepted task unless `--continue-on-failure` is set.
+5. Persist `runs/<release-run-id>/release_summary.json`.
+
+This command executes already-defined contracts. It does not yet use a strong model to generate contracts from a release objective.
 
 `agent-loop status` reads existing evidence bundles and prints recent run summaries with run ID, task ID, decision, and bundle path.
 

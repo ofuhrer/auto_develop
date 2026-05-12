@@ -36,15 +36,46 @@ class Budget(StrictModel):
     max_context_chars_per_task: int = Field(default=30_000, gt=0)
 
 
+class TaskType(StrEnum):
+    CODE_ONLY = "code_only"
+    DOCUMENTATION = "documentation"
+    BENCHMARK = "benchmark"
+    SCIENTIFIC_VALIDATION = "scientific_validation"
+    RELEASE_PREPARATION = "release_preparation"
+
+
+class ModelRouting(StrictModel):
+    default_role: str = Field(default="worker", min_length=1)
+    task_type_roles: dict[TaskType, str] = Field(default_factory=dict)
+    budget_class_roles: dict[str, str] = Field(default_factory=dict)
+    escalation_role: str | None = None
+
+
 class ProjectConfig(StrictModel):
     project_id: str = Field(min_length=1)
     repo_path: Path
     default_base_branch: str = Field(min_length=1)
     worktree_root: Path
     executor: ExecutorConfig
+    model_roles: dict[str, ExecutorConfig] = Field(default_factory=dict)
+    model_routing: ModelRouting = Field(default_factory=ModelRouting)
     verification_profiles: dict[str, VerificationProfile] = Field(min_length=1)
     budget: Budget
     repo_state_path: Path | None = None
+
+    @model_validator(mode="after")
+    def model_routing_roles_must_exist(self) -> "ProjectConfig":
+        available_roles = set(self.model_roles)
+        referenced_roles = {self.model_routing.default_role}
+        referenced_roles.update(self.model_routing.task_type_roles.values())
+        referenced_roles.update(self.model_routing.budget_class_roles.values())
+        if self.model_routing.escalation_role:
+            referenced_roles.add(self.model_routing.escalation_role)
+
+        missing_roles = sorted(referenced_roles - available_roles)
+        if missing_roles and self.model_roles:
+            raise ValueError(f"model routing references undefined roles: {', '.join(missing_roles)}")
+        return self
 
 
 class ReleaseObjective(StrictModel):
@@ -53,6 +84,20 @@ class ReleaseObjective(StrictModel):
     objective: str = Field(min_length=1)
     non_goals: list[str] = Field(default_factory=list)
     acceptance_criteria: list[str] = Field(min_length=1)
+
+
+class ReleasePlan(StrictModel):
+    release_id: str = Field(min_length=1)
+    active_objective: str = Field(min_length=1)
+    current_tasks: list[str] = Field(default_factory=list)
+    next_steps: list[str] = Field(default_factory=list)
+
+    @field_validator("current_tasks")
+    @classmethod
+    def current_tasks_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("current task IDs must not be empty")
+        return values
 
 
 class VerificationSpec(StrictModel):
@@ -71,14 +116,6 @@ class VerificationSpec(StrictModel):
         if not self.commands and not self.profile:
             raise ValueError("verification must define commands or profile")
         return self
-
-
-class TaskType(StrEnum):
-    CODE_ONLY = "code_only"
-    DOCUMENTATION = "documentation"
-    BENCHMARK = "benchmark"
-    SCIENTIFIC_VALIDATION = "scientific_validation"
-    RELEASE_PREPARATION = "release_preparation"
 
 
 class RemoteDispatch(StrictModel):

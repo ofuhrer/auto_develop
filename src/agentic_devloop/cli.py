@@ -8,6 +8,7 @@ from pathlib import Path
 from agentic_devloop import __version__
 from agentic_devloop.config import ProjectConfigError, load_project_config
 from agentic_devloop.orchestrator import run_task
+from agentic_devloop.release import run_release
 from agentic_devloop.status import load_run_summaries
 
 
@@ -85,6 +86,65 @@ def build_parser() -> argparse.ArgumentParser:
         help="Commit message to use when committing accepted task changes.",
     )
 
+    run_release_parser = subparsers.add_parser(
+        "run-release",
+        help="Run an ordered release task queue from contracts.",
+    )
+    run_release_parser.add_argument("--project", required=True, help="Project identifier.")
+    run_release_parser.add_argument("--release", required=True, help="Release identifier.")
+    run_release_parser.add_argument(
+        "--contract",
+        action="append",
+        dest="contracts",
+        help="Contract path to run, in order. May be passed multiple times.",
+    )
+    run_release_parser.add_argument(
+        "--config-dir",
+        default="configs",
+        help="Directory containing project config YAML files.",
+    )
+    run_release_parser.add_argument(
+        "--contracts-dir",
+        default="contracts",
+        help="Directory containing task contract YAML files.",
+    )
+    run_release_parser.add_argument(
+        "--runs-dir",
+        default="runs",
+        help="Directory where run evidence should be written.",
+    )
+    run_release_parser.add_argument(
+        "--verification-timeout-seconds",
+        type=int,
+        default=600,
+        help="Timeout for each verification command.",
+    )
+    run_release_parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="Allow creating worktrees when the base repository has uncommitted changes.",
+    )
+    run_release_parser.add_argument(
+        "--commit-on-accept",
+        action="store_true",
+        help="Commit accepted task changes in task worktrees.",
+    )
+    run_release_parser.add_argument(
+        "--merge-on-accept",
+        action="store_true",
+        help="Commit accepted task changes and merge task branches into the base branch.",
+    )
+    run_release_parser.add_argument(
+        "--push-on-accept",
+        action="store_true",
+        help="Commit, merge, and push accepted task changes to origin.",
+    )
+    run_release_parser.add_argument(
+        "--continue-on-failure",
+        action="store_true",
+        help="Continue running remaining contracts after a task is not accepted.",
+    )
+
     status_parser = subparsers.add_parser("status", help="Show orchestrator status.")
     status_parser.add_argument(
         "--runs-dir",
@@ -146,6 +206,31 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(_task_run_result(result), indent=2))
         return 0
 
+    if args.command == "run-release":
+        try:
+            result = run_release(
+                project_id=args.project,
+                release_id=args.release,
+                contract_paths=[Path(path) for path in args.contracts] if args.contracts else None,
+                config_dir=Path(args.config_dir),
+                contracts_dir=Path(args.contracts_dir),
+                runs_dir=Path(args.runs_dir),
+                verification_timeout_seconds=args.verification_timeout_seconds,
+                allow_dirty=args.allow_dirty,
+                commit_on_accept=args.commit_on_accept,
+                merge_on_accept=args.merge_on_accept,
+                push_on_accept=args.push_on_accept,
+                stop_on_failure=not args.continue_on_failure,
+                progress=_print_progress,
+            )
+        except KeyboardInterrupt:
+            parser.exit(130, "\ninterrupted: run-release stopped before completion\n")
+        except Exception as error:
+            parser.exit(2, f"error: {error}\n")
+
+        print(json.dumps(_release_run_result(result), indent=2))
+        return 0
+
     if args.command == "status":
         summaries = load_run_summaries(Path(args.runs_dir), limit=args.limit)
         if not summaries:
@@ -171,6 +256,16 @@ def _task_run_result(result) -> dict[str, object]:
         output["merged"] = result.finalize.merged
         output["pushed"] = result.finalize.pushed
     return output
+
+
+def _release_run_result(result) -> dict[str, object]:
+    return {
+        "release_id": result.release_id,
+        "run_id": result.run_id,
+        "summary_path": str(result.summary_path),
+        "decision": result.decision,
+        "tasks": [_task_run_result(task_result) for task_result in result.task_results],
+    }
 
 
 def _print_progress(message: str) -> None:

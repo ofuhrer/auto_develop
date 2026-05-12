@@ -108,6 +108,8 @@ cheap deterministic checks first
 -> frontier model only for planning, review, or failure diagnosis
 ```
 
+Current implementation supports configurable task execution roles through `model_roles` and `model_routing`. Release-level planning, strong-model review, and failure diagnosis are still explicit future control points rather than active automated calls.
+
 ## Context Controls
 
 Project state must be externalized. Do not keep long-lived state primarily inside model conversation history.

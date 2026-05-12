@@ -19,6 +19,7 @@ from agentic_devloop.git_state import changed_files as git_changed_files
 from agentic_devloop.git_state import diff_patch
 from agentic_devloop.models import (
     Decision,
+    ExecutorConfig,
     ExecutorResult,
     ProjectConfig,
     Reviewer,
@@ -112,8 +113,9 @@ def run_task(
         verification_results=[],
     )
 
-    selected_executor = executor or _executor_for_config(config)
-    _report(progress, f"running executor: {config.executor.type} model={config.executor.model}")
+    executor_config = executor_config_for_task(config, task)
+    selected_executor = executor or _executor_for_config(executor_config)
+    _report(progress, f"running executor: {executor_config.type} model={executor_config.model}")
     executor_result = selected_executor.run(
         prompt_path=prompt_path,
         worktree_path=worktree_path,
@@ -252,10 +254,22 @@ def run_task(
     )
 
 
-def _executor_for_config(config: ProjectConfig) -> ExecutorProtocol:
-    if config.executor.type != "codex_cli":
-        raise ValueError(f"unsupported executor type: {config.executor.type}")
-    return CodexExecutor(config.executor)
+def executor_config_for_task(config: ProjectConfig, task: TaskContract) -> ExecutorConfig:
+    role = config.model_routing.budget_class_roles.get(task.budget_class)
+    if role is None:
+        role = config.model_routing.task_type_roles.get(task.task_type)
+    if role is None:
+        role = config.model_routing.default_role
+
+    if role in config.model_roles:
+        return config.model_roles[role]
+    return config.executor
+
+
+def _executor_for_config(executor_config: ExecutorConfig) -> ExecutorProtocol:
+    if executor_config.type != "codex_cli":
+        raise ValueError(f"unsupported executor type: {executor_config.type}")
+    return CodexExecutor(executor_config)
 
 
 def _verification_commands(config: ProjectConfig, task: TaskContract) -> list[str]:

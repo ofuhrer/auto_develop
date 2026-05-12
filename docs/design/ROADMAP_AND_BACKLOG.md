@@ -93,6 +93,8 @@ Current implementation status:
 - Context size is bounded by `budget.max_context_chars_per_task`.
 - Evidence bundles persist `model_call_metadata.json` with prompt/output character counts.
 - `agent-loop status` reads existing evidence bundles and reports recent run summaries.
+- `agent-loop run-release` executes an ordered set of existing contracts from explicit `--contract` arguments or `repo_state/<project>/release_plan.yaml`.
+- Project configs support `model_roles` and `model_routing` for cheap-worker and stronger-model task execution routing.
 - Strong-model call accounting and repeated-failure diagnosis are not yet implemented.
 
 ## Phase 3: Scientific Verification and Distributed Execution
@@ -142,7 +144,7 @@ Current implementation status:
 - Evidence bundles persist `scientific_review.yaml`.
 - Benchmark tasks or benchmark-like file changes persist `benchmark_delta.json`.
 - Remote dispatch requests persist `remote_dispatch.yaml` with `declared_not_executed` status.
-- Balfrin execution, remote artifact collection, local/open model roles, and PR automation are not yet implemented.
+- Balfrin execution, remote artifact collection, local/open runtime adapters, strong-model planning, and PR automation are not yet implemented.
 
 ## Critical Path
 

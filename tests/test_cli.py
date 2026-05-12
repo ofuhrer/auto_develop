@@ -42,3 +42,14 @@ def test_run_task_command_is_registered(capsys) -> None:
     assert error.value.code == 0
     assert "--contract" in captured.out
     assert "--push-on-accept" in captured.out
+
+
+def test_run_release_command_is_registered(capsys) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["run-release", "--help"])
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 0
+    assert "--release" in captured.out
+    assert "--continue-on-failure" in captured.out

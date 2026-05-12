@@ -57,7 +57,7 @@ The v1 loop should reduce manual orchestration without allowing agent drift, tas
 
 ## Current Implementation
 
-The repo now contains a minimal executable loop behind `agent-loop run-task`.
+The repo now contains a minimal executable loop behind `agent-loop run-task` and a release queue runner behind `agent-loop run-release`.
 
 Implemented:
 
@@ -76,11 +76,15 @@ Implemented:
 - Task-type verification profiles for documentation, code, benchmark, scientific validation, and release preparation.
 - Scientific guardrails for fixture and tolerance changes.
 - Benchmark and remote-dispatch evidence metadata.
+- Ordered release execution from explicit contracts or `repo_state/<project>/release_plan.yaml`.
+- Role-based executor model routing via `model_roles` and `model_routing`.
+- Release-level summary files for multi-task runs.
 
 Not yet completed:
 
 - Automated merge-conflict repair.
 - Strong-model call accounting.
+- Strong-model release planning and automatic contract generation.
 - Repeated-failure diagnosis beyond deterministic escalation.
 - Actual Balfrin remote execution and artifact collection.
 - A real synthetic run against `rust_rockfall`.
