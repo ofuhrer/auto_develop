@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from agentic_devloop import __version__
@@ -100,7 +101,10 @@ def main(argv: list[str] | None = None) -> int:
                 runs_dir=Path(args.runs_dir),
                 verification_timeout_seconds=args.verification_timeout_seconds,
                 allow_dirty=args.allow_dirty,
+                progress=_print_progress,
             )
+        except KeyboardInterrupt:
+            parser.exit(130, "\ninterrupted: run-task stopped before final evidence collection\n")
         except Exception as error:
             parser.exit(2, f"error: {error}\n")
 
@@ -123,3 +127,7 @@ def _task_run_result(result) -> dict[str, str]:
         "decision": result.decision.decision,
         "rationale": result.decision.rationale,
     }
+
+
+def _print_progress(message: str) -> None:
+    print(f"[agent-loop] {message}", file=sys.stderr, flush=True)

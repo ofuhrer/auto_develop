@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 from agentic_devloop.config import load_project_config
 from agentic_devloop.evidence import EvidenceCollector, write_review_decision
@@ -59,6 +59,7 @@ def run_task(
     verification_timeout_seconds: int = 600,
     allow_dirty: bool = False,
     now: datetime | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> TaskRunResult:
     config = load_project_config(project_id, config_dir, validate_repo=True)
     task = load_yaml_model(contract_path, TaskContract)
@@ -69,6 +70,8 @@ def run_task(
     scratch_dir = run_root / "_scratch"
     bundle_path = run_root / "evidence"
 
+    _report(progress, f"run_id={run_id}")
+    _report(progress, f"creating worktree: {worktree_path}")
     started_at = datetime.now(UTC)
     create_worktree(
         repo_path=config.repo_path,
@@ -78,6 +81,7 @@ def run_task(
         allow_dirty=allow_dirty,
     )
 
+    _report(progress, "writing executor prompt")
     prompt_path = write_executor_prompt(task, scratch_dir / "executor_prompt.md")
     task_run = TaskRun(
         task_id=task.task_id,
@@ -93,11 +97,13 @@ def run_task(
     )
 
     selected_executor = executor or _executor_for_config(config)
+    _report(progress, f"running executor: {config.executor.type} model={config.executor.model}")
     executor_result = selected_executor.run(
         prompt_path=prompt_path,
         worktree_path=worktree_path,
         output_dir=scratch_dir,
     )
+    _report(progress, f"executor exit_code={executor_result.exit_code}")
     if executor_result.exit_code != 0:
         verification_log_path = scratch_dir / "verification.log"
         verification_log_path.write_text(
@@ -133,6 +139,7 @@ def run_task(
             rationale=f"Executor failed with exit code {executor_result.exit_code}.",
         )
         write_review_decision(bundle, decision)
+        _report(progress, f"decision={decision.decision}")
 
         return TaskRunResult(
             run_id=run_id,
@@ -141,12 +148,19 @@ def run_task(
             decision=decision,
         )
 
+    _report(progress, f"running verification: {len(task.verification.commands)} command(s)")
     verification_results = VerificationRunner(timeout_seconds=verification_timeout_seconds).run(
         commands=task.verification.commands,
         worktree_path=worktree_path,
         output_dir=scratch_dir,
     )
+    _report(
+        progress,
+        "verification exit_codes="
+        + ",".join(str(result.exit_code) for result in verification_results),
+    )
 
+    _report(progress, "collecting evidence")
     current_diff = diff_patch(worktree_path)
     current_changed_files = git_changed_files(worktree_path)
     task_run = task_run.model_copy(
@@ -178,6 +192,7 @@ def run_task(
         verification_exit_codes=[result.exit_code for result in verification_results],
     )
     write_review_decision(bundle, decision)
+    _report(progress, f"decision={decision.decision}")
 
     return TaskRunResult(
         run_id=run_id,
@@ -195,3 +210,8 @@ def _executor_for_config(config: ProjectConfig) -> ExecutorProtocol:
 
 def _review_line_count(diff: str) -> int:
     return sum(1 for line in diff.splitlines() if line.startswith(("+", "-")))
+
+
+def _report(progress: Callable[[str], None] | None, message: str) -> None:
+    if progress is not None:
+        progress(message)
