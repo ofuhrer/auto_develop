@@ -1,0 +1,49 @@
+task_id: governor-repair-policy-seam
+release_id: governor-service-boundaries
+title: Add bounded repair decision policy
+task_type: code_only
+budget_class: M
+
+objective: >
+  Create `agentic_devloop.repair_policy` with typed failure categories and
+  decisions for planner schema drift, verification environment drift, flaky
+  verification, contract-contained worker failures, contract boundary
+  violations, missing credentials, unsafe policy expansion, and exhausted retry
+  budget. Add focused tests for retry/stop classification and decision metadata.
+
+allowed_files:
+  - src/agentic_devloop/repair_policy.py
+  - src/agentic_devloop/models.py
+  - tests/test_repair_policy.py
+
+forbidden_changes:
+  - Do not replace existing conflict repair implementation.
+  - Do not modify executor, release, or orchestrator retry loops in this task.
+  - Do not make network calls or invoke coding agents from RepairPolicy.
+  - Do not weaken existing failure diagnosis evidence.
+  - Do not broaden task contract file permissions.
+
+required_evidence:
+  - git diff
+  - focused RepairPolicy pytest output
+  - model validation pytest output if shared models are added
+  - changed-files list
+
+verification:
+  profile: code_only
+
+stop_conditions:
+  - Stop if repair decisions require executing repair commands rather than returning typed policy decisions.
+  - Stop if classification cannot distinguish retryable contract-contained failures from unsafe policy expansion or missing credentials.
+  - Stop if implementation requires edits to release execution control flow outside the allowed files.
+  - Stop if the policy would silently swallow failures instead of exposing stop reasons.
+
+non_goals:
+  - Do not implement planner output normalization.
+  - Do not implement verification environment repair.
+  - Do not add multi-attempt autonomous repair loops.
+  - Do not change current release failure behavior.
+
+scientific_assumptions:
+  - Not applicable; developer tooling task.
+

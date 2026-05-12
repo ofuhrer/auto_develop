@@ -1,0 +1,61 @@
+task_id: governor-loop-one-epic-service
+release_id: governor-service-boundaries
+title: Extract one-epic GovernorLoop service
+task_type: code_only
+budget_class: L
+
+objective: >
+  Add `agentic_devloop.governor` with a GovernorLoop or equivalent service that
+  performs the current one-epic run_backlog flow: plan backlog, select the
+  requested or planner-selected epic, ensure or reuse objective YAML, invoke
+  run_objective, build the evidence manifest, and optionally update StateStore.
+  Refactor backlog.run_backlog to delegate to the service without changing
+  public return data or CLI JSON output.
+
+allowed_files:
+  - src/agentic_devloop/governor.py
+  - src/agentic_devloop/backlog.py
+  - src/agentic_devloop/cli.py
+  - tests/test_backlog.py
+  - tests/test_cli.py
+  - tests/test_objective.py
+  - tests/test_release.py
+
+forbidden_changes:
+  - Do not change user-facing CLI flags, required arguments, or JSON keys for plan-backlog, run-backlog, run-objective, or run-release.
+  - Do not alter release scheduling, dependency analysis, worktree safety, finalization, or merge behavior.
+  - Do not implement N-epic looping in this task.
+  - Do not change planner prompts except where necessary to preserve existing text after extraction.
+  - Do not edit documentation or repo-state notes in this task.
+  - Do not rely on developer local Git state in tests.
+
+required_evidence:
+  - git diff
+  - focused GovernorLoop service pytest output
+  - affected backlog, CLI, objective, and release pytest output
+  - CLI help smoke output for affected commands
+  - changed-files list
+
+verification:
+  profile: code_only
+
+stop_conditions:
+  - Stop if preserving run-backlog return fields requires changing CLI output schemas.
+  - Stop if the service extraction touches release merge or finalization internals outside the allowed files.
+  - Stop if N-epic loop behavior becomes necessary to satisfy tests.
+  - Stop if StateStore integration would require mutating real repo_state/ files during tests.
+  - Stop if existing run-objective or run-release flows regress for reasons unrelated to the extraction.
+
+non_goals:
+  - Do not implement continuous multi-epic looping.
+  - Do not add new CLI commands or flags.
+  - Do not implement repair strategies beyond consuming the RepairPolicy seam where useful.
+  - Do not rewrite release orchestration.
+
+scientific_assumptions:
+  - Not applicable; developer tooling task.
+
+depends_on:
+  - governor-state-store-seam
+  - governor-repair-policy-seam
+

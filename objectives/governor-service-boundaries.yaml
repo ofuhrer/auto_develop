@@ -1,0 +1,22 @@
+release_id: governor-service-boundaries
+title: Extract governor loop service boundaries for multi-epic autonomous execution
+objective: Create explicit service boundaries for the upcoming multi-epic governor
+  loop by introducing focused GovernorLoop, StateStore, and RepairPolicy seams while
+  moving backlog/objective handoff logic out of the CLI path into application services.
+  Keep behavior compatible with existing run-backlog and run-objective flows.
+non_goals:
+- Do not execute implementation workers while planning the backlog.
+- Do not broaden the selected epic beyond its acceptance criteria.
+acceptance_criteria:
+- A GovernorLoop or equivalent application service owns top-level one-epic loop orchestration
+  without changing current CLI behavior.
+- A StateStore or equivalent persistence seam reads and writes backlog state, completed/blocked/active
+  epics, and recent run summary references through typed APIs.
+- A RepairPolicy or equivalent seam classifies contract-contained subsystem failures
+  and exposes retry/stop decisions without implementing every repair strategy yet.
+- Existing plan-backlog, run-backlog, run-objective, and run-release tests pass unchanged
+  or are updated only for intentional service extraction behavior.
+- Focused tests cover service behavior using temporary repositories or filesystem
+  fixtures, not developer local Git state.
+- Documentation and repo-state notes distinguish implemented service seams from planned
+  multi-epic looping.

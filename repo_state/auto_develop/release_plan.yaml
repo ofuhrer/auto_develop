@@ -1,12 +1,13 @@
-release_id: run-backlog-autonomous-loop
-active_objective: Implement one-step autonomous backlog execution by chaining governor planning into objective execution.
+release_id: governor-service-boundaries
+active_objective: Extract explicit GovernorLoop, StateStore, and RepairPolicy service boundaries so multi-epic autonomous execution can grow without overloading backlog.py, release.py, orchestrator.py, and cli.py.
 current_tasks:
-  - run-backlog-cli-skeleton
-  - run-backlog-orchestrator-chain
-  - run-backlog-evidence-manifest
-  - run-backlog-failure-tests
-  - run-backlog-user-docs
+  - governor-state-store-seam
+  - governor-repair-policy-seam
+  - governor-loop-one-epic-service
+  - governor-service-docs-and-state-notes
 next_steps:
-  - Run doctor for release run-backlog-autonomous-loop.
-  - Run the release queue sequentially first; parallel mode can be tested after overlap behavior is clear.
+  - Run doctor for release governor-service-boundaries.
+  - Run governor-state-store-seam and governor-repair-policy-seam first; they are independent and can run in parallel if overlap analysis permits.
+  - Run governor-loop-one-epic-service after both seams are accepted.
+  - Run governor-service-docs-and-state-notes last to document only behavior that was actually implemented.
   - After the release, update backlog_state.yaml, release_plan.yaml, and roadmap/backlog docs from release evidence.

@@ -1,13 +1,16 @@
 active_goal: Enable a freshly onboarded auto_develop checkout and target repository to run a high-level autonomous development loop for the next N highest-value epics, stopping only for major problems after autonomous repair is exhausted.
 governor_mode: autonomous_first
-current_focus: multi-epic-governor-loop
-active_epic: null
+current_focus: governor-loop-service-boundaries
+active_epic: governor-loop-service-boundaries
 completed_epics:
   - release-governor-1
   - adaptive-model-hierarchy
   - run-backlog
 blocked_epics: []
 candidate_epics:
+  - id: governor-loop-service-boundaries
+    title: Extract governor loop service boundaries for multi-epic autonomous execution.
+    rationale: Architecture review and backlog planning selected this as the enabling increment before adding the N-epic governor loop.
   - id: multi-epic-run-governor
     title: Run the next N highest-priority epics autonomously.
     rationale: Converts one-epic run-backlog into the intended high-level development loop.
@@ -25,6 +28,8 @@ candidate_epics:
     rationale: The target operator experience is minimal setup followed by a high-level epic-count loop.
 last_reviewed: 2026-05-12
 notes:
+  - The next selected epic is governor-loop-service-boundaries; it should create GovernorLoop, StateStore, and RepairPolicy seams before expanding the product-facing multi-epic loop.
+  - Service extraction is an enabling increment for autonomous roadmap-driven execution and repair, not cosmetic cleanup.
   - Human review is an escalation boundary, not a routine planning gate.
   - The governor should read release artifacts, metrics, budget ledgers, tuning reports, and validation outputs before choosing the next epic.
   - The system should stop only for major problems such as exhausted autonomous repair, missing credentials, unsafe policy expansion, destructive operations not delegated, or no actionable work.
