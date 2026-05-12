@@ -284,6 +284,47 @@ def test_run_backlog_wires_selected_epic_and_release_flags(monkeypatch, capsys, 
     assert '"release_id": "run-backlog-20260512"' in captured.out
 
 
+def test_run_backlog_uses_planner_selected_epic_when_epic_id_is_omitted(monkeypatch, capsys, tmp_path) -> None:
+    seen_kwargs: dict[str, object] = {}
+    result = SimpleNamespace(
+        selected_epic_id="planner-selected",
+        plan_path=tmp_path / "runs" / "backlog_plan.json",
+        objective_path=tmp_path / "objectives" / "planner-selected.yaml",
+        release=SimpleNamespace(
+            release_id="planner-selected-20260512",
+            run_id="run-1",
+            summary_path=tmp_path / "runs" / "summary.json",
+            log_path=tmp_path / "runs" / "release.log",
+            decision="accepted",
+            task_results=[],
+        ),
+    )
+
+    def fake_run_backlog(**kwargs):
+        seen_kwargs.update(kwargs)
+        return result
+
+    monkeypatch.setattr(cli_module, "run_backlog", fake_run_backlog)
+    monkeypatch.setattr(cli_module, "_codex_backlog_planner_backend", lambda **kwargs: object())
+
+    exit_code = main(
+        [
+            "run-backlog",
+            "--project",
+            "demo",
+            "--goal",
+            "Move toward fully autonomous roadmap-driven development",
+            "--execute-planner",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert seen_kwargs["selected_epic_id"] is None
+    assert '"selected_epic_id": "planner-selected"' in captured.out
+
+
 def test_run_backlog_requires_execute_planner(capsys) -> None:
     with pytest.raises(SystemExit) as error:
         main(

@@ -56,3 +56,23 @@
   `merged: true` and `commit_hash: null` because the diff was already present
   on the integration branch. This edge case is acceptable for dependency
   tracking but should be represented more clearly in release review output.
+
+## Architectural review: consolidation needed
+
+- `release.py`, `orchestrator.py`, `backlog.py`, `cli.py`, and `models.py` are
+  carrying too many responsibilities for the intended multi-epic governor.
+- The next architecture increment should extract service boundaries before
+  adding more workflow behavior:
+  - `GovernorLoop` for N-epic execution, stopping criteria, retry policy, and
+    repo-state refresh.
+  - `StateStore` for backlog state, active releases, completed/blocked epics,
+    run summaries, and known learnings.
+  - `RepairPolicy` for planner schema repair, verification-environment repair,
+    flaky-test retry, narrow merge-conflict repair, and final escalation.
+  - `ReleaseScheduler`, `ReleaseReporter`, `ReleaseFinalizer`, and
+    `ReleaseMetrics` from `release.py`.
+  - Task execution, evidence/review, finalization, and repair seams from
+    `orchestrator.py`.
+- This is not cosmetic refactoring. Without these seams, the high-level
+  autonomous loop will continue to accumulate special cases in modules that
+  already mix policy, IO, subprocesses, Git state, logs, and artifacts.

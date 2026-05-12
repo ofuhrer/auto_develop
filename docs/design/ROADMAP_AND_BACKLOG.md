@@ -214,6 +214,14 @@ Remaining Phase 4 work:
 7. Add a bootstrap/onboarding command or checklist that turns a freshly cloned target repo plus one or two prompts into the required config, repo-state memory, objective/backlog directories, and initial doctor checks.
 8. Improve evidence for failed verification by preserving command stdout/stderr and concise failure excerpts, not just exit codes.
 
+Architecture consolidation needed before this should grow much further:
+
+1. Split `release.py` into release coordination, scheduling, reporting, finalization, metrics, and dependency analysis.
+2. Split `orchestrator.py` into task execution, evidence/review, model routing, finalization, and repair.
+3. Move backlog planning, objective handoff, and multi-epic governor control into separate services instead of growing `backlog.py`.
+4. Move CLI backend construction into application-service factories.
+5. Split schema models by domain so config, contracts, runtime state, evidence, and governor state can evolve independently.
+
 ## Critical Path
 
 ### 1. Task Contract Schema

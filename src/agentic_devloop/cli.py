@@ -150,7 +150,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Select one backlog epic and execute it through objective orchestration.",
     )
     run_backlog_parser.add_argument("--project", required=True, help="Project identifier.")
-    run_backlog_parser.add_argument("--epic-id", required=True, help="Backlog epic identifier to execute.")
+    run_backlog_parser.add_argument(
+        "--epic-id",
+        help="Backlog epic identifier to execute. Omit to use the planner-selected epic.",
+    )
     run_backlog_parser.add_argument("--goal", required=True, help="Repository goal used to prioritize epics.")
     run_backlog_parser.add_argument(
         "--roadmap",

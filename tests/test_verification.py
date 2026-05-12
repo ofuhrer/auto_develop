@@ -16,7 +16,11 @@ def test_verification_runner_records_output(tmp_path) -> None:
     assert results[0].exit_code == 0
     assert results[0].stdout_path is not None
     assert results[0].stdout_path.read_text(encoding="utf-8") == "ok"
-    assert (tmp_path / "verification" / "verification.log").exists()
+    log = (tmp_path / "verification" / "verification.log").read_text(encoding="utf-8")
+    assert "stdout_path=" in log
+    assert "stderr_path=" in log
+    assert "stdout_excerpt:\nok" in log
+    assert "stderr_excerpt:\n<empty>" in log
 
 
 def test_verification_runner_stops_on_failure(tmp_path) -> None:
@@ -30,3 +34,18 @@ def test_verification_runner_stops_on_failure(tmp_path) -> None:
 
     assert len(results) == 1
     assert results[0].exit_code == 7
+
+
+def test_verification_runner_records_failure_excerpts(tmp_path) -> None:
+    runner = VerificationRunner(timeout_seconds=5)
+
+    results = runner.run(
+        commands=["printf failure-out; printf failure-err >&2; exit 3"],
+        worktree_path=tmp_path,
+        output_dir=tmp_path / "verification",
+    )
+
+    log = (tmp_path / "verification" / "verification.log").read_text(encoding="utf-8")
+    assert results[0].exit_code == 3
+    assert "stdout_excerpt:\nfailure-out" in log
+    assert "stderr_excerpt:\nfailure-err" in log

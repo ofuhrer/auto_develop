@@ -4,7 +4,7 @@ These documents describe architecture, implementation strategy, and design risks
 
 Read in this order:
 
-1. [Architecture](ARCHITECTURE.md): core model, autonomy policy, execution state machine, context controls, and scientific safeguards.
+1. [Architecture](ARCHITECTURE.md): core model, autonomy policy, execution state machine, context controls, and validation safeguards.
 2. [Technical Specification](TECHNICAL_SPECIFICATION.md): schemas, CLI behavior, evidence layout, interfaces, and security assumptions.
 3. [Roadmap and Backlog](ROADMAP_AND_BACKLOG.md): Phase 1-3 implementation status, critical path, edge cases, and backlog.
 4. [Critical Assessment](CRITICAL_ASSESSMENT.md): known risks, simplifications, and decisions to revisit.

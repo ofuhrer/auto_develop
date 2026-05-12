@@ -6,6 +6,9 @@ from agentic_devloop.models import CommandResult
 from agentic_devloop.process import run_process
 
 
+MAX_LOG_EXCERPT_CHARS = 4000
+
+
 class VerificationRunner:
     def __init__(self, *, timeout_seconds: int = 600) -> None:
         self.timeout_seconds = timeout_seconds
@@ -48,6 +51,10 @@ class VerificationRunner:
                 f"exit_code={result.exit_code}\n"
                 f"timed_out={result.timed_out}\n"
                 f"duration_seconds={result.duration_seconds:.3f}\n"
+                f"stdout_path={stdout_path}\n"
+                f"stderr_path={stderr_path}\n"
+                f"stdout_excerpt:\n{_excerpt(result.stdout)}\n"
+                f"stderr_excerpt:\n{_excerpt(result.stderr)}\n"
             )
 
             if stop_on_failure and result.exit_code != 0:
@@ -55,3 +62,12 @@ class VerificationRunner:
 
         (output_dir / "verification.log").write_text("\n".join(log_lines), encoding="utf-8")
         return results
+
+
+def _excerpt(text: str) -> str:
+    if not text:
+        return "<empty>"
+    if len(text) <= MAX_LOG_EXCERPT_CHARS:
+        return text.rstrip("\n")
+    omitted = len(text) - MAX_LOG_EXCERPT_CHARS
+    return text[:MAX_LOG_EXCERPT_CHARS].rstrip("\n") + f"\n... <truncated {omitted} chars>"

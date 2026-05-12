@@ -765,7 +765,6 @@ Selects one epic from backlog planning and executes it through the objective/rel
 ```bash
 agent-loop run-backlog \
   --project my_project \
-  --epic-id run-backlog \
   --goal "Move toward fully autonomous roadmap-driven development" \
   --mode strong-model \
   --execute-planner \
@@ -776,7 +775,7 @@ agent-loop run-backlog \
 Key options:
 
 - `--project`: project identifier.
-- `--epic-id`: backlog epic identifier that must be selected for execution.
+- `--epic-id`: optional backlog epic identifier to execute. Omit it to run the epic selected by the backlog planner.
 - `--goal`: repository goal passed to backlog planning.
 - `--roadmap`: roadmap Markdown file to analyze.
 - `--mode strong-model`: required execution mode for backlog runs.
@@ -786,7 +785,7 @@ Key options:
 Relationship to nearby commands:
 
 - `plan-backlog` selects and prioritizes epics. With `--write-objective`, it stops after writing the selected epic as an objective YAML file.
-- `run-backlog` performs backlog planning first, then selects the requested epic, reuses `objectives/<suggested_release_id>.yaml` when it already exists, or writes that objective file when it does not.
+- `run-backlog` performs backlog planning first, then selects the requested epic or the planner-selected epic, reuses `objectives/<suggested_release_id>.yaml` when it already exists, or writes that objective file when it does not.
 - `run-objective` skips backlog selection and starts from an existing objective file.
 - `run-backlog` forwards the usual release execution and finalization flags, so `--commit-on-accept`, `--merge-on-accept`, `--push-on-accept`, and `--release-finalize` still control task commits and release finalization.
 

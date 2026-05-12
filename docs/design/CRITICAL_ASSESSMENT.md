@@ -23,6 +23,27 @@ The main risk is unbounded autonomy, not autonomy itself. The system should be a
 - Cost accounting may be approximate because provider CLIs often hide token-level usage.
 - Subprocess isolation is not a real sandbox.
 - A generic adapter interface may become too abstract before two real target repositories exist.
+- The implementation currently concentrates too many responsibilities in a few large modules. `release.py` owns release coordination, scheduling, logging, summaries, metrics, cleanup, dependency analysis, and finalization. `orchestrator.py` owns task execution, model routing, verification, evidence, review, finalization, and conflict repair. This slows evolution toward a multi-epic governor.
+- The current state model is artifact-scanning plus YAML files. That is inspectable, but it is not yet an authoritative state store for active epics, completed epics, retry counts, blocked work, and governor decisions.
+- The system has diagnostics for failures, but not a general repair policy. Planner schema drift, verification-environment drift, flaky tests, and small worker bugs are still outside a unified autonomous repair/retry loop.
+- The CLI is not a thin boundary. It wires backend construction and workflow-specific behavior that should move into application services as the command set grows.
+
+## Architectural Refactoring Priorities
+
+High-priority seams:
+
+- Extract a `GovernorLoop` that owns "run the next N epics", stopping criteria, retry policy, and state refresh.
+- Extract a `StateStore` API over repo-state files, run summaries, active releases, completed/blocked epics, and known learnings.
+- Extract release scheduling, cockpit reporting, finalization, and metrics from `release.py`.
+- Extract task execution, evidence, finalization, and repair from `orchestrator.py`.
+- Add a `RepairPolicy` that maps failure categories to schema normalization, verification repair, stronger-model diagnosis, retry, or stop.
+
+Medium-priority seams:
+
+- Split `models.py` into configuration, contracts, runtime state, evidence, and governor schemas.
+- Generalize legacy `scientific_*` naming to validation terminology with compatibility aliases.
+- Move CLI backend construction into service factories.
+- Define a target-repository profile for instructions, validation policy, generated artifact rules, and finalization policy.
 
 ## Pragmatic Simplifications for v1
 
