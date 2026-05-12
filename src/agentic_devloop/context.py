@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentic_devloop.models import ContextBundle, ContextSection, ProjectConfig, TaskContract
+from agentic_devloop.security import redact_text
 
 
 STATE_FILES = [
@@ -31,7 +32,7 @@ def load_context_bundle(config: ProjectConfig, task: TaskContract) -> ContextBun
         content = path.read_text(encoding="utf-8")
         if not content.strip():
             continue
-        sections.append(ContextSection(name=name, source_path=path, content=content))
+        sections.append(ContextSection(name=name, source_path=path, content=redact_text(content)))
 
     return _select_relevant_context(ContextBundle(sections=sections), task)
 

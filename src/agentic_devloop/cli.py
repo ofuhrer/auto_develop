@@ -521,8 +521,10 @@ def _cleanup_result(result) -> dict[str, object]:
         "worktree_paths": [str(path) for path in result.worktree_paths],
         "task_branches": result.task_branches,
         "integration_branch": result.integration_branch,
+        "stale_lock_paths": [str(path) for path in getattr(result, "stale_lock_paths", [])],
         "removed_worktrees": [str(path) for path in result.removed_worktrees],
         "deleted_branches": result.deleted_branches,
+        "removed_lock_paths": [str(path) for path in getattr(result, "removed_lock_paths", [])],
         "errors": result.errors,
     }
 

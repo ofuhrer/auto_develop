@@ -218,7 +218,7 @@ def test_plan_release_can_request_strong_planning_and_write_contracts(
                 "allowed_files": ["src/agentic_devloop/planning.py"],
                 "forbidden_changes": ["Do not touch release contracts."],
                 "required_evidence": ["plan diff"],
-                "verification": {"commands": ["true"]},
+                "verification": {"profile": "default"},
                 "stop_conditions": ["Scope expands beyond the allowed file."],
             }
         ),

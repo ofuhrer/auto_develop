@@ -46,8 +46,8 @@ def analyze_scientific_changes(
         violations.append("Fixture-like files changed without explicit permission.")
     if tolerance_changes and not task.tolerance_changes_allowed:
         violations.append("Tolerance-like diff lines changed without explicit permission.")
-    if task.task_type == TaskType.SCIENTIFIC_VALIDATION and not task.scientific_assumptions:
-        violations.append("Scientific validation task has no scientific assumptions.")
+    if task.task_type in {TaskType.SCIENTIFIC_VALIDATION, TaskType.VALIDATION} and not task.validation_assumptions:
+        violations.append("Validation task has no recorded validation assumptions.")
 
     return ScientificReview(
         fixture_changes=fixture_changes,

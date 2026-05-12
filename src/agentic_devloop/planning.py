@@ -12,6 +12,7 @@ from agentic_devloop.budget import reserve_strong_model_call
 from agentic_devloop.config import load_project_config
 from agentic_devloop.models import ContractPlan, GeneratedContract, ProjectConfig, ReleaseObjective, TaskContract
 from agentic_devloop.planner_backend import PlannerBackendResult
+from agentic_devloop.security import validate_identifier
 from agentic_devloop.yaml_io import load_yaml_model, write_yaml_model
 
 
@@ -36,6 +37,7 @@ class PlannerBackend(Protocol):
 
 
 def make_plan_id(release_id: str, now: datetime | None = None) -> str:
+    validate_identifier(release_id, kind="release_id")
     timestamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%SZ")
     return f"{timestamp}_{release_id}_plan"
 
@@ -53,6 +55,7 @@ def plan_release_contracts(
     now: datetime | None = None,
 ) -> ContractPlanResult:
     objective = load_yaml_model(objective_path, ReleaseObjective)
+    validate_identifier(objective.release_id, kind="release_id")
     existing_contracts = _contracts_for_release(objective.release_id, contracts_dir)
     warnings: list[str] = []
     generated_contracts: list[GeneratedContract] = []
@@ -288,6 +291,15 @@ def validate_generated_contracts(
                 "generated contract release_id "
                 f"{suggested_contract.release_id!r} did not match plan release_id {plan.release_id!r}"
             )
+        if suggested_contract.verification.commands:
+            raise ValueError(
+                "generated contract must reference an approved verification profile instead of inline commands: "
+                f"{suggested_contract.task_id}"
+            )
+        if suggested_contract.verification.profile is None:
+            raise ValueError(
+                f"generated contract must reference an approved verification profile: {suggested_contract.task_id}"
+            )
         broad_patterns = [pattern for pattern in suggested_contract.allowed_files if _is_whole_repo_pattern(pattern)]
         if broad_patterns:
             raise ValueError(
@@ -302,9 +314,9 @@ def validate_generated_contracts(
             raise ValueError(
                 f"generated contract must include a scope or verification stop condition: {suggested_contract.task_id}"
             )
-        if suggested_contract.task_type in {"benchmark", "scientific_validation"} and not suggested_contract.non_goals:
+        if suggested_contract.task_type in {"benchmark", "scientific_validation", "validation"} and not suggested_contract.non_goals:
             raise ValueError(
-                "generated scientific or benchmark contracts must include explicit non_goals: "
+                "generated validation or benchmark contracts must include explicit non_goals: "
                 f"{suggested_contract.task_id}"
             )
         if project_config is not None:

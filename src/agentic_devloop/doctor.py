@@ -4,8 +4,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from agentic_devloop.config import load_project_config
+from agentic_devloop.git_finalize import inspect_merge_lock
 from agentic_devloop.models import ExecutorConfig, ModelAvailability, ModelCatalogEntry, ProjectConfig
 from agentic_devloop.process import run_process
+from agentic_devloop.runtime_state import read_json
 
 
 DEFAULT_MODEL_CATALOG = {
@@ -41,9 +43,11 @@ class DoctorReport:
     current_branch: str | None
     dirty_files: list[str]
     worktree_root: dict[str, object]
+    merge_lock: dict[str, object]
     verification_profiles: dict[str, list[str]]
     model_routing: dict[str, object]
     release: dict[str, object] | None
+    interrupted_runs: list[dict[str, object]] = field(default_factory=list)
     diagnostics: list[DoctorDiagnostic] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
@@ -56,9 +60,11 @@ class DoctorReport:
             "dirty_files": self.dirty_files,
             "dirty": bool(self.dirty_files),
             "worktree_root": self.worktree_root,
+            "merge_lock": self.merge_lock,
             "verification_profiles": self.verification_profiles,
             "model_routing": self.model_routing,
             "release": self.release,
+            "interrupted_runs": self.interrupted_runs,
             "diagnostics": [diagnostic.to_dict() for diagnostic in self.diagnostics],
         }
 
@@ -114,6 +120,19 @@ def run_doctor(
                 + (f" ... (+{len(worktree_entries) - 5} more)" if len(worktree_entries) > 5 else ""),
             )
         )
+    merge_lock = inspect_merge_lock(config.repo_path) if repo_is_git_repo else None
+    if merge_lock is not None and merge_lock.exists:
+        diagnostics.append(
+            DoctorDiagnostic(
+                check="merge_lock",
+                severity="warning",
+                message=(
+                    "stale merge lock detected; run cleanup --force to recover it."
+                    if merge_lock.stale
+                    else "merge lock is currently held; another finalization may still be in progress."
+                ),
+            )
+        )
 
     release = None
     if release_id is not None:
@@ -147,6 +166,17 @@ def run_doctor(
     }
     model_routing = _build_model_routing_summary(config)
     diagnostics.extend(_model_routing_diagnostics(config, model_routing["resolved_roles"]))
+    interrupted_runs = _interrupted_runs(Path("runs"), release_id=release_id)
+    if interrupted_runs:
+        diagnostics.append(
+            DoctorDiagnostic(
+                check="interrupted_runs",
+                severity="warning",
+                message="interrupted runs are still present: "
+                + ", ".join(run["run_id"] for run in interrupted_runs[:5])
+                + (f" ... (+{len(interrupted_runs) - 5} more)" if len(interrupted_runs) > 5 else ""),
+            )
+        )
 
     return DoctorReport(
         project_id=config.project_id,
@@ -161,9 +191,17 @@ def run_doctor(
             "entries": [str(path) for path in worktree_entries],
             "clean": not worktree_entries,
         },
+        merge_lock={
+            "path": str(merge_lock.path) if merge_lock is not None else None,
+            "exists": bool(merge_lock and merge_lock.exists),
+            "stale": bool(merge_lock and merge_lock.stale),
+            "pid": merge_lock.pid if merge_lock is not None else None,
+            "created_at": merge_lock.created_at if merge_lock is not None else None,
+        },
         verification_profiles=verification_profiles,
         model_routing=model_routing,
         release=release,
+        interrupted_runs=interrupted_runs,
         diagnostics=diagnostics,
     )
 
@@ -341,3 +379,26 @@ def _branch_list(repo_path: Path, *patterns: str) -> list[str]:
         if branch:
             branches.append(branch)
     return branches
+
+
+def _interrupted_runs(runs_dir: Path, *, release_id: str | None) -> list[dict[str, object]]:
+    if not runs_dir.exists():
+        return []
+    runs: list[dict[str, object]] = []
+    for state_path in sorted(runs_dir.glob("*/release_state.json"), reverse=True):
+        state = read_json(state_path)
+        if not state:
+            continue
+        if release_id is not None and state.get("release_id") != release_id:
+            continue
+        if state.get("state") in {"ACCEPTED", "FAILED", "ESCALATED"}:
+            continue
+        runs.append(
+            {
+                "run_id": state.get("run_id", state_path.parent.name),
+                "release_id": state.get("release_id"),
+                "state": state.get("state"),
+                "path": str(state_path),
+            }
+        )
+    return runs

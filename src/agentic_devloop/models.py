@@ -5,6 +5,8 @@ from enum import StrEnum
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from agentic_devloop.security import validate_identifier
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -67,6 +69,7 @@ class TaskType(StrEnum):
     CODE_ONLY = "code_only"
     DOCUMENTATION = "documentation"
     BENCHMARK = "benchmark"
+    VALIDATION = "validation"
     SCIENTIFIC_VALIDATION = "scientific_validation"
     RELEASE_PREPARATION = "release_preparation"
 
@@ -113,6 +116,11 @@ class ReleaseObjective(StrictModel):
     non_goals: list[str] = Field(default_factory=list)
     acceptance_criteria: list[str] = Field(min_length=1)
 
+    @field_validator("release_id")
+    @classmethod
+    def release_id_must_be_safe(cls, value: str) -> str:
+        return validate_identifier(value, kind="release_id")
+
 
 class ReleasePlan(StrictModel):
     release_id: str = Field(min_length=1)
@@ -125,7 +133,14 @@ class ReleasePlan(StrictModel):
     def current_tasks_must_not_be_empty(cls, values: list[str]) -> list[str]:
         if any(not value.strip() for value in values):
             raise ValueError("current task IDs must not be empty")
+        for value in values:
+            validate_identifier(value, kind="task_id")
         return values
+
+    @field_validator("release_id")
+    @classmethod
+    def release_id_must_be_safe(cls, value: str) -> str:
+        return validate_identifier(value, kind="release_id")
 
 
 class VerificationSpec(StrictModel):
@@ -165,6 +180,7 @@ class TaskContract(StrictModel):
     verification: VerificationSpec
     stop_conditions: list[str] = Field(min_length=1)
     non_goals: list[str] = Field(default_factory=list)
+    validation_assumptions: list[str] = Field(default_factory=list)
     scientific_assumptions: list[str] = Field(default_factory=list)
     fixture_changes_allowed: bool = False
     tolerance_changes_allowed: bool = False
@@ -181,10 +197,28 @@ class TaskContract(StrictModel):
 
     @model_validator(mode="after")
     def scientific_tasks_require_assumptions(self) -> "TaskContract":
-        if self.task_type in {TaskType.BENCHMARK, TaskType.SCIENTIFIC_VALIDATION}:
-            if not self.scientific_assumptions:
-                raise ValueError("benchmark and scientific validation tasks require assumptions")
+        if self.validation_assumptions and self.scientific_assumptions:
+            if self.validation_assumptions != self.scientific_assumptions:
+                raise ValueError(
+                    "validation_assumptions and scientific_assumptions must match when both are set"
+                )
+        assumptions = self.validation_assumptions or self.scientific_assumptions
+        object.__setattr__(self, "validation_assumptions", assumptions)
+        object.__setattr__(self, "scientific_assumptions", assumptions)
+        if self.task_type in {TaskType.BENCHMARK, TaskType.SCIENTIFIC_VALIDATION, TaskType.VALIDATION}:
+            if not assumptions:
+                raise ValueError("benchmark and validation tasks require assumptions")
         return self
+
+    @field_validator("task_id")
+    @classmethod
+    def task_id_must_be_safe(cls, value: str) -> str:
+        return validate_identifier(value, kind="task_id")
+
+    @field_validator("release_id")
+    @classmethod
+    def contract_release_id_must_be_safe(cls, value: str) -> str:
+        return validate_identifier(value, kind="release_id")
 
 
 class TaskState(StrEnum):
@@ -198,6 +232,7 @@ class TaskState(StrEnum):
     NEEDS_REVISION = "NEEDS_REVISION"
     FAILED = "FAILED"
     ESCALATED = "ESCALATED"
+    INTERRUPTED = "INTERRUPTED"
 
 
 class CommandResult(StrictModel):
@@ -264,6 +299,44 @@ class TaskRun(StrictModel):
     changed_files: list[str] = Field(default_factory=list)
     diff_lines: int = Field(ge=0)
     verification_results: list[CommandResult] = Field(default_factory=list)
+    decision: Decision | None = None
+    bundle_path: Path | None = None
+
+    @field_validator("task_id")
+    @classmethod
+    def task_run_id_must_be_safe(cls, value: str) -> str:
+        return validate_identifier(value, kind="task_id")
+
+
+class ReleaseState(StrEnum):
+    STARTED = "STARTED"
+    RUNNING = "RUNNING"
+    FINALIZING = "FINALIZING"
+    ACCEPTED = "ACCEPTED"
+    FAILED = "FAILED"
+    ESCALATED = "ESCALATED"
+    INTERRUPTED = "INTERRUPTED"
+
+
+class ReleaseRunState(StrictModel):
+    release_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    state: ReleaseState
+    started_at: datetime
+    updated_at: datetime
+    integration_branch: str | None = None
+    task_states: dict[str, str] = Field(default_factory=dict)
+    decision: Decision | None = None
+    summary_path: Path | None = None
+    review_path: Path | None = None
+    metrics_path: Path | None = None
+    budget_path: Path | None = None
+    tuning_path: Path | None = None
+
+    @field_validator("release_id")
+    @classmethod
+    def release_run_id_must_be_safe(cls, value: str) -> str:
+        return validate_identifier(value, kind="release_id")
 
 
 class EvidenceBundle(StrictModel):
@@ -282,6 +355,7 @@ class EvidenceBundle(StrictModel):
     executor_attempts_path: Path | None = None
     failure_diagnosis_path: Path | None = None
     scientific_review_path: Path | None = None
+    validation_review_path: Path | None = None
     benchmark_delta_path: Path | None = None
     remote_dispatch_path: Path | None = None
     review_path: Path | None = None

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
 from agentic_devloop.models import CommandResult
 from agentic_devloop.process import run_process
+from agentic_devloop.security import redact_text
 
 
 class VerificationRunner:
@@ -24,15 +26,14 @@ class VerificationRunner:
 
         for index, command in enumerate(commands, start=1):
             result = run_process(
-                command,
+                shlex.split(command),
                 cwd=worktree_path,
                 timeout_seconds=self.timeout_seconds,
-                shell=True,
             )
             stdout_path = output_dir / f"verification_{index}_stdout.log"
             stderr_path = output_dir / f"verification_{index}_stderr.log"
-            stdout_path.write_text(result.stdout, encoding="utf-8")
-            stderr_path.write_text(result.stderr, encoding="utf-8")
+            stdout_path.write_text(redact_text(result.stdout), encoding="utf-8")
+            stderr_path.write_text(redact_text(result.stderr), encoding="utf-8")
 
             command_result = CommandResult(
                 command=command,
@@ -53,5 +54,8 @@ class VerificationRunner:
             if stop_on_failure and result.exit_code != 0:
                 break
 
-        (output_dir / "verification.log").write_text("\n".join(log_lines), encoding="utf-8")
+        (output_dir / "verification.log").write_text(
+            redact_text("\n".join(log_lines)),
+            encoding="utf-8",
+        )
         return results

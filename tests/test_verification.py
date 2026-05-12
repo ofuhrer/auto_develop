@@ -23,7 +23,7 @@ def test_verification_runner_stops_on_failure(tmp_path) -> None:
     runner = VerificationRunner(timeout_seconds=5)
 
     results = runner.run(
-        commands=["exit 7", "printf skipped"],
+        commands=["python3 -c 'import sys; sys.exit(7)'", "printf skipped"],
         worktree_path=tmp_path,
         output_dir=tmp_path / "verification",
     )

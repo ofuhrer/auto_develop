@@ -5,12 +5,13 @@ from pathlib import Path
 import yaml
 
 from agentic_devloop.models import ContextBundle, TaskContract
+from agentic_devloop.security import redact_text
 
 
 def build_executor_prompt(task: TaskContract, context: ContextBundle | None = None) -> str:
     contract_yaml = yaml.safe_dump(task.model_dump(mode="json"), sort_keys=False)
     context_text = _context_text(context)
-    return f"""# Bounded Development Task
+    return redact_text(f"""# Bounded Development Task
 
 You are executing one bounded task inside an isolated Git worktree.
 
@@ -40,7 +41,7 @@ Before finishing, provide a concise summary with:
 ```yaml
 {contract_yaml}```
 {context_text}
-"""
+""")
 
 
 def write_executor_prompt(

@@ -91,8 +91,8 @@ def build_failure_diagnosis_prompt(request: FailureDiagnosisRequest) -> str:
                 ("stop_conditions", ", ".join(task.stop_conditions)),
                 ("non_goals", ", ".join(task.non_goals) if task.non_goals else "<none>"),
                 (
-                    "scientific_assumptions",
-                    ", ".join(task.scientific_assumptions) if task.scientific_assumptions else "<none>",
+                    "validation_assumptions",
+                    ", ".join(task.validation_assumptions) if task.validation_assumptions else "<none>",
                 ),
                 ("fixture_changes_allowed", str(task.fixture_changes_allowed)),
                 ("tolerance_changes_allowed", str(task.tolerance_changes_allowed)),

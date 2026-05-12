@@ -34,7 +34,7 @@ class FakePlannerBackend:
                         "allowed_files": ["docs/objective.md"],
                         "forbidden_changes": ["Do not edit source files."],
                         "required_evidence": ["git diff", "test output"],
-                        "verification": {"commands": ["test -f docs/objective.md"]},
+                        "verification": {"profile": "default"},
                         "stop_conditions": ["Verification fails."],
                     },
                 }

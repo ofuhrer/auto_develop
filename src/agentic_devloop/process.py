@@ -71,6 +71,14 @@ def run_process(
             duration_seconds=clock() - started_at,
             timed_out=True,
         )
+    except OSError as error:
+        return ProcessOutput(
+            command=command,
+            exit_code=127,
+            stdout="",
+            stderr=str(error),
+            duration_seconds=clock() - started_at,
+        )
 
 
 def _run_process_streamed(
@@ -86,15 +94,24 @@ def _run_process_streamed(
     started_at: float,
     clock: Callable[[], float],
 ) -> ProcessOutput:
-    process = subprocess.Popen(
-        command,
-        cwd=cwd,
-        text=True,
-        shell=shell,
-        stdin=subprocess.PIPE if input_text is not None else None,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            text=True,
+            shell=shell,
+            stdin=subprocess.PIPE if input_text is not None else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except OSError as error:
+        return ProcessOutput(
+            command=command,
+            exit_code=127,
+            stdout="",
+            stderr=str(error),
+            duration_seconds=clock() - started_at,
+        )
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
 

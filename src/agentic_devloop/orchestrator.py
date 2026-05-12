@@ -49,7 +49,9 @@ from agentic_devloop.models import (
 )
 from agentic_devloop.prompt import write_executor_prompt
 from agentic_devloop.review import deterministic_review
+from agentic_devloop.runtime_state import write_json
 from agentic_devloop.scientific import analyze_scientific_changes
+from agentic_devloop.security import validate_identifier
 from agentic_devloop.verification import VerificationRunner
 from agentic_devloop.worktree import create_worktree
 from agentic_devloop.yaml_io import load_yaml_model
@@ -70,11 +72,15 @@ class TaskRunResult:
 
 
 def make_run_id(release_id: str, task_id: str, now: datetime | None = None) -> str:
+    validate_identifier(release_id, kind="release_id")
+    validate_identifier(task_id, kind="task_id")
     timestamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%SZ")
     return f"{timestamp}_{release_id}_{task_id}"
 
 
 def branch_name(release_id: str, task_id: str) -> str:
+    validate_identifier(release_id, kind="release_id")
+    validate_identifier(task_id, kind="task_id")
     return f"agent/{release_id}/{task_id}"
 
 
@@ -98,6 +104,8 @@ def run_task(
 ) -> TaskRunResult:
     config = load_project_config(project_id, config_dir, validate_repo=True)
     task = load_yaml_model(contract_path, TaskContract)
+    validate_identifier(task.release_id, kind="release_id")
+    validate_identifier(task.task_id, kind="task_id")
     diagnosis_backend = failure_diagnosis_backend or DeterministicFailureDiagnosisBackend()
     run_id = make_run_id(task.release_id, task.task_id, now)
     branch = branch_name(task.release_id, task.task_id)
@@ -106,65 +114,142 @@ def run_task(
     scratch_dir = run_root / "_scratch"
     bundle_path = run_root / "evidence"
     task_base_branch = base_branch or config.default_base_branch
+    run_state_path = run_root / "run_state.json"
 
     _report(progress, f"event=task_run_created task={task.task_id} run_id={run_id}")
     _report(progress, f"event=worktree_created task={task.task_id} path={worktree_path}")
     started_at = datetime.now(UTC)
-    create_worktree(
-        repo_path=config.repo_path,
-        worktree_path=worktree_path,
-        branch=branch,
-        base_branch=task_base_branch,
-        allow_dirty=allow_dirty,
-    )
-
-    _report(progress, f"event=prompt_build_started task={task.task_id}")
-    context = load_context_bundle(config, task)
-    enforce_context_budget(context, config.budget.max_context_chars_per_task)
-    _report(progress, f"event=context_loaded task={task.task_id} sections={len(context.sections)} chars={context.total_chars}")
-    prompt_path = write_executor_prompt(task, scratch_dir / "executor_prompt.md", context)
     task_run = TaskRun(
         task_id=task.task_id,
-        state=TaskState.EXECUTING,
+        state=TaskState.PLANNED,
         worktree_path=worktree_path,
         branch=branch,
-        executor_attempts=1,
+        executor_attempts=0,
         started_at=started_at,
-        updated_at=datetime.now(UTC),
+        updated_at=started_at,
         changed_files=[],
         diff_lines=0,
         verification_results=[],
     )
-
-    executor_configs = executor_configs_for_task(config, task)
-    executor_result = _run_executor_attempts(
-        task_id=task.task_id,
-        executor_configs=executor_configs,
-        executor=executor,
-        max_attempts=config.budget.max_executor_attempts_per_task,
-        prompt_path=prompt_path,
-        worktree_path=worktree_path,
-        scratch_dir=scratch_dir,
-        progress=progress,
-    )
-    _report(progress, f"event=executor_finished task={task.task_id} exit_code={executor_result.exit_code}")
-    if executor_result.exit_code != 0:
-        verification_log_path = scratch_dir / "verification.log"
-        verification_log_path.write_text(
-            "Verification skipped because executor failed.\n",
-            encoding="utf-8",
+    _persist_task_run_state(run_state_path, task_run)
+    try:
+        create_worktree(
+            repo_path=config.repo_path,
+            worktree_path=worktree_path,
+            branch=branch,
+            base_branch=task_base_branch,
+            allow_dirty=allow_dirty,
         )
+        task_run = _update_task_run(task_run, state=TaskState.WORKTREE_CREATED)
+        _persist_task_run_state(run_state_path, task_run)
+
+        _report(progress, f"event=prompt_build_started task={task.task_id}")
+        context = load_context_bundle(config, task)
+        enforce_context_budget(context, config.budget.max_context_chars_per_task)
+        _report(progress, f"event=context_loaded task={task.task_id} sections={len(context.sections)} chars={context.total_chars}")
+        prompt_path = write_executor_prompt(task, scratch_dir / "executor_prompt.md", context)
+        task_run = _update_task_run(task_run, state=TaskState.EXECUTING, executor_attempts=1)
+        _persist_task_run_state(run_state_path, task_run)
+
+        executor_configs = executor_configs_for_task(config, task)
+        executor_result = _run_executor_attempts(
+            task_id=task.task_id,
+            executor_configs=executor_configs,
+            executor=executor,
+            max_attempts=config.budget.max_executor_attempts_per_task,
+            prompt_path=prompt_path,
+            worktree_path=worktree_path,
+            scratch_dir=scratch_dir,
+            progress=progress,
+        )
+        _report(progress, f"event=executor_finished task={task.task_id} exit_code={executor_result.exit_code}")
+        if executor_result.exit_code != 0:
+            verification_log_path = scratch_dir / "verification.log"
+            verification_log_path.write_text(
+                "Verification skipped because executor failed.\n",
+                encoding="utf-8",
+            )
+            current_diff = diff_patch(worktree_path)
+            current_changed_files = git_changed_files(worktree_path)
+            task_run = _update_task_run(
+                task_run,
+                state=TaskState.ESCALATED,
+                changed_files=current_changed_files,
+                diff_lines=_review_line_count(current_diff),
+                verification_results=[],
+            )
+            _persist_task_run_state(run_state_path, task_run)
+            bundle = EvidenceCollector().collect(
+                run_id=run_id,
+                task=task,
+                run_state=task_run,
+                worktree_path=worktree_path,
+                bundle_path=bundle_path,
+                contract_source_path=contract_path,
+                executor_prompt_path=prompt_path,
+                executor_result=executor_result,
+                verification_log_path=verification_log_path,
+            )
+            decision = ReviewDecision(
+                task_id=task.task_id,
+                decision=Decision.ESCALATED,
+                reviewer=Reviewer.DETERMINISTIC,
+                rationale=f"Executor failed with exit code {executor_result.exit_code}.",
+            )
+            task_run = _update_task_run(task_run, decision=decision.decision, bundle_path=bundle.bundle_path)
+            _persist_task_run_state(run_state_path, task_run)
+            bundle = _diagnose_failure(
+                bundle=bundle,
+                task=task,
+                executor_result=executor_result,
+                verification_results=[],
+                changed_files=current_changed_files,
+                verification_log_path=verification_log_path,
+                backend=diagnosis_backend,
+                progress=progress,
+            )
+            write_review_decision(bundle, decision)
+            _report(progress, f"event=review_decision task={task.task_id} decision={decision.decision} rationale={json.dumps(decision.rationale)}")
+
+            return TaskRunResult(
+                run_id=run_id,
+                worktree_path=worktree_path,
+                bundle_path=bundle.bundle_path,
+                decision=decision,
+            )
+
+        verification_commands = _verification_commands(config, task)
+        task_run = _update_task_run(task_run, state=TaskState.VERIFYING)
+        _persist_task_run_state(run_state_path, task_run)
+        _report(progress, f"event=verification_started task={task.task_id} commands={len(verification_commands)}")
+        verification_results = VerificationRunner(timeout_seconds=verification_timeout_seconds).run(
+            commands=verification_commands,
+            worktree_path=worktree_path,
+            output_dir=scratch_dir,
+        )
+        _report(
+            progress,
+            f"event=verification_finished task={task.task_id} exit_codes="
+            + ",".join(str(result.exit_code) for result in verification_results),
+        )
+
+        _report(progress, f"event=evidence_collection_started task={task.task_id}")
         current_diff = diff_patch(worktree_path)
         current_changed_files = git_changed_files(worktree_path)
-        task_run = task_run.model_copy(
-            update={
-                "state": TaskState.ESCALATED,
-                "updated_at": datetime.now(UTC),
-                "changed_files": current_changed_files,
-                "diff_lines": _review_line_count(current_diff),
-                "verification_results": [],
-            }
+        scientific_review = analyze_scientific_changes(
+            task=task,
+            changed_files=current_changed_files,
+            diff_text=current_diff,
         )
+        task_run = _update_task_run(
+            task_run,
+            state=TaskState.REVIEWING,
+            changed_files=current_changed_files,
+            diff_lines=_review_line_count(current_diff),
+            verification_results=verification_results,
+        )
+        _persist_task_run_state(run_state_path, task_run)
+
         bundle = EvidenceCollector().collect(
             run_id=run_id,
             task=task,
@@ -174,164 +259,115 @@ def run_task(
             contract_source_path=contract_path,
             executor_prompt_path=prompt_path,
             executor_result=executor_result,
-            verification_log_path=verification_log_path,
+            verification_log_path=scratch_dir / "verification.log",
         )
-        decision = ReviewDecision(
-            task_id=task.task_id,
-            decision=Decision.ESCALATED,
-            reviewer=Reviewer.DETERMINISTIC,
-            rationale=f"Executor failed with exit code {executor_result.exit_code}.",
-        )
-        bundle = _diagnose_failure(
-            bundle=bundle,
+        decision = deterministic_review(
             task=task,
-            executor_result=executor_result,
-            verification_results=[],
+            budget=config.budget,
             changed_files=current_changed_files,
-            verification_log_path=verification_log_path,
-            backend=diagnosis_backend,
-            progress=progress,
+            diff_text=current_diff,
+            verification_exit_codes=[result.exit_code for result in verification_results],
+            scientific_review=scientific_review,
         )
+        final_task_state = {
+            Decision.ACCEPTED: TaskState.ACCEPTED,
+            Decision.FAILED: TaskState.FAILED,
+            Decision.NEEDS_REVISION: TaskState.NEEDS_REVISION,
+            Decision.ESCALATED: TaskState.ESCALATED,
+        }[decision.decision]
+        task_run = _update_task_run(
+            task_run,
+            state=final_task_state,
+            decision=decision.decision,
+            bundle_path=bundle.bundle_path,
+        )
+        _persist_task_run_state(run_state_path, task_run)
+        bundle = write_scientific_outputs(bundle, task, scientific_review)
+        if any(result.exit_code != 0 for result in verification_results):
+            bundle = _diagnose_failure(
+                bundle=bundle,
+                task=task,
+                executor_result=executor_result,
+                verification_results=verification_results,
+                changed_files=current_changed_files,
+                verification_log_path=bundle.verification_log_path,
+                backend=diagnosis_backend,
+                progress=progress,
+            )
         write_review_decision(bundle, decision)
         _report(progress, f"event=review_decision task={task.task_id} decision={decision.decision} rationale={json.dumps(decision.rationale)}")
+        finalize_result = None
+        if decision.decision == Decision.ACCEPTED and (
+            commit_on_accept or merge_on_accept or push_on_accept
+        ):
+            should_merge = merge_on_accept or push_on_accept
+            should_push = push_on_accept
+            message = commit_message or f"{task.task_id}: {task.title}"
+            _report(progress, f"event=task_finalization_started task={task.task_id}")
+            try:
+                finalize_result = finalize_accepted_task(
+                    repo_path=config.repo_path,
+                    worktree_path=worktree_path,
+                    task_branch=branch,
+                    base_branch=task_base_branch,
+                    commit_message=message,
+                    merge=should_merge,
+                    push=should_push,
+                )
+                if finalize_result.commit_hash:
+                    _report(progress, f"event=task_committed task={task.task_id} commit={finalize_result.commit_hash}")
+                if finalize_result.merged:
+                    _report(progress, f"event=task_merged task={task.task_id} target={task_base_branch}")
+                if finalize_result.pushed:
+                    _report(progress, f"event=task_pushed task={task.task_id} branch=origin/{task_base_branch}")
+            except GitFinalizeError as error:
+                _report(progress, f"event=task_finalization_failed task={task.task_id} error={json.dumps(str(error))}")
+                repair_result = _attempt_conflict_repair(
+                    error=error,
+                    task=task,
+                    executor_configs=conflict_repair_executor_configs(config, executor_configs),
+                    executor=executor,
+                    worktree_path=worktree_path,
+                    scratch_dir=scratch_dir,
+                    verification_commands=verification_commands,
+                    verification_timeout_seconds=verification_timeout_seconds,
+                    progress=progress,
+                )
+                bundle = write_conflict_repair_result(bundle, repair_result)
+                if repair_result.resolved:
+                    try:
+                        finalize_result = finalize_accepted_task(
+                            repo_path=config.repo_path,
+                            worktree_path=worktree_path,
+                            task_branch=branch,
+                            base_branch=task_base_branch,
+                            commit_message=message,
+                            merge=should_merge,
+                            push=should_push,
+                        )
+                    except GitFinalizeError as retry_error:
+                        finalize_result = _failed_finalize_result(retry_error)
+                        decision = _finalization_failure_decision(task, retry_error)
+                else:
+                    finalize_result = _failed_finalize_result(error)
+                    decision = _finalization_failure_decision(task, error)
+            write_finalization_result(bundle, finalize_result)
+            if finalize_result.error is not None:
+                write_review_decision(bundle, decision)
+                task_run = _update_task_run(task_run, state=TaskState.ESCALATED, decision=decision.decision)
+                _persist_task_run_state(run_state_path, task_run)
 
         return TaskRunResult(
             run_id=run_id,
             worktree_path=worktree_path,
             bundle_path=bundle.bundle_path,
             decision=decision,
+            finalize=finalize_result,
         )
-
-    verification_commands = _verification_commands(config, task)
-    _report(progress, f"event=verification_started task={task.task_id} commands={len(verification_commands)}")
-    verification_results = VerificationRunner(timeout_seconds=verification_timeout_seconds).run(
-        commands=verification_commands,
-        worktree_path=worktree_path,
-        output_dir=scratch_dir,
-    )
-    _report(
-        progress,
-        f"event=verification_finished task={task.task_id} exit_codes="
-        + ",".join(str(result.exit_code) for result in verification_results),
-    )
-
-    _report(progress, f"event=evidence_collection_started task={task.task_id}")
-    current_diff = diff_patch(worktree_path)
-    current_changed_files = git_changed_files(worktree_path)
-    scientific_review = analyze_scientific_changes(
-        task=task,
-        changed_files=current_changed_files,
-        diff_text=current_diff,
-    )
-    task_run = task_run.model_copy(
-        update={
-            "state": TaskState.REVIEWING,
-            "updated_at": datetime.now(UTC),
-            "changed_files": current_changed_files,
-            "diff_lines": _review_line_count(current_diff),
-            "verification_results": verification_results,
-        }
-    )
-
-    bundle = EvidenceCollector().collect(
-        run_id=run_id,
-        task=task,
-        run_state=task_run,
-        worktree_path=worktree_path,
-        bundle_path=bundle_path,
-        contract_source_path=contract_path,
-        executor_prompt_path=prompt_path,
-        executor_result=executor_result,
-        verification_log_path=scratch_dir / "verification.log",
-    )
-    decision = deterministic_review(
-        task=task,
-        budget=config.budget,
-        changed_files=current_changed_files,
-        diff_text=current_diff,
-        verification_exit_codes=[result.exit_code for result in verification_results],
-        scientific_review=scientific_review,
-    )
-    bundle = write_scientific_outputs(bundle, task, scientific_review)
-    if any(result.exit_code != 0 for result in verification_results):
-        bundle = _diagnose_failure(
-            bundle=bundle,
-            task=task,
-            executor_result=executor_result,
-            verification_results=verification_results,
-            changed_files=current_changed_files,
-            verification_log_path=bundle.verification_log_path,
-            backend=diagnosis_backend,
-            progress=progress,
-        )
-    write_review_decision(bundle, decision)
-    _report(progress, f"event=review_decision task={task.task_id} decision={decision.decision} rationale={json.dumps(decision.rationale)}")
-    finalize_result = None
-    if decision.decision == Decision.ACCEPTED and (
-        commit_on_accept or merge_on_accept or push_on_accept
-    ):
-        should_merge = merge_on_accept or push_on_accept
-        should_push = push_on_accept
-        message = commit_message or f"{task.task_id}: {task.title}"
-        _report(progress, f"event=task_finalization_started task={task.task_id}")
-        try:
-            finalize_result = finalize_accepted_task(
-                repo_path=config.repo_path,
-                worktree_path=worktree_path,
-                task_branch=branch,
-                base_branch=task_base_branch,
-                commit_message=message,
-                merge=should_merge,
-                push=should_push,
-            )
-            if finalize_result.commit_hash:
-                _report(progress, f"event=task_committed task={task.task_id} commit={finalize_result.commit_hash}")
-            if finalize_result.merged:
-                _report(progress, f"event=task_merged task={task.task_id} target={task_base_branch}")
-            if finalize_result.pushed:
-                _report(progress, f"event=task_pushed task={task.task_id} branch=origin/{task_base_branch}")
-        except GitFinalizeError as error:
-            _report(progress, f"event=task_finalization_failed task={task.task_id} error={json.dumps(str(error))}")
-            repair_result = _attempt_conflict_repair(
-                error=error,
-                task=task,
-                executor_configs=conflict_repair_executor_configs(config, executor_configs),
-                executor=executor,
-                worktree_path=worktree_path,
-                scratch_dir=scratch_dir,
-                verification_commands=verification_commands,
-                verification_timeout_seconds=verification_timeout_seconds,
-                progress=progress,
-            )
-            bundle = write_conflict_repair_result(bundle, repair_result)
-            if repair_result.resolved:
-                try:
-                    finalize_result = finalize_accepted_task(
-                        repo_path=config.repo_path,
-                        worktree_path=worktree_path,
-                        task_branch=branch,
-                        base_branch=task_base_branch,
-                        commit_message=message,
-                        merge=should_merge,
-                        push=should_push,
-                    )
-                except GitFinalizeError as retry_error:
-                    finalize_result = _failed_finalize_result(retry_error)
-                    decision = _finalization_failure_decision(task, retry_error)
-            else:
-                finalize_result = _failed_finalize_result(error)
-                decision = _finalization_failure_decision(task, error)
-        write_finalization_result(bundle, finalize_result)
-        if finalize_result.error is not None:
-            write_review_decision(bundle, decision)
-
-    return TaskRunResult(
-        run_id=run_id,
-        worktree_path=worktree_path,
-        bundle_path=bundle.bundle_path,
-        decision=decision,
-        finalize=finalize_result,
-    )
+    except KeyboardInterrupt:
+        interrupted = _update_task_run(task_run, state=TaskState.INTERRUPTED)
+        _persist_task_run_state(run_state_path, interrupted)
+        raise
 
 
 def executor_config_for_task(config: ProjectConfig, task: TaskContract) -> ExecutorConfig:
@@ -621,6 +657,15 @@ def _finalization_failure_decision(task: TaskContract, error: GitFinalizeError) 
 def _report(progress: Callable[[str], None] | None, message: str) -> None:
     if progress is not None:
         progress(message)
+
+
+def _update_task_run(task_run: TaskRun, **updates) -> TaskRun:
+    payload = {"updated_at": datetime.now(UTC), **updates}
+    return task_run.model_copy(update=payload)
+
+
+def _persist_task_run_state(path: Path, task_run: TaskRun) -> None:
+    write_json(path, task_run.model_dump(mode="json"))
 
 
 def _executor_stream_callback(

@@ -149,7 +149,7 @@ def test_parse_planner_output_validates_nested_task_contracts() -> None:
                             "allowed_files": ["src/agentic_devloop/planning.py"],
                             "forbidden_changes": ["Do not touch release contracts."],
                             "required_evidence": ["plan diff"],
-                            "verification": {"commands": ["true"]},
+                            "verification": {"profile": "default"},
                             "stop_conditions": ["Scope expands beyond the allowed file."],
                         },
                     }
@@ -163,7 +163,7 @@ def test_parse_planner_output_validates_nested_task_contracts() -> None:
 
     assert plan.planner == "strong-model"
     assert plan.generated_contracts[0].suggested_contract.task_id == "v0.3.0-0001"
-    assert plan.generated_contracts[0].suggested_contract.verification.commands == ["true"]
+    assert plan.generated_contracts[0].suggested_contract.verification.profile == "default"
 
 
 def test_parse_planner_output_accepts_fenced_json() -> None:
@@ -217,7 +217,7 @@ def test_validate_generated_contracts_rejects_task_id_mismatch() -> None:
                         "allowed_files": ["src/agentic_devloop/planning.py"],
                         "forbidden_changes": ["Do not touch release contracts."],
                         "required_evidence": ["plan diff"],
-                        "verification": {"commands": ["true"]},
+                        "verification": {"profile": "default"},
                         "stop_conditions": ["Scope expands beyond the allowed file."],
                     }
                 ),
@@ -383,7 +383,7 @@ def test_strong_model_plan_uses_backend_seam_to_parse_structured_output(tmp_path
                             "allowed_files": ["src/agentic_devloop/planning.py"],
                             "forbidden_changes": ["Do not touch release contracts."],
                             "required_evidence": ["plan diff"],
-                            "verification": {"commands": ["true"]},
+                            "verification": {"profile": "default"},
                             "stop_conditions": ["Scope expands beyond the allowed file."],
                         },
                     }
@@ -478,7 +478,7 @@ def test_strong_model_plan_persists_planner_backend_evidence_paths(tmp_path) -> 
                                 "allowed_files": ["src/agentic_devloop/planning.py"],
                                 "forbidden_changes": ["Do not touch release contracts."],
                                 "required_evidence": ["plan diff"],
-                                "verification": {"commands": ["true"]},
+                                "verification": {"profile": "default"},
                                 "stop_conditions": ["Scope expands beyond the allowed file."],
                             },
                         }
@@ -746,7 +746,7 @@ def _contract_plan_with_allowed_files(
                         "allowed_files": allowed_files,
                         "forbidden_changes": ["Do not touch release contracts."],
                         "required_evidence": required_evidence or ["plan diff"],
-                        "verification": {"commands": ["true"]},
+                        "verification": {"profile": "default"},
                         "stop_conditions": stop_conditions or ["Scope expands beyond the allowed file."],
                     }
                 ),

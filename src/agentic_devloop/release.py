@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import threading
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
@@ -24,6 +25,8 @@ from fnmatch import fnmatch
 from agentic_devloop.models import (
     Decision,
     OverlapFinding,
+    ReleaseRunState,
+    ReleaseState,
     ReleaseOverlapReport,
     ReleasePlan,
     ReviewDecision,
@@ -31,6 +34,8 @@ from agentic_devloop.models import (
 )
 from agentic_devloop.orchestrator import ExecutorProtocol, TaskRunResult, branch_name, run_task
 from agentic_devloop.process import run_process
+from agentic_devloop.runtime_state import write_json
+from agentic_devloop.security import redact_text, validate_identifier
 from agentic_devloop.yaml_io import load_yaml_model
 
 
@@ -51,11 +56,13 @@ class ReleaseRunResult:
 
 
 def make_release_run_id(release_id: str, now: datetime | None = None) -> str:
+    validate_identifier(release_id, kind="release_id")
     timestamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%SZ")
     return f"{timestamp}_{release_id}_release"
 
 
 def feature_branch_name(release_id: str) -> str:
+    validate_identifier(release_id, kind="release_id")
     return f"feature/{release_id}"
 
 
@@ -85,6 +92,7 @@ def run_release(
         raise ValueError(f"unsupported execution mode: {execution_mode}")
     if release_finalize not in {"none", "merge-main", "push-feature", "push-main"}:
         raise ValueError(f"unsupported release finalization mode: {release_finalize}")
+    validate_identifier(release_id, kind="release_id")
     config = load_project_config(project_id, config_dir, validate_repo=True)
     _ensure_no_existing_worktrees(config.worktree_root)
     run_id = make_release_run_id(release_id, now)
@@ -123,132 +131,166 @@ def run_release(
     _report(progress, f"event=release_started run_id={run_id} release={release_id} tasks={len(selected_contracts)} mode={execution_mode}")
     _report(progress, f"event=release_logs log={log_path} raw_log={raw_log_path}")
     feature_branch = integration_branch or feature_branch_name(release_id)
-    ensure_branch_from_base(config.repo_path, feature_branch, config.default_base_branch)
-    _report(progress, f"event=integration_branch branch={feature_branch} base={config.default_base_branch}")
-    if overlap_report.findings:
-        _report(progress, f"event=overlap_findings count={len(overlap_report.findings)}")
+    release_state = ReleaseRunState(
+        release_id=release_id,
+        run_id=run_id,
+        state=ReleaseState.STARTED,
+        started_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        integration_branch=feature_branch,
+    )
+    release_state_path = release_root / "release_state.json"
+    _persist_release_state(release_state_path, release_state)
+    try:
+        ensure_branch_from_base(config.repo_path, feature_branch, config.default_base_branch)
+        release_state = _update_release_state(release_state, state=ReleaseState.RUNNING)
+        _persist_release_state(release_state_path, release_state)
+        _report(progress, f"event=integration_branch branch={feature_branch} base={config.default_base_branch}")
+        if overlap_report.findings:
+            _report(progress, f"event=overlap_findings count={len(overlap_report.findings)}")
 
-    task_inputs = list(zip(selected_contracts, selected_tasks))
-    dependencies = _release_dependency_map(selected_tasks, overlap_report)
-    if dependencies:
-        _report(progress, "event=execution_dag dependencies=" + json.dumps(dependencies, sort_keys=True))
-    if execution_mode == "parallel":
-        task_results = _run_release_parallel(
-            project_id=project_id,
-            config_repo_path=config.repo_path,
-            config_dir=config_dir,
+        task_inputs = list(zip(selected_contracts, selected_tasks))
+        dependencies = _release_dependency_map(selected_tasks, overlap_report)
+        if dependencies:
+            _report(progress, "event=execution_dag dependencies=" + json.dumps(dependencies, sort_keys=True))
+        if execution_mode == "parallel":
+            task_results = _run_release_parallel(
+                project_id=project_id,
+                config_repo_path=config.repo_path,
+                config_dir=config_dir,
+                runs_dir=runs_dir,
+                task_base_branch=feature_branch,
+                task_inputs=task_inputs,
+                dependencies=dependencies,
+                executor=executor,
+                verification_timeout_seconds=verification_timeout_seconds,
+                allow_dirty=allow_dirty,
+                commit_on_accept=commit_on_accept,
+                merge_on_accept=merge_on_accept,
+                push_on_accept=push_on_accept,
+                stop_on_failure=stop_on_failure,
+                debug_keep_artifacts=debug_keep_artifacts,
+                progress=progress,
+            )
+        else:
+            task_results = _run_release_sequential(
+                project_id=project_id,
+                config_repo_path=config.repo_path,
+                config_dir=config_dir,
+                runs_dir=runs_dir,
+                task_base_branch=feature_branch,
+                task_inputs=task_inputs,
+                executor=executor,
+                verification_timeout_seconds=verification_timeout_seconds,
+                allow_dirty=allow_dirty,
+                commit_on_accept=commit_on_accept,
+                merge_on_accept=merge_on_accept,
+                push_on_accept=push_on_accept,
+                stop_on_failure=stop_on_failure,
+                debug_keep_artifacts=debug_keep_artifacts,
+                progress=progress,
+            )
+        release_state = _update_release_state(
+            release_state,
+            task_states={result.decision.task_id: str(result.decision.decision) for result in task_results},
+        )
+        _persist_release_state(release_state_path, release_state)
+
+        task_decision = _release_decision([result.decision for result in task_results])
+        release_metrics = _build_release_metrics(
+            run_id=run_id,
+            release_id=release_id,
+            decision=task_decision,
+            task_results=task_results,
+            raw_log_path=raw_log_path,
             runs_dir=runs_dir,
-            task_base_branch=feature_branch,
-            task_inputs=task_inputs,
-            dependencies=dependencies,
-            executor=executor,
-            verification_timeout_seconds=verification_timeout_seconds,
-            allow_dirty=allow_dirty,
-            commit_on_accept=commit_on_accept,
-            merge_on_accept=merge_on_accept,
-            push_on_accept=push_on_accept,
-            stop_on_failure=stop_on_failure,
-            debug_keep_artifacts=debug_keep_artifacts,
+        )
+        metrics_path = _write_release_metrics(
+            runs_dir=runs_dir,
+            run_id=run_id,
+            metrics=release_metrics,
+        )
+        budget_ledger = build_budget_ledger(release_metrics=release_metrics, budget=config.budget)
+        budget_path = _write_release_budget(runs_dir=runs_dir, run_id=run_id, ledger=budget_ledger)
+        tuning_path = _write_release_tuning(
+            runs_dir=runs_dir,
+            run_id=run_id,
+            tuning_report=build_tuning_report(ledger=budget_ledger),
+        )
+        budget_violations = _release_budget_violations(budget_ledger)
+        decision = _release_decision_with_budget(task_decision, budget_violations)
+        if decision != task_decision:
+            release_metrics["decision"] = decision
+            release_metrics["budget_violations"] = budget_violations
+            metrics_path = _write_release_metrics(runs_dir=runs_dir, run_id=run_id, metrics=release_metrics)
+            _report(progress, "event=release_budget_exceeded violations=" + json.dumps(budget_violations, sort_keys=True))
+        release_state = _update_release_state(release_state, state=ReleaseState.FINALIZING, decision=decision)
+        _persist_release_state(release_state_path, release_state)
+        finalization = _finalize_release(
+            repo_path=config.repo_path,
+            integration_branch=feature_branch,
+            base_branch=config.default_base_branch,
+            decision=decision,
+            mode=release_finalize,
             progress=progress,
         )
-    else:
-        task_results = _run_release_sequential(
-            project_id=project_id,
-            config_repo_path=config.repo_path,
-            config_dir=config_dir,
+        summary_path = _write_release_summary(
             runs_dir=runs_dir,
-            task_base_branch=feature_branch,
-            task_inputs=task_inputs,
-            executor=executor,
-            verification_timeout_seconds=verification_timeout_seconds,
-            allow_dirty=allow_dirty,
-            commit_on_accept=commit_on_accept,
-            merge_on_accept=merge_on_accept,
-            push_on_accept=push_on_accept,
-            stop_on_failure=stop_on_failure,
-            debug_keep_artifacts=debug_keep_artifacts,
-            progress=progress,
+            run_id=run_id,
+            release_id=release_id,
+            decision=decision,
+            task_results=task_results,
+            log_path=log_path,
+            raw_log_path=raw_log_path,
+            integration_branch=feature_branch,
+            finalization=finalization,
+            budget_path=budget_path,
+            tuning_path=tuning_path,
+            budget_violations=budget_violations,
         )
-
-    task_decision = _release_decision([result.decision for result in task_results])
-    release_metrics = _build_release_metrics(
-        run_id=run_id,
-        release_id=release_id,
-        decision=task_decision,
-        task_results=task_results,
-        raw_log_path=raw_log_path,
-        runs_dir=runs_dir,
-    )
-    metrics_path = _write_release_metrics(
-        runs_dir=runs_dir,
-        run_id=run_id,
-        metrics=release_metrics,
-    )
-    budget_ledger = build_budget_ledger(release_metrics=release_metrics, budget=config.budget)
-    budget_path = _write_release_budget(runs_dir=runs_dir, run_id=run_id, ledger=budget_ledger)
-    tuning_path = _write_release_tuning(
-        runs_dir=runs_dir,
-        run_id=run_id,
-        tuning_report=build_tuning_report(ledger=budget_ledger),
-    )
-    budget_violations = _release_budget_violations(budget_ledger)
-    decision = _release_decision_with_budget(task_decision, budget_violations)
-    if decision != task_decision:
-        release_metrics["decision"] = decision
-        release_metrics["budget_violations"] = budget_violations
-        metrics_path = _write_release_metrics(runs_dir=runs_dir, run_id=run_id, metrics=release_metrics)
-        _report(progress, "event=release_budget_exceeded violations=" + json.dumps(budget_violations, sort_keys=True))
-    finalization = _finalize_release(
-        repo_path=config.repo_path,
-        integration_branch=feature_branch,
-        base_branch=config.default_base_branch,
-        decision=decision,
-        mode=release_finalize,
-        progress=progress,
-    )
-    summary_path = _write_release_summary(
-        runs_dir=runs_dir,
-        run_id=run_id,
-        release_id=release_id,
-        decision=decision,
-        task_results=task_results,
-        log_path=log_path,
-        raw_log_path=raw_log_path,
-        integration_branch=feature_branch,
-        finalization=finalization,
-        budget_path=budget_path,
-        tuning_path=tuning_path,
-        budget_violations=budget_violations,
-    )
-    review_path = _write_release_review(
-        runs_dir=runs_dir,
-        run_id=run_id,
-        release_id=release_id,
-        decision=decision,
-        task_results=task_results,
-        integration_branch=feature_branch,
-        finalization=finalization,
-        metrics_path=metrics_path,
-        budget_path=budget_path,
-        tuning_path=tuning_path,
-        budget_violations=budget_violations,
-    )
-    _report(progress, f"event=release_decision decision={decision}")
-    _report(progress, f"event=release_review path={review_path}")
-    _report(progress, f"event=release_metrics path={metrics_path}")
-    _report(progress, f"event=release_budget path={budget_path}")
-    _report(progress, f"event=release_tuning path={tuning_path}")
-    _write_release_log_summary(
-        log_path=log_path,
-        raw_log_path=raw_log_path,
-        release_id=release_id,
-        decision=decision,
-        task_results=task_results,
-        metrics_path=metrics_path,
-        budget_path=budget_path,
-        tuning_path=tuning_path,
-        review_path=review_path,
-    )
+        review_path = _write_release_review(
+            runs_dir=runs_dir,
+            run_id=run_id,
+            release_id=release_id,
+            decision=decision,
+            task_results=task_results,
+            integration_branch=feature_branch,
+            finalization=finalization,
+            metrics_path=metrics_path,
+            budget_path=budget_path,
+            tuning_path=tuning_path,
+            budget_violations=budget_violations,
+        )
+        release_state = _update_release_state(
+            release_state,
+            state=_release_state_for_decision(decision),
+            decision=decision,
+            summary_path=summary_path,
+            review_path=review_path,
+            metrics_path=metrics_path,
+            budget_path=budget_path,
+            tuning_path=tuning_path,
+        )
+        _persist_release_state(release_state_path, release_state)
+        _report(progress, f"event=release_decision decision={decision}")
+        _report(progress, f"event=release_review path={review_path}")
+        _report(progress, f"event=release_metrics path={metrics_path}")
+        _report(progress, f"event=release_budget path={budget_path}")
+        _report(progress, f"event=release_tuning path={tuning_path}")
+        _write_release_log_summary(
+            log_path=log_path,
+            raw_log_path=raw_log_path,
+            release_id=release_id,
+            decision=decision,
+            task_results=task_results,
+            metrics_path=metrics_path,
+            budget_path=budget_path,
+            tuning_path=tuning_path,
+            review_path=review_path,
+        )
+    except KeyboardInterrupt:
+        _persist_release_state(release_state_path, _update_release_state(release_state, state=ReleaseState.INTERRUPTED))
+        raise
 
     return ReleaseRunResult(
         release_id=release_id,
@@ -365,7 +407,7 @@ def _run_release_parallel(
     failed = False
     task_results_by_id: dict[str, TaskRunResult] = {}
     futures: dict[Future[TaskRunResult], str] = {}
-    max_workers = max(1, len(task_inputs))
+    max_workers = max(1, min(len(task_inputs), os.cpu_count() or 1, 4))
     _report(progress, f"event=parallel_scheduler max_workers={max_workers}")
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         while pending or futures:
@@ -1037,6 +1079,22 @@ def _report(progress: Callable[[str], None] | None, message: str) -> None:
         progress(message)
 
 
+def _update_release_state(release_state: ReleaseRunState, **updates) -> ReleaseRunState:
+    return release_state.model_copy(update={"updated_at": datetime.now(UTC), **updates})
+
+
+def _persist_release_state(path: Path, release_state: ReleaseRunState) -> None:
+    write_json(path, release_state.model_dump(mode="json"))
+
+
+def _release_state_for_decision(decision: Decision) -> ReleaseState:
+    if decision == Decision.ACCEPTED:
+        return ReleaseState.ACCEPTED
+    if decision == Decision.ESCALATED:
+        return ReleaseState.ESCALATED
+    return ReleaseState.FAILED
+
+
 def _should_preserve_task_branch(result: TaskRunResult) -> bool:
     if result.finalize is None:
         return result.decision.decision == Decision.ACCEPTED
@@ -1061,8 +1119,9 @@ def _multiplexed_progress(
 
     def report(message: str) -> None:
         timestamp = datetime.now(UTC).isoformat()
-        raw_line = f"{timestamp} {message}\n"
-        display_messages = formatter.format(message)
+        safe_message = redact_text(message)
+        raw_line = f"{timestamp} {safe_message}\n"
+        display_messages = formatter.format(safe_message)
         with lock:
             raw_log_path.parent.mkdir(parents=True, exist_ok=True)
             with raw_log_path.open("a", encoding="utf-8") as file:

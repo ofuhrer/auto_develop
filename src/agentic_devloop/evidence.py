@@ -16,6 +16,7 @@ from agentic_devloop.models import (
     TaskRun,
 )
 from agentic_devloop.scientific import ScientificReview, benchmark_delta
+from agentic_devloop.security import redact_data, redact_text
 
 
 class EvidenceCollector:
@@ -49,29 +50,31 @@ class EvidenceCollector:
         executor_attempts_path = bundle_path / "executor_attempts.json"
 
         shutil.copyfile(contract_source_path, contract_path)
-        shutil.copyfile(executor_prompt_path, prompt_path)
-        shutil.copyfile(executor_result.stdout_path, executor_stdout_path)
-        shutil.copyfile(executor_result.stderr_path, executor_stderr_path)
-        shutil.copyfile(verification_log_path, verification_bundle_log_path)
+        _copy_redacted(executor_prompt_path, prompt_path)
+        _copy_redacted(executor_result.stdout_path, executor_stdout_path)
+        _copy_redacted(executor_result.stderr_path, executor_stderr_path)
+        _copy_redacted(verification_log_path, verification_bundle_log_path)
 
         run_state_path.write_text(
-            json.dumps(run_state.model_dump(mode="json"), indent=2) + "\n",
+            json.dumps(redact_data(run_state.model_dump(mode="json")), indent=2) + "\n",
             encoding="utf-8",
         )
         model_call_metadata_path.write_text(
             json.dumps(
-                {
-                    "backend": executor_result.backend,
-                    "model": executor_result.model,
-                    "command": executor_result.command,
-                    "exit_code": executor_result.exit_code,
-                    "duration_seconds": executor_result.duration_seconds,
-                    "timed_out": executor_result.timed_out,
-                    "prompt_chars": executor_result.prompt_chars,
-                    "stdout_chars": executor_result.stdout_chars,
-                    "stderr_chars": executor_result.stderr_chars,
-                    "approx_output_chars": executor_result.stdout_chars + executor_result.stderr_chars,
-                },
+                redact_data(
+                    {
+                        "backend": executor_result.backend,
+                        "model": executor_result.model,
+                        "command": executor_result.command,
+                        "exit_code": executor_result.exit_code,
+                        "duration_seconds": executor_result.duration_seconds,
+                        "timed_out": executor_result.timed_out,
+                        "prompt_chars": executor_result.prompt_chars,
+                        "stdout_chars": executor_result.stdout_chars,
+                        "stderr_chars": executor_result.stderr_chars,
+                        "approx_output_chars": executor_result.stdout_chars + executor_result.stderr_chars,
+                    }
+                ),
                 indent=2,
             )
             + "\n",
@@ -80,10 +83,12 @@ class EvidenceCollector:
         executor_attempts_path.write_text(
             json.dumps(
                 [
-                    {
-                        **attempt.model_dump(mode="json"),
-                        "approx_output_chars": attempt.stdout_chars + attempt.stderr_chars,
-                    }
+                    redact_data(
+                        {
+                            **attempt.model_dump(mode="json"),
+                            "approx_output_chars": attempt.stdout_chars + attempt.stderr_chars,
+                        }
+                    )
                     for attempt in executor_result.attempts
                 ],
                 indent=2,
@@ -91,9 +96,9 @@ class EvidenceCollector:
             + "\n",
             encoding="utf-8",
         )
-        git_diff_path.write_text(diff_patch(worktree_path), encoding="utf-8")
+        git_diff_path.write_text(redact_text(diff_patch(worktree_path)), encoding="utf-8")
         changed_files_path.write_text(
-            "\n".join(changed_files(worktree_path)) + "\n",
+            redact_text("\n".join(changed_files(worktree_path)) + "\n"),
             encoding="utf-8",
         )
 
@@ -181,7 +186,11 @@ def write_scientific_outputs(
     from agentic_devloop.scientific import write_scientific_review
 
     scientific_review_path = write_scientific_review(bundle.bundle_path / "scientific_review.yaml", review)
-    updates = {"scientific_review_path": scientific_review_path}
+    validation_review_path = write_scientific_review(bundle.bundle_path / "validation_review.yaml", review)
+    updates = {
+        "scientific_review_path": scientific_review_path,
+        "validation_review_path": validation_review_path,
+    }
     delta = benchmark_delta(task, review)
     if delta["required"] or delta["benchmark_changes"]:
         benchmark_delta_path = bundle.bundle_path / "benchmark_delta.json"
@@ -213,4 +222,8 @@ def _decision_yaml(decision: ReviewDecision) -> str:
 def _yaml(data: dict) -> str:
     import yaml
 
-    return yaml.safe_dump(data, sort_keys=False)
+    return yaml.safe_dump(redact_data(data), sort_keys=False)
+
+
+def _copy_redacted(source: Path, destination: Path) -> None:
+    destination.write_text(redact_text(source.read_text(encoding="utf-8")), encoding="utf-8")

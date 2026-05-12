@@ -49,7 +49,7 @@ def deterministic_review(
             task_id=task.task_id,
             decision=Decision.NEEDS_REVISION,
             reviewer=Reviewer.DETERMINISTIC,
-            rationale="Scientific review violations: " + "; ".join(scientific_review.violations),
+            rationale="Validation review violations: " + "; ".join(scientific_review.violations),
         )
 
     if len(changed_files) > budget.max_changed_files_per_task:

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from agentic_devloop.config import load_project_config
+from agentic_devloop.git_finalize import inspect_merge_lock, recover_merge_lock
 from agentic_devloop.process import run_process
 from agentic_devloop.release import feature_branch_name
 
@@ -17,8 +18,10 @@ class CleanupReport:
     worktree_paths: list[Path] = field(default_factory=list)
     task_branches: list[str] = field(default_factory=list)
     integration_branch: str | None = None
+    stale_lock_paths: list[Path] = field(default_factory=list)
     removed_worktrees: list[Path] = field(default_factory=list)
     deleted_branches: list[str] = field(default_factory=list)
+    removed_lock_paths: list[Path] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
 
@@ -37,6 +40,8 @@ def cleanup_release_artifacts(
     task_branches = _matching_branches(repo_path, f"agent/{release_id}/*")
     integration_branch = feature_branch_name(release_id)
     integration_branch_candidate = integration_branch if include_integration_branch else None
+    merge_lock = inspect_merge_lock(repo_path)
+    stale_lock_paths = [merge_lock.path] if merge_lock.exists and merge_lock.stale else []
 
     if integration_branch_candidate and not _branch_exists(repo_path, integration_branch_candidate):
         integration_branch_candidate = None
@@ -49,10 +54,12 @@ def cleanup_release_artifacts(
             worktree_paths=worktree_paths,
             task_branches=task_branches,
             integration_branch=integration_branch_candidate,
+            stale_lock_paths=stale_lock_paths,
         )
 
     removed_worktrees: list[Path] = []
     deleted_branches: list[str] = []
+    removed_lock_paths: list[Path] = []
     errors: list[str] = []
 
     for worktree_path in worktree_paths:
@@ -68,6 +75,9 @@ def cleanup_release_artifacts(
             deleted_branches.append(branch)
         else:
             errors.append(error)
+    recovered_lock = recover_merge_lock(repo_path)
+    if recovered_lock is not None:
+        removed_lock_paths.append(recovered_lock)
 
     return CleanupReport(
         project_id=project_id,
@@ -76,8 +86,10 @@ def cleanup_release_artifacts(
         worktree_paths=worktree_paths,
         task_branches=task_branches,
         integration_branch=integration_branch_candidate,
+        stale_lock_paths=stale_lock_paths,
         removed_worktrees=removed_worktrees,
         deleted_branches=deleted_branches,
+        removed_lock_paths=removed_lock_paths,
         errors=errors,
     )
 
