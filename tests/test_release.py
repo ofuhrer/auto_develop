@@ -736,6 +736,154 @@ def test_run_release_fails_when_release_budget_is_exceeded(tmp_path) -> None:
     assert "Violation: strong_model_calls_per_release exceeded budget" in review
 
 
+def test_run_release_accepts_minor_budget_overage_with_soft_decision_artifact(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, max_strong_model_calls_per_release=10)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+    runs_dir = tmp_path / "runs"
+    ledger_path = runs_dir / "v0.1.0" / "budget_ledger.json"
+    ledger_path.parent.mkdir(parents=True)
+    ledger_path.write_text(
+        json.dumps(
+            [
+                {
+                    "release_id": "v0.1.0",
+                    "kind": "strong_model",
+                    "model": "gpt-5.3-codex-spark",
+                    "reason": "planner",
+                    "created_at": "2026-05-12T00:00:00+00:00",
+                }
+            ]
+            * 11
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=runs_dir,
+        executor=FakeExecutor(),
+        merge_on_accept=True,
+        release_finalize="merge-main",
+    )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    review = result.review_path.read_text(encoding="utf-8")
+    metrics = json.loads(result.metrics_path.read_text(encoding="utf-8"))
+    soft_path = Path(summary["release_soft_gate_decision_path"])
+
+    assert result.decision == Decision.ACCEPTED
+    assert result.finalization is not None
+    assert summary["budget_violations"] == []
+    assert len(summary["soft_budget_findings"]) == 1
+    assert "strong_model_calls_per_release exceeded budget" in summary["soft_budget_findings"][0]
+    assert soft_path.exists()
+    assert "Soft decision artifact" in review
+    assert str(soft_path) in review
+    assert metrics["soft_budget_findings"] == summary["soft_budget_findings"]
+
+
+def test_run_release_rejects_severe_budget_overage(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, max_strong_model_calls_per_release=5)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+    runs_dir = tmp_path / "runs"
+    ledger_path = runs_dir / "v0.1.0" / "budget_ledger.json"
+    ledger_path.parent.mkdir(parents=True)
+    ledger_path.write_text(
+        json.dumps(
+            [
+                {
+                    "release_id": "v0.1.0",
+                    "kind": "strong_model",
+                    "model": "gpt-5.3-codex-spark",
+                    "reason": "planner",
+                    "created_at": "2026-05-12T00:00:00+00:00",
+                }
+            ]
+            * 7
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=runs_dir,
+        executor=FakeExecutor(),
+        merge_on_accept=True,
+        release_finalize="merge-main",
+    )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert result.decision == Decision.FAILED
+    assert result.finalization is None
+    assert summary["release_soft_gate_decision_path"] is None
+    assert summary["budget_violations"]
+    assert summary["soft_budget_findings"] == []
+
+
+def test_run_release_failed_task_remains_hard_failure_even_with_soft_budget_findings(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, max_strong_model_calls_per_release=10)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+    runs_dir = tmp_path / "runs"
+    ledger_path = runs_dir / "v0.1.0" / "budget_ledger.json"
+    ledger_path.parent.mkdir(parents=True)
+    ledger_path.write_text(
+        json.dumps(
+            [
+                {
+                    "release_id": "v0.1.0",
+                    "kind": "strong_model",
+                    "model": "gpt-5.3-codex-spark",
+                    "reason": "planner",
+                    "created_at": "2026-05-12T00:00:00+00:00",
+                }
+            ]
+            * 11
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=runs_dir,
+        executor=FailingExecutor(),
+        merge_on_accept=True,
+        release_finalize="merge-main",
+    )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert result.decision == Decision.ESCALATED
+    assert result.finalization is None
+    assert summary["soft_budget_findings"]
+    assert summary["release_soft_gate_decision_path"] is None
+
+
 def test_release_preflight_ignores_metadata_files(tmp_path) -> None:
     worktree_root = tmp_path / "worktrees"
     worktree_root.mkdir()

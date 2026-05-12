@@ -12,6 +12,7 @@ from typing import Callable
 from agentic_devloop.artifacts import cleanup_task_artifacts
 from agentic_devloop.budget import build_budget_ledger, build_tuning_report
 from agentic_devloop.config import load_project_config
+from agentic_devloop.evidence import write_release_soft_gate_decisions
 from agentic_devloop.git_finalize import (
     FinalizeResult,
     GitFinalizeError,
@@ -26,7 +27,13 @@ from agentic_devloop.models import (
     OverlapFinding,
     ReleaseOverlapReport,
     ReleasePlan,
+    ReleaseSoftGateDecisionRecord,
     ReviewDecision,
+    SoftGateDecision,
+    SoftGateDecisionOutcome,
+    SoftGateFinding,
+    SoftGateSeverity,
+    TaskSoftGateDecisionRecord,
     TaskContract,
 )
 from agentic_devloop.orchestrator import ExecutorProtocol, TaskRunResult, branch_name, run_task
@@ -64,6 +71,9 @@ class ReleaseRunResult:
     decision: Decision
     integration_branch: str | None = None
     finalization: FinalizeResult | None = None
+
+
+_RELEASE_BUDGET_SOFT_OVERAGE_RATIO = 0.2
 
 
 def make_release_run_id(release_id: str, now: datetime | None = None) -> str:
@@ -239,11 +249,27 @@ def run_release(
         run_id=run_id,
         tuning_report=build_tuning_report(ledger=budget_ledger),
     )
-    budget_violations = _release_budget_violations(budget_ledger)
-    decision = _release_decision_with_budget(task_decision, budget_violations)
+    budget_evaluation = _evaluate_release_budget(budget_ledger)
+    budget_violations = budget_evaluation["severe_violations"]
+    soft_budget_findings = budget_evaluation["soft_findings"]
+    release_metrics["budget_violations"] = budget_violations
+    release_metrics["soft_budget_findings"] = soft_budget_findings
+    release_soft_gate_decision_path: Path | None = None
+    decision = _release_decision_with_budget(
+        task_decision,
+        severe_budget_violations=budget_violations,
+    )
+    if task_decision == Decision.ACCEPTED and soft_budget_findings:
+        release_soft_gate_decision_path = _write_release_budget_soft_decision(
+            runs_dir=runs_dir,
+            run_id=run_id,
+            release_id=release_id,
+            findings=soft_budget_findings,
+            progress=progress,
+        )
+    metrics_path = _write_release_metrics(runs_dir=runs_dir, run_id=run_id, metrics=release_metrics)
     if decision != task_decision:
         release_metrics["decision"] = decision
-        release_metrics["budget_violations"] = budget_violations
         metrics_path = _write_release_metrics(runs_dir=runs_dir, run_id=run_id, metrics=release_metrics)
         _report(progress, "event=release_budget_exceeded violations=" + json.dumps(budget_violations, sort_keys=True))
     finalization = _finalize_release(
@@ -267,6 +293,8 @@ def run_release(
         budget_path=budget_path,
         tuning_path=tuning_path,
         budget_violations=budget_violations,
+        soft_budget_findings=soft_budget_findings,
+        release_soft_gate_decision_path=release_soft_gate_decision_path,
     )
     review_path = _write_release_review(
         runs_dir=runs_dir,
@@ -280,6 +308,8 @@ def run_release(
         budget_path=budget_path,
         tuning_path=tuning_path,
         budget_violations=budget_violations,
+        soft_budget_findings=soft_budget_findings,
+        release_soft_gate_decision_path=release_soft_gate_decision_path,
     )
     _report(progress, f"event=release_decision decision={decision}")
     _report(progress, f"event=release_review path={review_path}")
@@ -1038,6 +1068,8 @@ def _write_release_summary(
     budget_path: Path,
     tuning_path: Path,
     budget_violations: list[str],
+    soft_budget_findings: list[str],
+    release_soft_gate_decision_path: Path | None,
 ) -> Path:
     summary_dir = runs_dir / run_id
     summary_dir.mkdir(parents=True, exist_ok=True)
@@ -1052,6 +1084,8 @@ def _write_release_summary(
         "budget_path": str(budget_path),
         "tuning_path": str(tuning_path),
         "budget_violations": budget_violations,
+        "soft_budget_findings": soft_budget_findings,
+        "release_soft_gate_decision_path": str(release_soft_gate_decision_path) if release_soft_gate_decision_path else None,
         "integration_branch": integration_branch,
         "finalization": {
             "merged": finalization.merged,
@@ -1092,6 +1126,8 @@ def _write_release_review(
     budget_path: Path,
     tuning_path: Path,
     budget_violations: list[str],
+    soft_budget_findings: list[str],
+    release_soft_gate_decision_path: Path | None,
 ) -> Path:
     review_path = runs_dir / run_id / "release_review.md"
     lines = [
@@ -1111,6 +1147,11 @@ def _write_release_review(
         lines.extend(f"- Violation: {violation}" for violation in budget_violations)
     else:
         lines.append("- No configured release-level budget limits were exceeded.")
+    if soft_budget_findings:
+        lines.append("- Soft findings accepted with mitigation:")
+        lines.extend(f"- Soft finding: {finding}" for finding in soft_budget_findings)
+    if release_soft_gate_decision_path is not None:
+        lines.append(f"- Soft decision artifact: `{release_soft_gate_decision_path}`")
     lines.extend([
         "",
         "## Task Results",
@@ -1257,18 +1298,72 @@ def _write_release_tuning(*, runs_dir: Path, run_id: str, tuning_report) -> Path
     return tuning_path
 
 
-def _release_budget_violations(ledger) -> list[str]:
-    return [
-        f"{entry.name} exceeded budget: actual {entry.actual} {entry.unit} over configured {entry.configured}"
-        for entry in ledger.usage
-        if entry.scope == "release" and entry.over_by is not None and entry.over_by > 0
-    ]
+def _evaluate_release_budget(ledger) -> dict[str, list[str]]:
+    severe_violations: list[str] = []
+    soft_findings: list[str] = []
+    for entry in ledger.usage:
+        if entry.scope != "release" or entry.over_by is None or entry.over_by <= 0:
+            continue
+        message = (
+            f"{entry.name} exceeded budget: actual {entry.actual} {entry.unit} "
+            f"over configured {entry.configured}"
+        )
+        if _is_soft_release_budget_overage(entry.configured, entry.over_by):
+            soft_findings.append(message)
+        else:
+            severe_violations.append(message)
+    return {"severe_violations": severe_violations, "soft_findings": soft_findings}
 
 
-def _release_decision_with_budget(decision: Decision, budget_violations: list[str]) -> Decision:
-    if budget_violations and decision == Decision.ACCEPTED:
+def _release_decision_with_budget(decision: Decision, severe_budget_violations: list[str]) -> Decision:
+    if severe_budget_violations and decision == Decision.ACCEPTED:
         return Decision.FAILED
     return decision
+
+
+def _is_soft_release_budget_overage(configured: int | float | None, over_by: int | float) -> bool:
+    if configured is None or configured <= 0:
+        return False
+    return (float(over_by) / float(configured)) <= _RELEASE_BUDGET_SOFT_OVERAGE_RATIO
+
+
+def _write_release_budget_soft_decision(
+    *,
+    runs_dir: Path,
+    run_id: str,
+    release_id: str,
+    findings: list[str],
+    progress: Callable[[str], None] | None,
+) -> Path:
+    finding_records: list[TaskSoftGateDecisionRecord] = []
+    for index, finding in enumerate(findings, start=1):
+        finding_id = f"release-budget-{index}"
+        finding_records.append(
+            TaskSoftGateDecisionRecord(
+                task_id="release-budget",
+                finding=SoftGateFinding(
+                    finding_id=finding_id,
+                    severity=SoftGateSeverity.MODERATE,
+                    risk=finding,
+                    recommended_actions=["Inspect release_budget.json and release_tuning.md before finalizing downstream integrations."],
+                    evidence_paths=[runs_dir / run_id / "release_budget.json", runs_dir / run_id / "release_tuning.md"],
+                ),
+                decision=SoftGateDecision(
+                    finding_id=finding_id,
+                    decision=SoftGateDecisionOutcome.ACCEPT_WITH_MITIGATION,
+                    rationale="Release-level overage remained within the configured soft threshold.",
+                    fallback_plan="Split planned follow-up scope or tighten model usage on the next run if this repeats.",
+                    validators_rerun=["release_budget.json", "release_metrics.json", "release_tuning.md"],
+                    evidence_paths=[runs_dir / run_id / "release_metrics.json"],
+                ),
+            )
+        )
+    artifact_path = write_release_soft_gate_decisions(
+        runs_dir / run_id,
+        ReleaseSoftGateDecisionRecord(release_id=release_id, decisions=finding_records),
+    )
+    _report(progress, f"event=release_soft_gate_decisions path={artifact_path}")
+    return artifact_path
 
 
 def _write_release_log_summary(
