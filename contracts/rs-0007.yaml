@@ -30,8 +30,8 @@ required_evidence:
 - changed-files list
 verification:
   commands:
-  - PYTHONPATH=src .venv/bin/python -m agentic_devloop --help
-  - PYTHONPATH=src .venv/bin/python -m agentic_devloop run-release --help
+  - PYTHONPATH=src python -m agentic_devloop --help
+  - PYTHONPATH=src python -m agentic_devloop run-release --help
   - git diff --check
   profile: null
 stop_conditions:
