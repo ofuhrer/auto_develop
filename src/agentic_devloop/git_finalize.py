@@ -56,8 +56,8 @@ def ensure_branch_from_base(repo_path: Path, branch: str, base_branch: str) -> N
     _ensure_clean(repo_path)
     if _branch_exists(repo_path, branch):
         return
-    if not _branch_exists(repo_path, base_branch):
-        raise GitFinalizeError(f"base branch not found: {base_branch}", step="branch")
+    # Only assert that the base ref exists here; release finalization owns branch switching.
+    _require_branch(repo_path, base_branch, step="branch")
     _git(repo_path, ["branch", branch, base_branch])
 
 
@@ -162,6 +162,11 @@ def _has_remote(repo_path: Path, remote: str) -> bool:
 
 def _branch_exists(repo_path: Path, branch: str) -> bool:
     return _ref_exists(repo_path, branch)
+
+
+def _require_branch(repo_path: Path, branch: str, *, step: str) -> None:
+    if not _branch_exists(repo_path, branch):
+        raise GitFinalizeError(f"base branch not found: {branch}", step=step)
 
 
 def _ref_exists(repo_path: Path, ref: str) -> bool:

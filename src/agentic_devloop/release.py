@@ -38,6 +38,8 @@ from agentic_devloop.runtime_state import write_json
 from agentic_devloop.security import redact_text, validate_identifier
 from agentic_devloop.yaml_io import load_yaml_model
 
+MAX_PARALLEL_RELEASE_WORKERS = 4
+
 
 @dataclass(frozen=True)
 class ReleaseRunResult:
@@ -407,7 +409,7 @@ def _run_release_parallel(
     failed = False
     task_results_by_id: dict[str, TaskRunResult] = {}
     futures: dict[Future[TaskRunResult], str] = {}
-    max_workers = max(1, min(len(task_inputs), os.cpu_count() or 1, 4))
+    max_workers = max(1, min(len(task_inputs), os.cpu_count() or 1, MAX_PARALLEL_RELEASE_WORKERS))
     _report(progress, f"event=parallel_scheduler max_workers={max_workers}")
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         while pending or futures:

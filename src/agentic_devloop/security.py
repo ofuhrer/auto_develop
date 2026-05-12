@@ -4,6 +4,8 @@ import re
 from typing import Any
 
 
+# Keep controller-generated branch names and run directory names compact and portable.
+# The 64-character cap leaves room for prefixes like feature/, agent/, and timestamps.
 SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 _INLINE_SECRET_RE = re.compile(
