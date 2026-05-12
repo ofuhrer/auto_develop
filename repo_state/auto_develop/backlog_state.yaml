@@ -28,7 +28,9 @@ candidate_epics:
     rationale: The target operator experience is minimal setup followed by a high-level epic-count loop.
 last_reviewed: 2026-05-12
 notes:
-  - The next selected epic is governor-loop-service-boundaries; it should create GovernorLoop, StateStore, and RepairPolicy seams before expanding the product-facing multi-epic loop.
+  - The governor-loop-service-boundaries epic has now extracted GovernorLoop, StateStore, and RepairPolicy seams for one-epic autonomous execution, state persistence, and repair classification.
+  - The next planned increment is the product-facing multi-epic loop; that work should stay marked as planned until the code supports it.
+  - Documentation and state-note updates must stay implementation-true and avoid describing the N-epic governor as already shipped.
   - Service extraction is an enabling increment for autonomous roadmap-driven execution and repair, not cosmetic cleanup.
   - Human review is an escalation boundary, not a routine planning gate.
   - The governor should read release artifacts, metrics, budget ledgers, tuning reports, and validation outputs before choosing the next epic.

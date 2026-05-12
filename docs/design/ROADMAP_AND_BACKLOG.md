@@ -194,6 +194,7 @@ Required capabilities:
 
 Current implementation status:
 
+- The governor-control path now has an explicit one-epic `GovernorLoop` service boundary, a typed `StateStore` persistence seam, and a `RepairPolicy` decision seam.
 - `agent-loop plan-backlog --mode strong-model --execute-planner` lets the configured planner agent read bounded documentation, roadmap context, and the repository goal, then emit a validated `BacklogPlan` with prioritized epics and one selected next epic.
 - `BacklogPlan` now carries `roadmap_updates` and `repo_state_updates` so the governor can surface learned roadmap/backlog changes from docs, artifacts, metrics, and validation evidence.
 - Deterministic `plan-backlog` remains available as fallback/test scaffolding, not as the target autonomous governor behavior.
@@ -205,11 +206,11 @@ Current implementation status:
 
 Remaining Phase 4 work:
 
-1. Add a top-level `run-governor` or extended `run-backlog` loop that accepts an epic count and continues through the next N highest-priority epics.
+1. Extend the current one-epic governor boundary into a top-level `run-governor` or extended `run-backlog` loop that accepts an epic count and continues through the next N highest-priority epics.
 2. Make persistent backlog state authoritative for completed, skipped, blocked, active, and candidate epics across runs.
 3. Teach the governor to generate and normalize sub-task contracts directly from the selected epic, including schema repair/retry when planner output is semantically useful but invalid.
 4. Teach the governor to decide which workers can run in parallel and which must be chained based on dependencies, overlap, and run outcomes.
-5. Add autonomous repair loops for contract-contained subsystem failures before stopping: verification-environment drift, flaky tests, small syntax/type errors, task-summary/actual-diff mismatches, and narrow merge conflicts.
+5. Extend `RepairPolicy` into autonomous repair loops for contract-contained subsystem failures before stopping: verification-environment drift, flaky tests, small syntax/type errors, task-summary/actual-diff mismatches, and narrow merge conflicts.
 6. Teach the governor to apply or commit policy-compliant roadmap/backlog/repo-state updates after each epic with outcome, metrics, lessons, and next recommendations.
 7. Add a bootstrap/onboarding command or checklist that turns a freshly cloned target repo plus one or two prompts into the required config, repo-state memory, objective/backlog directories, and initial doctor checks.
 8. Improve evidence for failed verification by preserving command stdout/stderr and concise failure excerpts, not just exit codes.

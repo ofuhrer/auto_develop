@@ -10,7 +10,7 @@ This directory contains user, maintainer, and design documentation for `agentic-
 
 ## Project Summary
 
-`agentic-devloop` is an autonomous-first orchestration layer around coding agents. A governor agent owns roadmap/backlog analysis, epic selection, and state refresh. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, and configured Git finalization. Coding agents own implementation inside narrow task contracts.
+`agentic-devloop` is an autonomous-first orchestration layer around coding agents. The current governor path is split into a one-epic `GovernorLoop` service, a typed `StateStore` persistence seam, and a `RepairPolicy` decision seam. Those seams own roadmap/backlog analysis for the current epic, state persistence, and bounded repair decisions. The broader multi-epic governor loop and fully automated state refresh remain planned. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, and configured Git finalization. Coding agents own implementation inside narrow task contracts.
 
 The project prioritizes:
 
@@ -30,6 +30,9 @@ Implemented capabilities include:
 - isolated Git worktree creation;
 - Codex CLI executor wrapper with bounded attempts and fallback models;
 - `doctor` preflight diagnostics for repo cleanliness, stale worktrees, release-branch collisions, and routing warnings;
+- one-epic `GovernorLoop` service boundaries for selected-epic execution and follow-up state refresh inputs;
+- typed `StateStore` persistence over repo-state files and run summaries;
+- `RepairPolicy` decision seams for classifying failures into normalize, retry, repair, escalate, or stop;
 - deterministic verification command execution;
 - evidence bundle collection;
 - deterministic review and persisted decisions;
@@ -47,8 +50,10 @@ Implemented capabilities include:
 
 Important remaining gaps:
 
+- multi-epic governor looping beyond the current one-epic service boundary;
+- fully automated state refresh across repeated epic cycles;
 - stronger model-based repeated-failure diagnosis backend;
-- richer semantic merge-conflict repair;
+- richer semantic merge-conflict repair and broader repair strategies;
 - automated pull-request creation;
 - repository-instruction-driven remote execution evidence, if a target project requires it;
 - stronger runtime adapters for local/open model roles.

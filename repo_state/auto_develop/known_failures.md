@@ -57,22 +57,34 @@
   on the integration branch. This edge case is acceptable for dependency
   tracking but should be represented more clearly in release review output.
 
+## Release learning: over-broad docs task
+
+- The `governor-service-docs-and-state-notes` task showed that repo-state
+  documentation can overreach if it starts describing the N-epic governor as
+  already implemented.
+- State notes should only describe verified seams and keep the multi-epic
+  governor explicitly marked as planned until the code supports it.
+- The useful learning from the docs task is to preserve the distinction
+  between implemented `GovernorLoop`, `StateStore`, and `RepairPolicy` seams
+  and the still-planned multi-epic loop.
+
 ## Architectural review: consolidation needed
 
 - `release.py`, `orchestrator.py`, `backlog.py`, `cli.py`, and `models.py` are
   carrying too many responsibilities for the intended multi-epic governor.
-- The next architecture increment should extract service boundaries before
-  adding more workflow behavior:
-  - `GovernorLoop` for N-epic execution, stopping criteria, retry policy, and
-    repo-state refresh.
+- The service boundaries now split out the single-epic governor path:
+  - `GovernorLoop` for one-epic execution, stopping criteria, and repo-state
+    refresh.
   - `StateStore` for backlog state, active releases, completed/blocked epics,
     run summaries, and known learnings.
   - `RepairPolicy` for planner schema repair, verification-environment repair,
     flaky-test retry, narrow merge-conflict repair, and final escalation.
-  - `ReleaseScheduler`, `ReleaseReporter`, `ReleaseFinalizer`, and
-    `ReleaseMetrics` from `release.py`.
-  - Task execution, evidence/review, finalization, and repair seams from
-    `orchestrator.py`.
+- The remaining architecture increment is the product-facing multi-epic
+  governor loop; it should not be recorded as implemented yet.
+- `ReleaseScheduler`, `ReleaseReporter`, `ReleaseFinalizer`, and
+  `ReleaseMetrics` from `release.py`.
+- Task execution, evidence/review, finalization, and repair seams from
+  `orchestrator.py`.
 - This is not cosmetic refactoring. Without these seams, the high-level
   autonomous loop will continue to accumulate special cases in modules that
   already mix policy, IO, subprocesses, Git state, logs, and artifacts.
