@@ -22,6 +22,16 @@ from agentic_devloop.models import (
 from agentic_devloop.scientific import ScientificReview, benchmark_delta
 
 
+def _normalized_string_list(values: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for value in values:
+        item = str(value).strip()
+        if not item:
+            continue
+        normalized.append(item)
+    return normalized
+
+
 class EvidenceCollector:
     def collect(
         self,
@@ -280,17 +290,17 @@ def write_feature_review_decision(
         "reviewer": decision.reviewer.value,
         "summary": decision.summary,
         "recommendation": decision.recommendation.value,
-        "accepted_risks": decision.accepted_risks,
-        "rerun_verification_commands": decision.rerun_verification_commands,
+        "accepted_risks": _normalized_string_list(decision.accepted_risks),
+        "rerun_verification_commands": _normalized_string_list(decision.rerun_verification_commands),
         "findings": [
             {
                 "finding_id": finding.finding_id,
                 "severity": finding.severity.value,
                 "summary": finding.summary,
-                "affected_files": finding.affected_files,
+                "affected_files": _normalized_string_list(finding.affected_files),
                 "evidence_paths": [str(path) for path in finding.evidence_paths],
-                "required_repairs": finding.required_repairs,
-                "optional_follow_ups": finding.optional_follow_ups,
+                "required_repairs": _normalized_string_list(finding.required_repairs),
+                "optional_follow_ups": _normalized_string_list(finding.optional_follow_ups),
             }
             for finding in decision.findings
         ],
@@ -306,9 +316,9 @@ def write_feature_review_recheck(
     feature_review_recheck_path = release_bundle_path / "feature_review_recheck.json"
     payload = {
         "release_id": record.release_id,
-        "unresolved_finding_ids": record.unresolved_finding_ids,
-        "resolved_finding_ids": record.resolved_finding_ids,
-        "accepted_finding_ids": record.accepted_finding_ids,
+        "unresolved_finding_ids": _normalized_string_list(record.unresolved_finding_ids),
+        "resolved_finding_ids": _normalized_string_list(record.resolved_finding_ids),
+        "accepted_finding_ids": _normalized_string_list(record.accepted_finding_ids),
         "stop_reason": record.stop_reason,
     }
     feature_review_recheck_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")

@@ -10,6 +10,19 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def _normalize_non_empty_string_list(values: object, *, error_message: str) -> list[str]:
+    if not isinstance(values, list):
+        return values
+
+    normalized: list[str] = []
+    for value in values:
+        item = str(value).strip()
+        if not item:
+            raise ValueError(error_message)
+        normalized.append(item)
+    return normalized
+
+
 class ExecutorConfig(StrictModel):
     type: str = Field(min_length=1)
     model: str = Field(min_length=1)
@@ -532,12 +545,34 @@ class FeatureReviewFinding(StrictModel):
     required_repairs: list[str] = Field(default_factory=list)
     optional_follow_ups: list[str] = Field(default_factory=list)
 
+    @field_validator("affected_files", "required_repairs", "optional_follow_ups", mode="before")
+    @classmethod
+    def normalize_list_items(cls, values: object) -> object:
+        return _normalize_non_empty_string_list(values, error_message="feature review list items must not be empty")
+
     @field_validator("affected_files", "required_repairs", "optional_follow_ups")
     @classmethod
     def list_items_must_not_be_empty(cls, values: list[str]) -> list[str]:
         if any(not value.strip() for value in values):
             raise ValueError("feature review list items must not be empty")
         return values
+
+    @field_validator("evidence_paths", mode="before")
+    @classmethod
+    def evidence_paths_must_not_be_empty(cls, values: object) -> object:
+        if not isinstance(values, list):
+            return values
+
+        normalized: list[object] = []
+        for value in values:
+            if isinstance(value, str):
+                item = value.strip()
+                if not item:
+                    raise ValueError("feature review evidence paths must not be empty")
+                normalized.append(item)
+                continue
+            normalized.append(value)
+        return normalized
 
     @model_validator(mode="after")
     def actionable_findings_require_affected_files(self) -> "FeatureReviewFinding":
@@ -554,6 +589,11 @@ class FeatureReviewDecision(StrictModel):
     accepted_risks: list[str] = Field(default_factory=list)
     recommendation: FeatureReviewRecommendation
     rerun_verification_commands: list[str] = Field(default_factory=list)
+
+    @field_validator("accepted_risks", "rerun_verification_commands", mode="before")
+    @classmethod
+    def normalize_list_items(cls, values: object) -> object:
+        return _normalize_non_empty_string_list(values, error_message="feature review list items must not be empty")
 
     @field_validator("accepted_risks", "rerun_verification_commands")
     @classmethod
@@ -583,6 +623,11 @@ class FeatureReviewRecheckRecord(StrictModel):
         if value == "blocked_by":
             return FeatureReviewRecheckStopReason.BLOCKED_BY_HARD_GATE
         return value
+
+    @field_validator("unresolved_finding_ids", "resolved_finding_ids", "accepted_finding_ids", mode="before")
+    @classmethod
+    def normalize_finding_id_items(cls, values: object) -> object:
+        return _normalize_non_empty_string_list(values, error_message="feature review finding IDs must not be empty")
 
     @field_validator("unresolved_finding_ids", "resolved_finding_ids", "accepted_finding_ids")
     @classmethod
