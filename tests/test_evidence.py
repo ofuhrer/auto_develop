@@ -32,10 +32,7 @@ from agentic_devloop.models import (
     TaskState,
 )
 from agentic_devloop.review import deterministic_review
-from agentic_devloop.yaml_io import load_yaml_model
-
-
-ROOT = Path(__file__).resolve().parents[1]
+from agentic_devloop.yaml_io import write_yaml_model
 
 
 def _git(repo, *args: str) -> None:
@@ -53,7 +50,9 @@ def test_evidence_collector_writes_complete_bundle(tmp_path) -> None:
     _git(repo, "commit", "-m", "initial")
     (repo / "README.md").write_text("# changed\n", encoding="utf-8")
 
-    task = load_yaml_model(ROOT / "contracts" / "rr-0001.yaml", TaskContract)
+    task = _task_contract()
+    contract_source_path = tmp_path / "contract.yaml"
+    write_yaml_model(contract_source_path, task)
     now = datetime.now(timezone.utc)
     run_state = TaskRun(
         task_id=task.task_id,
@@ -95,7 +94,7 @@ def test_evidence_collector_writes_complete_bundle(tmp_path) -> None:
         run_state=run_state,
         worktree_path=repo,
         bundle_path=tmp_path / "runs" / "rr-0001",
-        contract_source_path=ROOT / "contracts" / "rr-0001.yaml",
+        contract_source_path=contract_source_path,
         executor_prompt_path=prompt_path,
         executor_result=executor_result,
         verification_log_path=verification_log_path,
@@ -281,6 +280,23 @@ def task_budget():
         max_strong_model_calls_per_release=10,
         max_changed_files_per_task=8,
         max_diff_lines_per_task=600,
+    )
+
+
+def _task_contract() -> TaskContract:
+    return TaskContract(
+        task_id="rr-0001",
+        release_id="v0.8.0",
+        title="Add regression test for selected validation gate report mismatch",
+        task_type="scientific_validation",
+        budget_class="M",
+        objective="Add one regression test covering the mismatch between selected gate evidence and generated report output.",
+        allowed_files=["tests/**", "scripts/validate_public_real_site_conditional_pilot_run.py"],
+        forbidden_changes=["Do not change validation schema."],
+        required_evidence=["git diff", "test output", "changed-files list"],
+        verification={"commands": ["true"]},
+        stop_conditions=["Stop if scope changes."],
+        scientific_assumptions=["No scientific behavior changes are expected."],
     )
 
 

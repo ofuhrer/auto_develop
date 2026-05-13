@@ -1,17 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from agentic_devloop.models import Budget, Decision, SoftGateSeverity, TaskContract
 from agentic_devloop.review import deterministic_review
-from agentic_devloop.yaml_io import load_yaml_model
-
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_deterministic_review_accepts_in_contract_change() -> None:
-    task = load_yaml_model(ROOT / "contracts" / "rr-0001.yaml", TaskContract)
+    task = _task_contract()
     budget = Budget(
         max_executor_attempts_per_task=2,
         max_strong_model_calls_per_release=10,
@@ -31,7 +25,7 @@ def test_deterministic_review_accepts_in_contract_change() -> None:
 
 
 def test_deterministic_review_rejects_disallowed_file() -> None:
-    task = load_yaml_model(ROOT / "contracts" / "rr-0001.yaml", TaskContract)
+    task = _task_contract()
     budget = Budget(
         max_executor_attempts_per_task=2,
         max_strong_model_calls_per_release=10,
@@ -51,7 +45,7 @@ def test_deterministic_review_rejects_disallowed_file() -> None:
 
 
 def test_deterministic_review_classifies_minor_budget_overage_as_soft_finding() -> None:
-    task = load_yaml_model(ROOT / "contracts" / "rr-0001.yaml", TaskContract)
+    task = _task_contract()
     budget = Budget(
         max_executor_attempts_per_task=2,
         max_strong_model_calls_per_release=10,
@@ -73,3 +67,20 @@ def test_deterministic_review_classifies_minor_budget_overage_as_soft_finding() 
     assert decision.decision == Decision.ACCEPTED
     assert len(decision.soft_gate_findings) == 1
     assert decision.soft_gate_findings[0].severity == SoftGateSeverity.LOW
+
+
+def _task_contract() -> TaskContract:
+    return TaskContract(
+        task_id="rr-0001",
+        release_id="v0.8.0",
+        title="Add regression test for selected validation gate report mismatch",
+        task_type="scientific_validation",
+        budget_class="M",
+        objective="Add one regression test covering the mismatch between selected gate evidence and generated report output.",
+        allowed_files=["tests/**", "scripts/validate_public_real_site_conditional_pilot_run.py"],
+        forbidden_changes=["Do not change validation schema."],
+        required_evidence=["git diff", "test output", "changed-files list"],
+        verification={"commands": ["true"]},
+        stop_conditions=["Stop if scope changes."],
+        scientific_assumptions=["No scientific behavior changes are expected."],
+    )

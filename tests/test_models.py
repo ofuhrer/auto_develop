@@ -38,8 +38,27 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_sample_yaml_files_validate() -> None:
     project = load_yaml_model(ROOT / "configs" / "rust_rockfall.yaml", ProjectConfig)
-    objective = load_yaml_model(ROOT / "objectives" / "v0.8.0.yaml", ReleaseObjective)
-    contract = load_yaml_model(ROOT / "contracts" / "rr-0001.yaml", TaskContract)
+    objective = ReleaseObjective(
+        release_id="v0.8.0",
+        title="Major feature release",
+        objective="Implement a release-sized feature increment for rust_rockfall.",
+        non_goals=["Do not weaken validation gates."],
+        acceptance_criteria=["All default verification checks pass."],
+    )
+    contract = TaskContract(
+        task_id="rr-0001",
+        release_id="v0.8.0",
+        title="Add regression test",
+        task_type="scientific_validation",
+        budget_class="M",
+        objective="Add one bounded regression test.",
+        allowed_files=["tests/**"],
+        forbidden_changes=["Do not weaken assertions."],
+        required_evidence=["git diff", "changed-files list"],
+        verification={"commands": ["true"]},
+        stop_conditions=["Stop if scope changes."],
+        scientific_assumptions=["No scientific behavior changes are expected."],
+    )
 
     assert project.project_id == "rust_rockfall"
     assert project.model_catalog["coding_worker"].model == "gpt-5.3-codex"
