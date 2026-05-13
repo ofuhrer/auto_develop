@@ -1,6 +1,6 @@
-active_goal: Enable a freshly onboarded auto_develop checkout and target repository to run a high-level autonomous development loop for the next N highest-value epics, with a runtime supervisor that diagnoses, repairs, and resumes contract-contained subsystem failures without routine human intervention.
+active_goal: Enable a freshly onboarded auto_develop checkout and target repository to run a high-level autonomous development loop for the next N highest-value epics, with a governor/supervisor agent that chooses the execution strategy, uses one-shot implementation or decomposed sub-agents as appropriate, diagnoses and repairs contract-contained subsystem failures, normalizes useful model output before strict validation, and stops only for major hard-policy problems.
 governor_mode: autonomous_first
-current_focus: review-loop-convergence-policy
+current_focus: supervisor-execution-strategy
 active_epic: null
 completed_epics:
   - release-governor-1
@@ -17,48 +17,58 @@ completed_epics:
   - supervisor-owned-release-scheduling
 blocked_epics: []
 candidate_epics:
-  - id: review-loop-convergence-policy
+  - id: supervisor-execution-strategy
     priority: 1
+    title: Let the supervisor choose one-shot versus decomposed execution.
+    rationale: The one-shot comparison showed that cohesive medium architectural work can be faster, more coherent, and more mergeable than a fixed multi-contract release. The governor should choose one-shot, sequential contracts, parallel contracts, stacked branches, patch handoff, or replanning before generating contracts.
+    next_release_id: supervisor-execution-strategy
+  - id: model-output-normalization
+    priority: 2
+    title: Normalize useful planner and reviewer output before strict validation.
+    rationale: The release blocked because useful reviewer findings had empty evidence_paths. Raw LLM output should be normalized or repaired into strict typed artifacts before hard gates decide whether to stop.
+    next_release_id: model-output-normalization
+  - id: review-loop-convergence-policy
+    priority: 3
     title: Add convergence policy for reviewer repair loops.
     rationale: Multiple repair passes are useful for blocking findings, but repeated adjacent findings should be classified as blockers, soft findings, duplicates, false positives, scope expansion, or backlog follow-ups before retry budget churn.
     next_release_id: review-loop-convergence-policy
   - id: multi-epic-run-governor
-    priority: 2
+    priority: 4
     title: Run the next N highest-priority epics autonomously.
-    rationale: Converts one-epic run-backlog into the intended high-level development loop after state review, feature review, persistent memory, and supervisor decision records can prevent stale work and procedural stops.
+    rationale: Converts one-epic run-backlog into the intended high-level development loop after state review, feature review, persistent memory, supervisor decisions, execution-strategy selection, and output normalization can prevent stale work and procedural stops.
     next_release_id: multi-epic-run-governor
   - id: governor-cockpit-v2
-    priority: 3
+    priority: 5
     title: Expand governor cockpit logging for full N-epic runs.
     rationale: Operators need one `governor.log` stream that links state review, backlog selection, child releases, feature reviews, repair loops, state refresh, and next-epic selection across repeated cycles.
     next_release_id: governor-cockpit-v2
   - id: shared-verification-runtime
-    priority: 4
+    priority: 6
     title: Make isolated worktrees run tests through a configured shared runtime.
     rationale: Sub-agents repeatedly could not run pytest because task worktrees do not contain .venv; verification should use project runtime policy rather than worktree-local assumptions.
     next_release_id: shared-verification-runtime
   - id: environment-repair-actions
-    priority: 5
+    priority: 7
     title: Repair safe verification-environment drift autonomously.
     rationale: Stale editable installs, command-not-found errors, missing PYTHONPATH, and dependency runtime drift should become bounded repair actions when project policy declares a safe repair.
     next_release_id: environment-repair-actions
   - id: executor-liveness-supervision
-    priority: 6
+    priority: 8
     title: Classify active, stalled, hung, and environment-blocked executors.
     rationale: Long-running workers need process/output/file heartbeat evidence so the supervisor can wait, inspect, restart, or stop without human guessing.
     next_release_id: executor-liveness-supervision
   - id: target-artifact-ownership
-    priority: 7
+    priority: 9
     title: Store target development memory in the target repo or a durable control repo.
     rationale: Deleting and recloning the auto_develop controller should not lose target repo-state, objectives, contracts, completed-epic history, or next-epic planning context.
     next_release_id: target-artifact-ownership
   - id: governor-state-refresh
-    priority: 8
+    priority: 10
     title: Apply roadmap and repo-state updates after each epic.
     rationale: Ensures new learnings from artifacts, validation, metrics, review findings, and documentation feed the next planning cycle.
     next_release_id: governor-state-refresh
   - id: onboarding-bootstrap
-    priority: 9
+    priority: 11
     title: Bootstrap a freshly cloned target repository from one or two onboarding prompts.
     rationale: The target operator experience is minimal setup followed by a high-level epic-count loop.
     next_release_id: onboarding-bootstrap
@@ -89,7 +99,9 @@ notes:
   - Before selecting the next epic, the governor should refresh its state view from source/branch status, recent run artifacts, release reviews, metrics, tuning reports, unresolved findings, docs drift, and tracked repo-state memory.
   - The governor-state-review cycle was merged on 2026-05-13 and implemented deterministic state-review snapshot capture plus backlog-planning evidence linkage.
   - Completed objectives and historical contracts have been removed from the controller repo after merge; current releases should generate fresh objective/contract artifacts instead of reusing stale landed packages.
-  - "Prioritization rule as of 2026-05-13 after supervisor-decision-records merge: scheduling decisions first, review-loop convergence second, N-epic loop third. Running the N-epic loop before supervisor-owned scheduling and convergence policy would amplify deterministic stops and review churn."
+  - "Prioritization rule as of 2026-05-13 after the one-shot comparison: execution-strategy selection first, model-output normalization second, review-loop convergence third, N-epic loop fourth. Running the N-epic loop before strategy selection and normalization would amplify over-decomposition, brittle schema stops, and review churn."
   - The persistent-governor-memory cycle showed that deterministic overlap stops should become supervisor scheduling decisions: overlap analysis emits facts, while the supervisor chooses sequential slices, stacked branches, replanning, or a hard stop for true exclusive paths.
   - Feature-review repair loops need convergence policy. Multiple repair passes are acceptable for blocking in-scope findings, but new adjacent quality findings after bounded repair should be classified as blocker, soft finding, duplicate, false positive, scope expansion, or backlog follow-up.
   - Code volume should decrease over time by moving judgment-heavy procedural heuristics into typed supervisor decision records, then rerunning hard validators. The repository should not accumulate parallel Python policy engines for every dogfood edge case.
+  - "One-shot comparison finding: the experiment branch implementing the same frozen supervisor-owned scheduling epic with one high-capability agent changed the same files, passed the same tests, and produced a more coherent schema than the five-contract auto_develop run. The release run succeeded at worker isolation but blocked finalization on brittle reviewer-output validation. Execution strategy must be supervisor-owned before contract generation."
+  - "Architecture pivot as of 2026-05-13: keep Git/worktree, verification, evidence, metrics, typed persistence, and hard gates deterministic; move judgment-heavy choices into a high-level supervisor agent, including one-shot versus decomposition, reviewer-output normalization, finding adjudication, soft-budget acceptance, and retry/split/replan decisions."

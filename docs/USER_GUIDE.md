@@ -1090,11 +1090,13 @@ Then decide whether to repair manually, narrow the contract, or rerun from a cle
 
 ## Current Limits
 
-`auto_develop` is useful for bounded autonomous development today. The current implementation includes one-epic planning, runtime-supervisor repair/resume, deterministic state-review snapshot capture, persistent governor memory seams, typed supervisor decision records for auditable soft and repair decisions, and an independent feature-review pass when `model_roles.reviewer` is configured. The active direction is a complete autonomous project governor with runtime supervision: it should review current repository state, choose epics from docs/roadmap/state/artifacts, decompose them, run workers, verify, run release-local feature review, repair reviewer findings and contract-contained failures, update memory, and continue until configured stopping criteria are reached.
+`auto_develop` is useful for bounded autonomous development today. The current implementation includes one-epic planning, runtime-supervisor repair/resume, deterministic state-review snapshot capture, persistent governor memory seams, typed supervisor decision records for auditable soft and repair decisions, supervisor-owned release scheduling for normal source overlap, and an independent feature-review pass when `model_roles.reviewer` is configured. The active direction is a complete autonomous project governor with runtime supervision: it should review current repository state, choose epics from docs/roadmap/state/artifacts, choose whether the epic should be implemented one-shot or decomposed into sub-agents, run the selected strategy, verify, run release-local feature review, normalize useful reviewer output before strict validation, repair reviewer findings and contract-contained failures, update memory, and continue until configured stopping criteria are reached.
 
 Current important limits:
 
 - The strongest workflow still depends on well-written objectives and contracts.
+- Execution strategy is not yet fully supervisor-owned; cohesive medium epics may still be over-decomposed.
+- Raw planner/reviewer output normalization is still incomplete; strict schema gates can still block useful model output.
 - Fully dynamic model-driven orchestration is still evolving.
 - The broader multi-epic governor loop remains planned.
 - Full agent-driven pre-epic state-review decisioning before backlog selection remains planned.

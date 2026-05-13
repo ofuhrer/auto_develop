@@ -1,18 +1,18 @@
-release_id: supervisor-owned-release-scheduling
-active_objective: "Replace unconditional normal-source overlap stops with overlap-risk reports and typed supervisor scheduling decisions so the runtime can choose sequential, parallel, stacked, re-sliced, or stop actions while deterministic hard gates remain authoritative for exclusive paths and unsafe scopes."
+release_id: supervisor-execution-strategy
+active_objective: "Add a supervisor-owned execution-strategy decision before contract generation so cohesive epics can run as one-shot high-capability implementations while independent or risky work can still be decomposed into sequential, parallel, stacked, patch-handoff, or replanned contract packages."
 current_tasks:
-  - overlap-risk-report-schema
-  - scheduling-decision-consumption
-  - sequential-and-stacked-scheduling-tests
-  - unsafe-overlap-hard-gate-regressions
+  - execution-strategy-decision-schema
+  - one-shot-strategy-prompt-generation
+  - strategy-metrics-and-selection-tests
+  - contract-planning-gating-refactor
   - docs-and-state-update
 next_steps:
-  - Release scheduling is implemented: preserve the overlap-risk report and release_scheduling artifact trail in docs and memory, then move the next release focus to review-loop-convergence-policy.
-  - Keep the implemented runtime-supervisor, planner-normalization, one-epic governor logging behavior, typed supervisor decision records, and semantic feature-review loop aligned with docs.
-  - Treat governor-state-review, agentic-feature-review-loop, persistent-governor-memory, and supervisor-decision-records as completed for the current cycle.
-  - Implement supervisor-owned release scheduling so normal source-file overlap becomes an agent-owned scheduling decision rather than a deterministic stop.
+  - Keep the implemented runtime-supervisor, planner-normalization, one-epic governor logging behavior, typed supervisor decision records, supervisor-owned release scheduling, and semantic feature-review loop aligned with docs.
+  - Treat governor-state-review, agentic-feature-review-loop, persistent-governor-memory, supervisor-decision-records, and supervisor-owned-release-scheduling as completed for the current cycle.
+  - Implement supervisor-owned execution strategy before generating contracts. The strategy decision should choose one-shot, sequential contracts, parallel contracts, stacked branches, patch handoff, or replanning from epic cohesion, risk, coupling, verification needs, and prior metrics.
+  - Implement model-output normalization next so semantically useful planner/reviewer output with bounded schema defects is repaired before strict typed validation.
   - Preserve the implemented repair/resume seam while the broader N-epic governor loop remains planned until state review and feature review exist.
-  - Identify procedural heuristics that can be retired once supervisor actions and the broader governor loop exist: deterministic backlog scoring, contract wording checks, log-pattern failure classification, budget-tuning prose, exact-overlap rejection, hard rejection for small budget overages, environment-command assumptions, and cockpit-summary filtering.
+  - Identify procedural heuristics that can be retired once supervisor actions and the broader governor loop exist: deterministic backlog scoring, contract wording checks, raw reviewer-output hard stops, log-pattern failure classification, budget-tuning prose, hard rejection for small budget overages, environment-command assumptions, and cockpit-summary filtering.
   - Keep deterministic gates authoritative for hard invariants; let the supervisor or reviewer agent decide soft findings such as modest budget overage, source-file overlap, model escalation, retry strategy, and environment repair with auditable rationale.
   - Add shared verification-runtime policy so isolated worktrees can run tests without requiring a per-worktree .venv.
   - Add executor liveness classification from process, output, heartbeat, and file/diff activity before declaring workers stuck.

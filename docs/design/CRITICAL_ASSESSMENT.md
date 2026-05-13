@@ -30,10 +30,28 @@ The main risk is unbounded autonomy, not autonomy itself. The system should be a
 - The system now has runtime-supervisor repair/resume seams, deterministic state-review snapshot capture, contract-plan snapshot-path plumbing, and a release-local feature-review/repair loop. It still lacks full agent-driven pre-epic state-review decisioning and multi-epic orchestration of review/repair outcomes. The deterministic kernel can execute, summarize, and semantically review one release, but it does not yet choose backlog work from a complete live source/branch/artifact state decision pass. Typed supervisor decision records are the implemented bridge for recovery and soft decisions; the N-epic loop that would orchestrate them repeatedly remains planned.
 - The CLI is not a thin boundary. It wires backend construction and workflow-specific behavior that should move into application services as the command set grows.
 
+## One-Shot Comparison Findings
+
+The `supervisor-owned-release-scheduling` experiment compared the generated multi-agent release package against a single high-capability Codex implementation from the same base commit and frozen epic. The one-shot branch changed the same 13 files, passed the same full test suite, and produced a more coherent scheduling model with explicit action enums, structured staleness inputs, action/outcome consistency checks, and stronger stale/unsupported scheduling tests. The `auto_develop` run successfully accepted all five worker tasks with no retries, but it took longer, generated more orchestration overhead, and blocked finalization because useful reviewer output failed strict schema validation on empty `evidence_paths`.
+
+Architectural consequences:
+
+- `auto_develop` should not optimize for "more agents by default." It should optimize for the best autonomous execution strategy.
+- One-shot high-capability implementation must be a first-class strategy for cohesive medium architectural work.
+- Contract decomposition should be selected by the governor when work is independent, risky, review-sensitive, or benefits from isolation.
+- Deterministic code should be a kernel for hard invariants, Git mechanics, evidence, verification, and typed persistence; it should not accumulate procedural approximations of judgment.
+- LLM outputs should pass through normalization/repair before strict typed validation. Strict schemas remain valuable after normalization, but they are too brittle as the first gate on raw planner or reviewer output.
+- The release-local reviewer should not hard-block finalization solely because semantically useful findings contain repairable schema defects. A supervisor should normalize, ask for re-emission, classify as backlog follow-up, or block with a precise reason.
+- Granularity metrics should drive future planning: elapsed time, retries, review findings, diff coherence, changed-file count, verification coverage, mergeability, and human steering.
+
+This does not justify a rewrite. The existing Git/worktree, verification, evidence, metrics, config, model-routing, and finalization infrastructure is valuable. The pivot is to move judgment-heavy orchestration behind a supervisor/governor boundary and keep deterministic code focused on hard guarantees.
+
 ## Architectural Refactoring Priorities
 
 High-priority seams:
 
+- Add a supervisor-owned execution-strategy decision before contract generation. It should choose one-shot, sequential contracts, parallel contracts, stacked branches, patch handoff, or replanning from the epic, repository state, risk, and expected coupling.
+- Add normalization/repair before strict validation for planner output, reviewer output, and supervisor decisions. Raw model output should not directly hard-stop execution when defects are bounded and meaning-preserving.
 - Expand the state-review governor service before backlog selection from snapshot capture into full decisioning. It should collect branch/source/doc/run/review/metric/tuning evidence, persist snapshots, and drive epic selection from that live state.
 - Compose the implemented release-local feature-review service into the governor loop and add convergence policy for repeated reviewer/repair cycles.
 - Extend the `StateStore` API over repo-state files, run summaries, active releases, completed/blocked epics, and known learnings into authoritative multi-epic state.
@@ -67,6 +85,8 @@ Keep as deterministic code:
 
 Refactor toward runtime-supervisor decisions:
 
+- Execution-strategy selection before contract generation. Keep deterministic execution modes, but let the governor choose whether a cohesive epic should be one-shot or decomposed.
+- Raw planner and reviewer schema handling. Keep strict typed artifacts after normalization, but move repair of bounded shape defects to the supervisor instead of hard-stopping on useful output.
 - Deterministic backlog extraction and scoring in `backlog.py`. Keep deterministic
   mode only as a small test fixture/fallback; let the governor agent own epic
   discovery and prioritization from docs, repo-state, and run artifacts.
