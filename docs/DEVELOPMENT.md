@@ -64,12 +64,14 @@ Use the module fallback when the editable install is not active:
 ```bash
 PYTHONPATH=src .venv/bin/python -m agentic_devloop --help
 PYTHONPATH=src .venv/bin/python -m agentic_devloop run-release --help
+PYTHONPATH=src .venv/bin/python -m agentic_devloop run-governor --help
 PYTHONPATH=src .venv/bin/python -m agentic_devloop cleanup --help
 ```
 
 Smoke expectations:
 
 - `run-release --help` should expose `--release-finalize` with `none`, `push-feature`, `merge-main`, and `push-main`.
+- `run-governor --help` should expose `--epic-count`, `--goal`, `--execute-planner`, and `--release-finalize`.
 - `cleanup --help` should expose `--force` and `--include-integration-branch`.
 - The module fallback should work even when the editable console script is missing from `PATH`.
 
@@ -108,7 +110,7 @@ Review `runs/<release-run-id>/release.log`, `release.raw.log`, `release_summary.
 
 If `release_finalization_policy` is set to `pr_preparation`, expect a `pr_handoff.json` artifact and no remote push or merge. The configured policy is authoritative; `--release-finalize` is retained as a compatibility/evidence hint and must not override project policy. If `release_finalization_policy` is omitted, or if required credential environment variables are missing, expect an explicit `missing_policy` or `missing_credentials` stop rather than a silent fallback.
 
-When governor orchestration changes, also smoke-test the repeated-cycle shell with `agent-loop run-governor --epic-count 2` against a temp target repo. The shipped command now composes repeated one-epic cycles and writes parent `governor.log`, `governor.raw.log`, and `events.jsonl` artifacts; the remaining hardening work is in final-review continuation, cleanup, and richer state refresh, not in the loop scaffold itself.
+When governor orchestration changes, also smoke-test the repeated-cycle shell with `agent-loop run-governor --epic-count 2` against a temp target repo. The shipped command composes repeated one-epic cycles and writes parent `governor.log`, `governor.raw.log`, and `events.jsonl` artifacts; child release evidence remains in the child run and is still inspectable. The remaining hardening work is in final-review continuation, cleanup, and richer state refresh, not in the loop scaffold itself.
 
 Release-local convergence decisions should be inspectable in the same evidence trail. Required findings keep the release in the bounded repair loop until they are resolved, explicitly accepted with rationale, or stopped by retry budget or a hard gate. Duplicate, false-positive, and other soft findings should be accepted only with evidence-backed rationale and validators rerun, while scope-expansion and backlog-follow-up findings should be written up as proposals for the next planning cycle instead of being forced into the current release.
 

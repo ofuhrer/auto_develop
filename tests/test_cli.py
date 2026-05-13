@@ -697,6 +697,10 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
     assert '"cleanup_result": {' in captured.out
     assert '"evidence_manifest": {' in captured.out
     assert '"dry_run": true' in captured.out
+    assert '"governor_log_path":' in captured.out
+    assert '"governor_events_path":' in captured.out
+    assert str(tmp_path / "runs" / run_id / "governor.log") in captured.out
+    assert str(tmp_path / "runs" / run_id / "events.jsonl") in captured.out
     events_text = (tmp_path / "runs" / run_id / "events.jsonl").read_text(encoding="utf-8")
     assert '"event_type": "governor_started"' in events_text
     assert '"event_type": "state_review_completed"' in events_text
@@ -716,6 +720,9 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
     assert '"event_type": "stop_reason_recorded"' in events_text
     assert '"stop_category": "non_accepted_release"' in events_text
     assert "cleanup_handoff" in events_text
+    assert (tmp_path / "runs" / run_id / "governor.log").exists()
+    assert (tmp_path / "runs" / run_id / "governor.raw.log").exists()
+    assert (tmp_path / "runs" / run_id / "events.jsonl").exists()
     cleanup_path = tmp_path / "runs" / run_id / "cleanup" / "cycle_001_demo-epic-1_cleanup.json"
     assert cleanup_path.exists()
     assert str(cleanup_path) in events_text

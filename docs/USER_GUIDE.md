@@ -869,11 +869,16 @@ Key options:
 
 Current boundary:
 
-- The command composes repeated one-epic cycles and writes a parent `governor.log`, `governor.raw.log`, and `events.jsonl`.
-- It marks completed, blocked, reviewed, and active epic records plus recent release summaries in repo state when a `StateStore` is configured.
+- The command composes repeated one-epic cycles and writes the parent cockpit files `runs/<governor-run-id>/governor.log`, `runs/<governor-run-id>/governor.raw.log`, and `runs/<governor-run-id>/events.jsonl`.
+- The parent cockpit stream is the operator-facing audit trail. `governor.log` is the human-readable cockpit, `governor.raw.log` is the complete raw stream, and `events.jsonl` is the structured event feed.
+- The parent cockpit records planning, state review, backlog selection, contract generation, child release completion, feature review, repair decisions, final verification, finalization, cleanup eligibility, stop reasons, and next-epic selection.
+- Parent stop metadata uses the fixed `stop_reason` taxonomy and the derived `stop_context.category` values `no_actionable_work`, `planning_only_strategy`, `non_accepted_release`, `blocked_finalization`, `state_refresh_failure`, `missing_planner_credentials`, `hard_policy_stop`, `repeated_epic_selected`, `requested_epic_count_reached`, or `unknown`.
+- The command marks completed, blocked, reviewed, and active epic records plus recent release summaries in repo state when a `StateStore` is configured.
 - It writes refresh evidence on both sides of the cycle. The pre-selection refresh writes `state_review_snapshot.json` and `state_refresh_summary.json`; the post-cycle refresh writes `post_cycle_state_refresh.json`. If either refresh step fails, it writes `state_refresh_error.json` and stops before the next epic selection.
+- Child release evidence stays in the child run. `release.log`, `release.raw.log`, `release_review.md`, `release_metrics.json`, `release_budget.json`, `release_tuning.md`, and the feature-review artifacts remain linked and inspectable without being rewritten by the parent cockpit.
 - Accepted/finalized cycles record finalization outcome references, including branch, commit, cleanup, and recommended backlog state details. Failed or blocked cycles keep their blocked outcome references and unresolved finding summaries in the refresh trail.
 - Manual merge or completed-finalization outcomes are recorded as `accepted_manual_merge_or_completed`, so the next selection step can compact durable state before deciding the next epic.
+- The cleanup eligibility handoff is the parent `cleanup_eligibility_evaluated` event plus the per-cycle cleanup report JSON. When cleanup runs, the parent cockpit records that handoff separately from the child release evidence.
 - It stops by default when a cycle produces no executable release or a release is not accepted.
 - Autonomous final-review repair continuation, policy-driven branch deletion, and full pre-epic state-review decisioning remain planned.
 
@@ -913,7 +918,7 @@ Release-local review convergence follows the same boundary:
 
 The broader N-epic governor that would replay this convergence policy across repeated epics remains planned.
 
-The planned multi-epic governor should expose one parent log stream:
+The shipped multi-epic governor exposes one parent cockpit stream:
 
 ```text
 runs/<governor-run-id>/governor.log
@@ -921,7 +926,7 @@ runs/<governor-run-id>/governor.raw.log
 runs/<governor-run-id>/events.jsonl
 ```
 
-Operators should watch `governor.log`, not chase separate child release logs. It should summarize backlog planning, selected epic, contract generation, contract normalization, release progress, repair decisions, finalization, repo-state updates, and next-epic selection. Release-local `release.log` files remain linked child artifacts for deeper inspection.
+Operators should watch `governor.log`, not chase separate child release logs. It summarizes backlog planning, selected epic, contract generation, contract normalization, release progress, repair decisions, finalization, repo-state updates, cleanup handoff, and next-epic selection. Release-local evidence remains linked child artifacts for deeper inspection and is not rewritten by the parent cockpit.
 
 Run-backlog evidence records artifact paths when produced, including:
 - backlog plan (`backlog_plan.json`);
@@ -1154,7 +1159,7 @@ Then decide whether to repair manually, narrow the contract, or rerun from a cle
 
 ## Current Limits
 
-`auto_develop` is useful for bounded autonomous development today. The current implementation includes one-epic planning, a shipped repeated-cycle governor shell, parent governor log/events artifacts, completed-epic tracking, recent release-summary recording, shipped supervisor-owned execution-strategy selection for one-epic releases, runtime-supervisor repair/resume, deterministic state-review snapshot capture, post-cycle state-refresh evidence, persistent governor memory seams, typed supervisor decision records for auditable soft and repair decisions, supervisor-owned release scheduling for normal source overlap, policy-owned finalization with explicit `missing_policy` / `missing_credentials` stops, and an independent feature-review pass when `model_roles.reviewer` is configured. One-epic planning writes `execution_strategy_selection.json`, `supervisor_decisions/execution_strategy__<decision-id>.json`, and `one_shot_execution_input.json` when the chosen action is `one_shot`; that one-shot input carries the bounded objective scope, evidence requirements, stop conditions, and selector inputs instead of contract decomposition. The one-shot path is not an executing release runner yet: `run-objective` may return `release: null` after writing the input artifact, and `run-backlog` currently forces executable decomposition as its default so a selected epic still runs through worker, verification, review, and finalization. A `stop` strategy is currently represented in `execution_strategy_selection.json` only; typed blocked-decision persistence for `stop` remains planned. The active direction is a complete autonomous project governor with runtime supervision: it should review current repository state, choose epics from docs/roadmap/state/artifacts, choose whether the epic should be implemented one-shot or decomposed into sub-agents, run the selected strategy, verify, run release-local feature review, normalize useful reviewer output before strict validation, repair reviewer findings and contract-contained failures, compact durable state after the cycle, and continue until configured stopping criteria are reached. Full live pre-epic state-review decisioning remains planned unless separately implemented.
+`auto_develop` is useful for bounded autonomous development today. The current implementation includes one-epic planning, a shipped repeated-cycle governor shell, the parent `governor.log`/`governor.raw.log`/`events.jsonl` cockpit, completed-epic tracking, recent release-summary recording, shipped supervisor-owned execution-strategy selection for one-epic releases, runtime-supervisor repair/resume, deterministic state-review snapshot capture, post-cycle state-refresh evidence, persistent governor memory seams, typed supervisor decision records for auditable soft and repair decisions, supervisor-owned release scheduling for normal source overlap, policy-owned finalization with explicit `missing_policy` / `missing_credentials` stops, and an independent feature-review pass when `model_roles.reviewer` is configured. One-epic planning writes `execution_strategy_selection.json`, `supervisor_decisions/execution_strategy__<decision-id>.json`, and `one_shot_execution_input.json` when the chosen action is `one_shot`; that one-shot input carries the bounded objective scope, evidence requirements, stop conditions, and selector inputs instead of contract decomposition. The one-shot path is not an executing release runner yet: `run-objective` may return `release: null` after writing the input artifact, and `run-backlog` currently forces executable decomposition as its default so a selected epic still runs through worker, verification, review, and finalization. A `stop` strategy is currently represented in `execution_strategy_selection.json` only; typed blocked-decision persistence for `stop` remains planned. The active direction is a complete autonomous project governor with runtime supervision: it should review current repository state, choose epics from docs/roadmap/state/artifacts, choose whether the epic should be implemented one-shot or decomposed into sub-agents, run the selected strategy, verify, run release-local feature review, normalize useful reviewer output before strict validation, repair reviewer findings and contract-contained failures, compact durable state after the cycle, and continue until configured stopping criteria are reached. Full live pre-epic state-review decisioning remains planned unless separately implemented.
 
 Current important limits:
 
