@@ -1,17 +1,17 @@
-release_id: supervisor-execution-strategy
-active_objective: "Add a supervisor-owned execution-strategy decision before contract generation so cohesive epics can run as one-shot high-capability implementations while independent or risky work can still be decomposed into sequential, parallel, stacked, patch-handoff, or replanned contract packages."
+release_id: review-loop-convergence-policy
+active_objective: "Add supervisor-owned convergence policy for release-local feature-review repair loops so repeated findings are classified as blockers, soft findings, duplicates, false positives, scope expansion, or backlog follow-ups instead of causing unbounded repair churn."
 current_tasks:
-  - execution-strategy-decision-schema
-  - one-shot-strategy-prompt-generation
-  - strategy-metrics-and-selection-tests
-  - contract-planning-gating-refactor
+  - review-finding-classification-schema
+  - repair-loop-continuation-decisioning
+  - reviewer-recheck-convergence-tests
   - docs-and-state-update
 next_steps:
   - Keep the implemented runtime-supervisor, planner-normalization, one-epic governor logging behavior, typed supervisor decision records, supervisor-owned release scheduling, and semantic feature-review loop aligned with docs.
-  - Treat governor-state-review, agentic-feature-review-loop, persistent-governor-memory, supervisor-decision-records, and supervisor-owned-release-scheduling as completed for the current cycle.
-  - Implement supervisor-owned execution strategy before generating contracts. The strategy decision should choose one-shot, sequential contracts, parallel contracts, stacked branches, patch handoff, or replanning from epic cohesion, risk, coupling, verification needs, and prior metrics.
+  - Treat governor-state-review, agentic-feature-review-loop, persistent-governor-memory, supervisor-decision-records, supervisor-owned-release-scheduling, supervisor-execution-strategy, and model-output-normalization as completed for the current cycle.
+  - Implement review-loop convergence before launching full repeated-epic execution. The supervisor should decide when a finding is blocking, duplicate, false positive, accepted soft risk, out-of-scope scope expansion, or backlog follow-up.
+  - Close the autonomous loop next: add a top-level repeated-epic governor mode that accepts an epic count, refreshes state before each epic, selects the highest-value next epic, chooses execution strategy, runs/reviews/repairs/finalizes, updates durable memory, cleans feature/agent branches, and continues until budget, count, no-actionable-work, or hard-policy stop.
   - Model-output normalization is now implemented so semantically useful planner/reviewer/supervisor output with bounded schema defects is repaired before strict typed validation, but only when the repair stays within the original objective and allowed scope.
-  - Preserve the implemented repair/resume seam while the broader N-epic governor loop remains planned until state review and feature review exist.
+  - Preserve the implemented repair/resume seam while the broader N-epic governor loop remains planned until review convergence and repeated-cycle state refresh exist.
   - "Identify procedural heuristics that can be retired once supervisor actions and the broader governor loop exist: deterministic backlog scoring, contract wording checks, raw reviewer-output hard stops, log-pattern failure classification, budget-tuning prose, hard rejection for small budget overages, environment-command assumptions, and cockpit-summary filtering."
   - Keep deterministic gates authoritative for hard invariants; let the supervisor or reviewer agent decide soft findings such as modest budget overage, source-file overlap, model escalation, retry strategy, and environment repair with auditable rationale.
   - Add shared verification-runtime policy so isolated worktrees can run tests without requiring a per-worktree .venv.
@@ -20,4 +20,4 @@ next_steps:
   - Expand the top-level governor log stream so one file can be watched while state review, backlog planning, contract generation, release execution, feature review, repair, state refresh, and next-epic selection proceed.
   - Document shipped behavior while keeping unimplemented state-review decisioning, persistent memory, and multi-epic loops explicitly planned.
   - Keep `release_review.md` documented as a deterministic evidence summary and `feature_review.json` / `feature_review_recheck.json` documented as the semantic reviewer artifacts when reviewer routing is configured.
-  - "The release scheduling epic is implemented in this branch: normal overlap now emits an overlap-risk report plus a typed release_scheduling decision artifact, while stale or unsupported scheduling artifacts fail deterministically."
+  - "The release scheduling, execution-strategy, and model-output-normalization epics are implemented on main. The next architectural increment should make feature-review repair loops convergent, then close the repeated-epic autonomous loop."
