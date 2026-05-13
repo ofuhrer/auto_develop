@@ -91,6 +91,10 @@ model_routing:
     XL: planner
   escalation_role: reviewer
 
+release_finalization_policy:
+  policy: pr_preparation
+  required_credential_env_vars: []
+
 verification_profiles:
   default:
     commands:

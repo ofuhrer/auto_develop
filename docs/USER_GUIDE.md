@@ -190,6 +190,10 @@ model_routing:
     XL: planner
   escalation_role: reviewer
 
+release_finalization_policy:
+  policy: pr_preparation
+  required_credential_env_vars: []
+
 verification_profiles:
   default:
     commands:
@@ -226,6 +230,7 @@ Important config fields:
 - `model_catalog`: advisory model policy with capabilities, budget class, and support status.
 - `model_roles`: named model roles for workers, reviewers, planners, routers, and repair agents.
 - `model_routing`: routing rules from task type or budget class to model role.
+- `release_finalization_policy`: policy-owned finalization mode. Use `pr_preparation` when you want a safe PR handoff without automatic push or merge; `local_merge` and `push_feature` are opt-in release-finish policies.
 - `verification_profiles`: named command sets task contracts can reference.
 - `budget`: deterministic limits used during planning and review.
 
@@ -621,6 +626,15 @@ The finalization choices are:
 - `merge-main`: merge `feature/<release>` into the base branch locally.
 - `push-main`: merge `feature/<release>` into the base branch and push it.
 
+The configured `release_finalization_policy` controls the policy-owned finalization stage after accepted work passes review:
+
+- `local_merge`: merge the accepted feature branch into the base branch locally.
+- `push_feature`: push the accepted feature branch for PR review or downstream integration.
+- `pr_preparation`: write a `pr_handoff.json` artifact that records the base branch, head branch, head commit, and suggested PR title/body.
+- `stop_missing_policy_or_credentials`: stop instead of finalizing when the project requires an explicit policy or credential check to be supplied elsewhere.
+
+When no finalization policy is configured, `run-release` stops with `missing_policy`. When required credential environment variables are configured but absent, it stops with `missing_credentials`. Use environment-variable names, not secret values, in the config.
+
 ## Step 13: Clean Up Artifacts
 
 Normal release runs remove task worktrees and merged task branches unless `--debug-keep-artifacts` is set. Accepted unfinalized work, unmerged accepted branches, and failed-finalization branches are preserved so work remains recoverable.
@@ -867,6 +881,8 @@ JSON output contract for stop metadata:
 - For other stop reasons, `blocked_finalization` and `governor_cycle_continuation` are cycle-scoped optional fields and may be omitted when not applicable.
 
 `run-release` writes a deterministic `release_review.md` evidence summary. If the project config also defines `model_roles.reviewer`, it invokes a separate reviewer agent over `base..feature`, writes `feature_review.json`, generates bounded repair contracts for required findings, reruns verification using validated reviewer-requested commands or the default verification profile, writes `feature_review_recheck.json`, and blocks PR/merge/push finalization while unresolved required findings remain.
+
+When `release_finalization_policy.policy` is `pr_preparation`, the finalization step writes the PR handoff artifact and stops before pushing or merging. That handoff is the audit trail for the next manual or policy-owned PR step.
 
 Reviewer backend assumptions (implemented today):
 - Feature review currently runs via the Codex CLI backend (`executor.type: codex_cli`). `run-release` preflights the reviewer backend and blocks review immediately when `codex` is missing from `PATH` or the configured reviewer executor type is unsupported.
@@ -1135,7 +1151,7 @@ Then decide whether to repair manually, narrow the contract, or rerun from a cle
 
 ## Current Limits
 
-`auto_develop` is useful for bounded autonomous development today. The current implementation includes one-epic planning, a shipped repeated-cycle governor shell, parent governor log/events artifacts, completed-epic tracking, recent release-summary recording, shipped supervisor-owned execution-strategy selection for one-epic releases, runtime-supervisor repair/resume, deterministic state-review snapshot capture, persistent governor memory seams, typed supervisor decision records for auditable soft and repair decisions, supervisor-owned release scheduling for normal source overlap, and an independent feature-review pass when `model_roles.reviewer` is configured. One-epic planning writes `execution_strategy_selection.json`, `supervisor_decisions/execution_strategy__<decision-id>.json`, and `one_shot_execution_input.json` when the chosen action is `one_shot`; that one-shot input carries the bounded objective scope, evidence requirements, stop conditions, and selector inputs instead of contract decomposition. The one-shot path is not an executing release runner yet: `run-objective` may return `release: null` after writing the input artifact, and `run-backlog` currently forces executable decomposition as its default so a selected epic still runs through worker, verification, review, and finalization. A `stop` strategy is currently represented in `execution_strategy_selection.json` only; typed blocked-decision persistence for `stop` remains planned. The active direction is a complete autonomous project governor with runtime supervision: it should review current repository state, choose epics from docs/roadmap/state/artifacts, choose whether the epic should be implemented one-shot or decomposed into sub-agents, run the selected strategy, verify, run release-local feature review, normalize useful reviewer output before strict validation, repair reviewer findings and contract-contained failures, update memory, and continue until configured stopping criteria are reached.
+`auto_develop` is useful for bounded autonomous development today. The current implementation includes one-epic planning, a shipped repeated-cycle governor shell, parent governor log/events artifacts, completed-epic tracking, recent release-summary recording, shipped supervisor-owned execution-strategy selection for one-epic releases, runtime-supervisor repair/resume, deterministic state-review snapshot capture, persistent governor memory seams, typed supervisor decision records for auditable soft and repair decisions, supervisor-owned release scheduling for normal source overlap, policy-owned finalization with explicit `missing_policy` / `missing_credentials` stops, and an independent feature-review pass when `model_roles.reviewer` is configured. One-epic planning writes `execution_strategy_selection.json`, `supervisor_decisions/execution_strategy__<decision-id>.json`, and `one_shot_execution_input.json` when the chosen action is `one_shot`; that one-shot input carries the bounded objective scope, evidence requirements, stop conditions, and selector inputs instead of contract decomposition. The one-shot path is not an executing release runner yet: `run-objective` may return `release: null` after writing the input artifact, and `run-backlog` currently forces executable decomposition as its default so a selected epic still runs through worker, verification, review, and finalization. A `stop` strategy is currently represented in `execution_strategy_selection.json` only; typed blocked-decision persistence for `stop` remains planned. The active direction is a complete autonomous project governor with runtime supervision: it should review current repository state, choose epics from docs/roadmap/state/artifacts, choose whether the epic should be implemented one-shot or decomposed into sub-agents, run the selected strategy, verify, run release-local feature review, normalize useful reviewer output before strict validation, repair reviewer findings and contract-contained failures, update memory, and continue until configured stopping criteria are reached.
 
 Current important limits:
 

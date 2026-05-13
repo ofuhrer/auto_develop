@@ -67,6 +67,12 @@ PYTHONPATH=src .venv/bin/python -m agentic_devloop run-release --help
 PYTHONPATH=src .venv/bin/python -m agentic_devloop cleanup --help
 ```
 
+Smoke expectations:
+
+- `run-release --help` should expose `--release-finalize` with `none`, `push-feature`, `merge-main`, and `push-main`.
+- `cleanup --help` should expose `--force` and `--include-integration-branch`.
+- The module fallback should work even when the editable console script is missing from `PATH`.
+
 ## Release-Orchestration Smoke Test
 
 The repository no longer tracks historical smoke-test contracts. Before running
@@ -99,6 +105,8 @@ agent-loop run-release \
 ```
 
 Review `runs/<release-run-id>/release.log`, `release.raw.log`, `release_summary.json`, `release_metrics.json`, `release_budget.json`, `release_tuning.md`, and `release_review.md`. Treat `release.log` as the human cockpit and `release.raw.log` as the complete audit stream. When `model_roles.reviewer` is configured, also inspect `feature_review_prompt.md`, `feature_review_stdout.log`, `feature_review_stderr.log`, `feature_review_metadata.json`, `feature_review.json`, `feature_review_recheck.json`, the output-normalization decision artifact when present, and any bounded repair-contract evidence under the release run; these artifacts are the semantic-review trail and repair-contract record, while `release_review.md` remains the deterministic evidence summary. Normalized planner, reviewer, and supervisor output must stay inside the original objective, allowed files, forbidden changes, and stop conditions; when the repair would broaden scope or change intent, the supervisor must refuse rather than paper over the defect.
+
+If `release_finalization_policy` is set to `pr_preparation`, expect a `pr_handoff.json` artifact and no remote push or merge. If `release_finalization_policy` is omitted, or if required credential environment variables are missing, expect an explicit `missing_policy` or `missing_credentials` stop rather than a silent fallback.
 
 When governor orchestration changes, also smoke-test the repeated-cycle shell with `agent-loop run-governor --epic-count 2` against a temp target repo. The shipped command now composes repeated one-epic cycles and writes parent `governor.log`, `governor.raw.log`, and `events.jsonl` artifacts; the remaining hardening work is in final-review continuation, cleanup, and richer state refresh, not in the loop scaffold itself.
 
