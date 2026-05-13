@@ -228,6 +228,7 @@ class BacklogEvidenceManifest(StrictModel):
     roadmap_proposal_plan_path: Path | None = None
     state_review_snapshot_path: Path | None = None
     state_refresh_summary_path: Path | None = None
+    state_refresh_error_path: Path | None = None
 
 
 class GovernorStopReason(StrEnum):
@@ -237,6 +238,7 @@ class GovernorStopReason(StrEnum):
     RELEASE_NOT_ACCEPTED = "release_not_accepted"
     NO_ACTIONABLE_WORK = "no_actionable_work"
     BLOCKED_FINALIZATION = "blocked_finalization"
+    STATE_REFRESH_FAILED = "state_refresh_failed"
 
 
 class StateReviewSnapshot(StrictModel):
@@ -741,6 +743,7 @@ class GovernorContinuationStopReason(StrEnum):
     UNRESOLVED_REQUIRED_REVIEW_FINDINGS = "unresolved_required_review_findings"
     EXHAUSTED_REPAIR_BUDGET = "exhausted_repair_budget"
     BLOCKED_BY_HARD_GATE = "blocked_by_hard_gate"
+    STATE_REFRESH_FAILED = "state_refresh_failed"
 
 
 class GovernorFeatureReviewContinuation(StrictModel):

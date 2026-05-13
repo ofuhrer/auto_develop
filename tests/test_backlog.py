@@ -845,6 +845,140 @@ def test_governor_loop_state_refresh_failure_writes_error_artifact(tmp_path, mon
     assert payload["partial_artifact_paths"] == []
 
 
+def test_governor_loop_post_cycle_state_refresh_failure_writes_error_and_stops_before_next_plan(
+    tmp_path, monkeypatch
+) -> None:
+    from types import SimpleNamespace
+
+    runs_dir = tmp_path / "runs"
+    objectives_dir = tmp_path / "objectives"
+    roadmap_path = tmp_path / "ROADMAP.md"
+    roadmap_path.write_text("# Roadmap\n", encoding="utf-8")
+    config_dir = _write_project_config(tmp_path)
+    state_store = StateStore(tmp_path / "repo_state" / "demo" / "backlog_state.yaml")
+    plan_calls = 0
+
+    def _plan(epic_id: str, release_id: str):
+        plan_path = runs_dir / epic_id / "backlog_plan.json"
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text("{}", encoding="utf-8")
+        return SimpleNamespace(
+            plan_path=plan_path,
+            objective_path=None,
+            plan=parse_backlog_planner_output(
+                {
+                    "project_id": "demo",
+                    "goal": "Goal.",
+                    "roadmap_path": str(roadmap_path),
+                    "planner": "deterministic",
+                    "selected_epic_id": epic_id,
+                    "warnings": [],
+                    "epics": [
+                        {
+                            "epic_id": epic_id,
+                            "title": f"Epic {epic_id}",
+                            "objective": f"Do {epic_id}.",
+                            "rationale": "Because.",
+                            "priority": 1,
+                            "source_refs": ["roadmap:1"],
+                            "acceptance_criteria": ["It works."],
+                            "suggested_release_id": release_id,
+                        }
+                    ],
+                },
+                project_id="demo",
+            ),
+        )
+
+    plans = [_plan("epic-0001", "demo-epic-0001"), _plan("epic-0002", "demo-epic-0002")]
+
+    def fake_plan_backlog(**_kwargs):
+        nonlocal plan_calls
+        planned = plans[plan_calls]
+        plan_calls += 1
+        return planned
+
+    def fake_run_objective(**kwargs):
+        release_id = kwargs["objective_path"].stem
+        release_dir = runs_dir / release_id
+        release_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = release_dir / "release_summary.json"
+        summary_path.write_text(
+            json.dumps({"integration_branch": f"feature/{release_id}", "integration_commit": "deadbeef"}) + "\n",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(
+            release_id=release_id,
+            planning=SimpleNamespace(plan_path=release_dir / "contract_plan.json"),
+            release=SimpleNamespace(
+                release_id=release_id,
+                summary_path=summary_path,
+                metrics_path=release_dir / "release_metrics.json",
+                budget_path=release_dir / "release_budget.json",
+                tuning_path=release_dir / "release_tuning.md",
+                decision="accepted",
+                finalization_gate={"allowed": True, "reason": "allowed", "decision": "accepted"},
+                finalization=SimpleNamespace(error=None, failed_step=None, merged=True, pushed=True),
+            ),
+        )
+
+    def fail_apply(_epic_id, _outcome):
+        raise RuntimeError("durable state write failed")
+
+    monkeypatch.setattr(state_store, "apply_epic_refresh_outcome", fail_apply)
+
+    result = GovernorLoop(
+        plan_backlog=fake_plan_backlog,
+        run_objective=fake_run_objective,
+        state_store=state_store,
+    ).run_epics(
+        project_id="demo",
+        goal="Run two epics.",
+        roadmap_path=roadmap_path,
+        selected_epic_id=None,
+        epic_count=2,
+        config_dir=config_dir,
+        contracts_dir=tmp_path / "contracts",
+        runs_dir=runs_dir,
+        objectives_dir=objectives_dir,
+        mode="deterministic",
+        planner_backend=None,
+        objective_planner_backend=FakeObjectivePlannerBackend(),
+        executor=FakeExecutor(),
+        verification_timeout_seconds=60,
+        allow_dirty=True,
+        commit_on_accept=False,
+        merge_on_accept=False,
+        push_on_accept=False,
+        release_finalize="push-feature",
+        integration_branch=None,
+        stop_on_failure=False,
+        execution_mode="sequential",
+        debug_keep_artifacts=False,
+        progress=None,
+        now=datetime(2026, 5, 12, 12, 0, tzinfo=UTC),
+    )
+
+    assert result.stop_reason == GovernorStopReason.STATE_REFRESH_FAILED
+    assert plan_calls == 1
+    assert len(result.cycles) == 1
+    continuation = result.cycles[0].governor_cycle_continuation
+    assert continuation is not None
+    assert continuation.action == GovernorContinuationAction.STOP
+    assert continuation.stop_reason == GovernorContinuationStopReason.STATE_REFRESH_FAILED
+    manifest = result.cycles[0].evidence_manifest
+    assert manifest is not None
+    assert manifest.state_refresh_error_path is not None
+    payload = json.loads(manifest.state_refresh_error_path.read_text(encoding="utf-8"))
+    assert payload["phase"] == "apply_epic_refresh_outcome"
+    assert payload["release_id"] == "demo-epic-0001"
+    assert payload["epic_id"] == "epic-0001"
+    assert payload["error_type"] == "RuntimeError"
+    assert payload["error"] == "durable state write failed"
+    assert payload["recommended_continuation"] == "stop_governor_until_durable_state_is_repaired"
+    assert payload["partial_artifact_paths"]
+
+
 def test_governor_loop_marks_planning_only_strategy_as_reviewed_not_blocked(tmp_path) -> None:
     from types import SimpleNamespace
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, Protocol
@@ -39,6 +40,13 @@ from agentic_devloop.state_refresh import (
 )
 from agentic_devloop.state_store import StateStore
 from agentic_devloop.yaml_io import load_yaml_model, write_yaml_model
+
+
+class PostCycleStateRefreshFailedError(RuntimeError):
+    def __init__(self, *, message: str, error_artifact_path: Path) -> None:
+        super().__init__(message)
+        self.error_artifact_path = error_artifact_path
+
 
 class PlanBacklogFn(Protocol):
     def __call__(
@@ -202,12 +210,32 @@ class GovernorLoop:
             )
             cycles.append(result)
             if self._state_store is not None:
-                self._apply_post_cycle_refresh_for_cycle(
-                    result=result,
-                    runs_dir=runs_dir,
-                    cycle_index=cycle_index,
-                    recorded_at=now,
-                )
+                try:
+                    self._apply_post_cycle_refresh_for_cycle(
+                        result=result,
+                        runs_dir=runs_dir,
+                        cycle_index=cycle_index,
+                        recorded_at=now,
+                    )
+                except PostCycleStateRefreshFailedError as error:
+                    stop_reason = GovernorStopReason.STATE_REFRESH_FAILED
+                    continuation = GovernorCycleContinuation(
+                        action=GovernorContinuationAction.STOP,
+                        stop_reason=GovernorContinuationStopReason.STATE_REFRESH_FAILED,
+                    )
+                    evidence_manifest = result.evidence_manifest
+                    if evidence_manifest is None:
+                        evidence_manifest = BacklogEvidenceManifest(state_refresh_error_path=error.error_artifact_path)
+                    else:
+                        evidence_manifest = evidence_manifest.model_copy(
+                            update={"state_refresh_error_path": error.error_artifact_path}
+                        )
+                    cycles[-1] = replace(
+                        result,
+                        governor_cycle_continuation=continuation,
+                        evidence_manifest=evidence_manifest,
+                    )
+                    break
             if result.release is None and result.release_id == "no_actionable_work":
                 stop_reason = GovernorStopReason.NO_ACTIONABLE_WORK
                 break
@@ -516,19 +544,6 @@ class GovernorLoop:
         if self._state_store is None:
             return
 
-        if result.release is None and result.release_id == "no_actionable_work":
-            refresh_artifact, refresh_outcome = build_no_actionable_post_cycle_state_refresh(
-                epic_id=result.selected_epic_id,
-                now=recorded_at,
-            )
-        else:
-            refresh_artifact, refresh_outcome = build_post_cycle_state_refresh(
-                result=result,
-                retry_count=_read_epic_retry_count(self._state_store, result.selected_epic_id),
-                repair_count=_read_epic_repair_count(self._state_store, result.selected_epic_id),
-                now=recorded_at,
-            )
-
         refresh_dir = _post_cycle_state_refresh_artifacts_dir(
             runs_dir=runs_dir,
             release_id=result.release_id,
@@ -536,14 +551,59 @@ class GovernorLoop:
             cycle_index=cycle_index,
             now=recorded_at,
         )
-        write_post_cycle_state_refresh_artifact(
-            artifact=refresh_artifact,
-            artifacts_dir=refresh_dir,
-        )
-        self._state_store.apply_epic_refresh_outcome(
-            result.selected_epic_id,
-            refresh_outcome,
-        )
+        phase = "build_post_cycle_state_refresh"
+        partial_artifact_paths: list[Path] = []
+        try:
+            if result.release is None and result.release_id == "no_actionable_work":
+                refresh_artifact, refresh_outcome = build_no_actionable_post_cycle_state_refresh(
+                    epic_id=result.selected_epic_id,
+                    now=recorded_at,
+                )
+            else:
+                refresh_artifact, refresh_outcome = build_post_cycle_state_refresh(
+                    result=result,
+                    retry_count=_read_epic_retry_count(self._state_store, result.selected_epic_id),
+                    repair_count=_read_epic_repair_count(self._state_store, result.selected_epic_id),
+                    now=recorded_at,
+                )
+            phase = "write_post_cycle_state_refresh_artifact"
+            refresh_artifact_path = write_post_cycle_state_refresh_artifact(
+                artifact=refresh_artifact,
+                artifacts_dir=refresh_dir,
+            )
+            partial_artifact_paths.append(refresh_artifact_path)
+            phase = "apply_epic_refresh_outcome"
+            self._state_store.apply_epic_refresh_outcome(
+                result.selected_epic_id,
+                refresh_outcome,
+            )
+        except Exception as error:
+            refresh_dir.mkdir(parents=True, exist_ok=True)
+            error_path = refresh_dir / "state_refresh_error.json"
+            error_path.write_text(
+                json.dumps(
+                    {
+                        "phase": phase,
+                        "release_id": result.release_id,
+                        "epic_id": result.selected_epic_id,
+                        "error_type": type(error).__name__,
+                        "error": str(error),
+                        "partial_artifact_paths": [str(path) for path in partial_artifact_paths if path.exists()],
+                        "recommended_continuation": "stop_governor_until_durable_state_is_repaired",
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            raise PostCycleStateRefreshFailedError(
+                message=(
+                    "post-cycle state refresh failed after epic execution; "
+                    f"phase={phase}; error_artifact={error_path}"
+                ),
+                error_artifact_path=error_path,
+            ) from error
 
     def _no_actionable_reason_for_selected_epic(
         self,
