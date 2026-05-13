@@ -937,18 +937,31 @@ def _normalize_contracts_for_admission(
                 ),
             )
         normalized_contract = outcome.after_snapshot.contract
-        if (
-            normalized_contract.allowed_files != generated.suggested_contract.allowed_files
-            or normalized_contract.forbidden_changes != generated.suggested_contract.forbidden_changes
-            or normalized_contract.depends_on != generated.suggested_contract.depends_on
-        ):
+        guarded_changes: list[str] = []
+        if normalized_contract.allowed_files != generated.suggested_contract.allowed_files:
+            guarded_changes.append("allowed_files")
+        if normalized_contract.forbidden_changes != generated.suggested_contract.forbidden_changes:
+            guarded_changes.append("forbidden_changes")
+        if normalized_contract.depends_on != generated.suggested_contract.depends_on:
+            guarded_changes.append("depends_on")
+        if normalized_contract.task_type != generated.suggested_contract.task_type:
+            guarded_changes.append("task_type")
+        if normalized_contract.title != generated.suggested_contract.title:
+            guarded_changes.append("title")
+        if normalized_contract.objective != generated.suggested_contract.objective:
+            guarded_changes.append("objective")
+        if normalized_contract.stop_conditions != generated.suggested_contract.stop_conditions:
+            guarded_changes.append("stop_conditions")
+        if not set(generated.suggested_contract.required_evidence).issubset(set(normalized_contract.required_evidence)):
+            guarded_changes.append("required_evidence")
+        if guarded_changes:
             raise PlannerNormalizationError(
                 "planner-generated contract normalization changed guarded semantics",
                 stop_evidence=PlannerNormalizationStopEvidence(
                     kind=RuntimeSupervisorApplierStopKind.BYPASSES_HARD_GATE,
                     reason=(
-                        "Deterministic normalization attempted to modify allowed_files, forbidden_changes, "
-                        f"or depends_on for {generated.task_id}."
+                        "Deterministic normalization attempted to modify guarded semantics "
+                        f"({', '.join(guarded_changes)}) for {generated.task_id}."
                     ),
                 ),
             )

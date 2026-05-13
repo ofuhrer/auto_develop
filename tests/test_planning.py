@@ -1110,6 +1110,11 @@ def test_parse_planner_output_hard_stops_when_normalization_changes_guarded_sema
     [
         ({"forbidden_changes": ["Do not touch release flow.", "Do not touch tests."]}, "forbidden_changes"),
         ({"depends_on": ["v0.3.6-0099"]}, "depends_on"),
+        ({"task_type": "release_preparation"}, "task_type"),
+        ({"title": "Unsafe normalization retitle"}, "title"),
+        ({"objective": "Unsafe normalization objective drift."}, "objective"),
+        ({"stop_conditions": ["Stop if scope cannot remain bounded."]}, "stop_conditions"),
+        ({"required_evidence": ["git diff"]}, "required_evidence"),
     ],
 )
 def test_parse_planner_output_hard_stops_when_normalization_changes_other_guarded_semantics(
