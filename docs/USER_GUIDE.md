@@ -210,7 +210,7 @@ budget:
   max_strong_model_calls_per_release: 10
   max_changed_files_per_task: 8
   max_diff_lines_per_task: 600
-  max_context_chars_per_task: 30000
+  max_context_chars_per_task: 35000
 ```
 
 Validate the config:
