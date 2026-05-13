@@ -9,9 +9,11 @@ from agentic_devloop.state_store import (
     BacklogState,
     EpicRefreshOutcome,
     FinalizationOutcomeReference,
+    MetricsSnapshotReference,
     OutcomeReference,
     StateReviewSnapshotReference,
     StateStore,
+    TuningReportReference,
     UnresolvedFindingReference,
 )
 
@@ -516,6 +518,20 @@ def test_apply_epic_refresh_outcome_is_typed_and_idempotent_for_references(tmp_p
                 release_id="governor-state-refresh",
             )
         ],
+        metrics_snapshot_references=[
+            MetricsSnapshotReference(
+                metrics_path=Path("runs/gov/metrics_summary.json"),
+                recorded_at=datetime(2026, 5, 13, 11, 45, tzinfo=UTC),
+                release_id="governor-state-refresh",
+            )
+        ],
+        tuning_report_references=[
+            TuningReportReference(
+                tuning_report_path=Path("runs/gov/tuning_report.json"),
+                recorded_at=datetime(2026, 5, 13, 11, 50, tzinfo=UTC),
+                release_id="governor-state-refresh",
+            )
+        ],
     )
 
     store.apply_epic_refresh_outcome("governor-state-refresh", refresh_outcome)
@@ -534,6 +550,13 @@ def test_apply_epic_refresh_outcome_is_typed_and_idempotent_for_references(tmp_p
     assert len(record.finalization_outcome_references) == 1
     assert len(record.unresolved_finding_references) == 1
     assert len(record.state_review_snapshot_references) == 1
+    assert len(record.metrics_snapshot_references) == 1
+    assert len(record.tuning_report_references) == 1
+    assert record.outcome_references[0].release_id == "governor-state-refresh"
+    assert record.finalization_outcome_references[0].release_id == "governor-state-refresh"
+    assert record.state_review_snapshot_references[0].release_id == "governor-state-refresh"
+    assert record.metrics_snapshot_references[0].release_id == "governor-state-refresh"
+    assert record.tuning_report_references[0].release_id == "governor-state-refresh"
 
 
 def test_apply_epic_refresh_outcome_preserves_legacy_string_record_loading(tmp_path: Path) -> None:

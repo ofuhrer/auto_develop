@@ -71,6 +71,22 @@ class StateReviewSnapshotReference(BaseModel):
     release_id: str | None = Field(default=None, min_length=1)
 
 
+class MetricsSnapshotReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    metrics_path: Path
+    recorded_at: datetime
+    release_id: str | None = Field(default=None, min_length=1)
+
+
+class TuningReportReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tuning_report_path: Path
+    recorded_at: datetime
+    release_id: str | None = Field(default=None, min_length=1)
+
+
 class EpicMemoryRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -86,6 +102,8 @@ class EpicMemoryRecord(BaseModel):
     finalization_outcome_references: list[FinalizationOutcomeReference] = Field(default_factory=list)
     unresolved_finding_references: list[UnresolvedFindingReference] = Field(default_factory=list)
     state_review_snapshot_references: list[StateReviewSnapshotReference] = Field(default_factory=list)
+    metrics_snapshot_references: list[MetricsSnapshotReference] = Field(default_factory=list)
+    tuning_report_references: list[TuningReportReference] = Field(default_factory=list)
     updated_at: datetime | None = None
 
 
@@ -102,6 +120,8 @@ class EpicRefreshOutcome(BaseModel):
     finalization_outcome_references: list[FinalizationOutcomeReference] = Field(default_factory=list)
     unresolved_finding_references: list[UnresolvedFindingReference] = Field(default_factory=list)
     state_review_snapshot_references: list[StateReviewSnapshotReference] = Field(default_factory=list)
+    metrics_snapshot_references: list[MetricsSnapshotReference] = Field(default_factory=list)
+    tuning_report_references: list[TuningReportReference] = Field(default_factory=list)
 
     @field_validator("next_recommendations")
     @classmethod
@@ -286,6 +306,14 @@ class StateStore:
         record.state_review_snapshot_references = self._merge_unique_references(
             record.state_review_snapshot_references,
             outcome.state_review_snapshot_references,
+        )
+        record.metrics_snapshot_references = self._merge_unique_references(
+            record.metrics_snapshot_references,
+            outcome.metrics_snapshot_references,
+        )
+        record.tuning_report_references = self._merge_unique_references(
+            record.tuning_report_references,
+            outcome.tuning_report_references,
         )
         record.updated_at = datetime.now(UTC)
         self._set_epic_lifecycle_state(state, record, outcome.lifecycle_state)
