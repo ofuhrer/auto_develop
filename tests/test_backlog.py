@@ -1448,6 +1448,11 @@ def test_state_refresh_builder_completed_finalized_with_review_details(tmp_path)
     assert validated.unresolved_finding_references[0].finding_id == "finding-1"
     assert validated.unresolved_finding_references[0].summary == "Required file overlap remains unresolved."
     assert validated.unresolved_finding_references[0].source_path == feature_review_path
+    assert validated.review_finding_summaries == ["Required file overlap remains unresolved."]
+    assert validated.finalization_outcome_details == {
+        "finalization_policy": "push-feature",
+        "finalization_result": {"result": {"merged": True, "pushed": True}},
+    }
     assert refresh_outcome.finalization_outcome_references[0].branch == "feature/demo-epic-0001"
     assert refresh_outcome.finalization_outcome_references[0].commit == "deadbeef"
 
@@ -1481,6 +1486,15 @@ def test_state_refresh_builder_blocked_finalization_from_gate(tmp_path) -> None:
     assert artifact.lifecycle_state == "blocked"
     assert artifact.status_reason == "blocked:unresolved_required_findings"
     assert artifact.unresolved_finding_references[0].finding_id == "finding-2"
+    assert artifact.finalization_outcome_details == {
+        "finalization_policy": "push-feature",
+        "finalization_result": {"gate": {"allowed": False}},
+        "blocked_finalization": {
+            "type": "finalization_gate_blocked",
+            "reason": "unresolved_required_findings",
+            "unresolved_required_finding_ids": ["finding-2"],
+        },
+    }
     assert refresh_outcome.blocked_reason == "unresolved_required_findings"
     assert refresh_outcome.finalization_outcome_references[0].outcome == "blocked"
 
@@ -1517,8 +1531,17 @@ def test_state_refresh_builder_manual_merge_completed_and_writes_artifact(tmp_pa
     release_dir = tmp_path / "runs" / "demo-epic-0004_release"
     release_dir.mkdir(parents=True, exist_ok=True)
     release_summary_path = release_dir / "release_summary.json"
+    finalization_summary_path = release_dir / "finalization_summary.json"
+    finalization_summary_path.write_text("{}\n", encoding="utf-8")
     release_summary_path.write_text(
-        json.dumps({"integration_branch": "feature/demo-epic-0004", "integration_commit": "cafe1234"}) + "\n",
+        json.dumps(
+            {
+                "integration_branch": "feature/demo-epic-0004",
+                "integration_commit": "cafe1234",
+                "finalization_summary_path": str(finalization_summary_path),
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     result = SimpleNamespace(
@@ -1543,7 +1566,7 @@ def test_state_refresh_builder_manual_merge_completed_and_writes_artifact(tmp_pa
     assert artifact.status_reason == "accepted_manual_merge_or_completed"
     assert "record manual merge/completion outcome in repo-state memory" in artifact.next_recommendations
     assert payload["status_reason"] == "accepted_manual_merge_or_completed"
-    assert payload["finalization_outcome_path"].endswith("release_summary.json")
+    assert payload["finalization_outcome_path"].endswith("finalization_summary.json")
     assert refresh_outcome.finalization_outcome_references[0].recommended_backlog_state == "completed"
 
 

@@ -40,6 +40,7 @@ class PostCycleStateRefreshArtifact(StrictModel):
     finalization_outcome_path: Path | None = None
     finalization_outcome_details: dict[str, object] | None = None
     review_artifact_paths: list[Path] = Field(default_factory=list)
+    review_finding_summaries: list[str] = Field(default_factory=list)
     release_metrics_path: Path | None = None
     release_budget_path: Path | None = None
     release_tuning_path: Path | None = None
@@ -60,8 +61,12 @@ def build_post_cycle_state_refresh(
     summary_payload = _load_json_mapping(result.release_summary_path)
     review_path = _path_from_payload(summary_payload, "feature_review_path")
     recheck_path = _path_from_payload(summary_payload, "feature_review_recheck_path")
+    finalization_outcome_path = _path_from_payload(summary_payload, "finalization_summary_path")
+    if finalization_outcome_path is None:
+        finalization_outcome_path = result.release_summary_path
     review_payload = _load_json_mapping(review_path)
     recheck_payload = _load_json_mapping(recheck_path)
+    review_finding_summaries = _review_finding_summaries(review_payload)
 
     decision = _release_decision_value(result.release)
     unresolved_ids = _unresolved_finding_ids(
@@ -119,9 +124,15 @@ def build_post_cycle_state_refresh(
         lifecycle_state=lifecycle_state,
         status_reason=status_reason,
         release_summary_path=result.release_summary_path,
-        finalization_outcome_path=result.release_summary_path,
-        finalization_outcome_details=result.finalization_result or result.blocked_finalization,
+        finalization_outcome_path=finalization_outcome_path,
+        finalization_outcome_details=_finalization_outcome_details(
+            finalization_result=result.finalization_result,
+            blocked_finalization=result.blocked_finalization,
+            finalization_policy=result.finalization_policy,
+            continuation=result.governor_cycle_continuation,
+        ),
         review_artifact_paths=[path for path in [review_path, recheck_path] if path is not None],
+        review_finding_summaries=review_finding_summaries,
         release_metrics_path=result.release_metrics_path,
         release_budget_path=result.release_budget_path,
         release_tuning_path=result.release_tuning_path,
@@ -317,6 +328,20 @@ def _unresolved_finding_references(
     return references
 
 
+def _review_finding_summaries(review_payload: dict[str, object]) -> list[str]:
+    raw_findings = review_payload.get("findings")
+    if not isinstance(raw_findings, list):
+        return []
+    summaries: list[str] = []
+    for item in raw_findings:
+        if not isinstance(item, dict):
+            continue
+        summary = str(item.get("summary") or "").strip()
+        if summary:
+            summaries.append(summary)
+    return summaries
+
+
 def _path_from_payload(payload: dict[str, object], key: str) -> Path | None:
     raw = payload.get(key)
     if not isinstance(raw, str):
@@ -379,3 +404,23 @@ def _string_from_payload(payload: dict[str, object], key: str) -> str | None:
         return None
     value = raw.strip()
     return value or None
+
+
+def _finalization_outcome_details(
+    *,
+    finalization_result: dict[str, object] | None,
+    blocked_finalization: dict[str, object] | None,
+    finalization_policy: str | None,
+    continuation: object | None,
+) -> dict[str, object] | None:
+    details: dict[str, object] = {}
+    if finalization_policy is not None:
+        details["finalization_policy"] = finalization_policy
+    if finalization_result is not None:
+        details["finalization_result"] = finalization_result
+    if blocked_finalization is not None:
+        details["blocked_finalization"] = blocked_finalization
+    stop_reason = getattr(continuation, "stop_reason", None)
+    if stop_reason is not None:
+        details["continuation_stop_reason"] = str(stop_reason)
+    return details or None
