@@ -852,7 +852,7 @@ The implemented adjudication path is intentionally narrow: it can accept false-p
 Release-local review convergence follows the same boundary:
 
 - required findings continue through bounded repair until they resolve, the retry budget is exhausted, or a hard gate stops the run;
-- duplicate or false-positive findings are accepted only with evidence-backed rationale, and the acceptance trail stays in `feature_review.json`, `feature_review_recheck.json`, and any typed supervisor decision record used for the adjudication;
+- duplicate findings are classified as deferred non-blocking findings (not `accepted_finding_ids`) with evidence-backed rationale captured in typed supervisor decision artifacts, while false-positive findings are the non-blocking acceptance path and remain auditable in `feature_review.json` / `feature_review_recheck.json`;
 - soft findings remain auditable decisions rather than silent ignores;
 - scope-expansion findings become proposal material for the next planning cycle instead of broadening the current release; and
 - backlog follow-ups are recorded as follow-up proposals, not as hidden scope creep inside the current feature branch.
