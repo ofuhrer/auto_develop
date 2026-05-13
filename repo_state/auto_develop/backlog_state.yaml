@@ -153,9 +153,10 @@ blocked_epic_records: []
 last_reviewed: '2026-05-13'
 notes:
 - 'Shipped seams: GovernorLoop, StateStore, RepairPolicy, typed supervisor decisions,
-  runtime-supervisor repair/resume, release scheduling, model-output normalization,
+  runtime-supervisor repair/resume, release scheduling, planner-output normalization,
   release-local feature review, review-loop convergence, state-review snapshots, and
-  the repeated `run-governor --epic-count N` shell.'
+  the repeated `run-governor --epic-count N` shell. Reviewer- and supervisor-output
+  normalization remain planned extensions on the same seam.'
 - 'Architecture pivot: deterministic code owns Git/worktrees, verification, evidence,
   metrics, typed persistence, configured finalization mechanics, and hard gates. High-level
   supervisor agents should own judgment-heavy execution strategy, reviewer normalization,
@@ -167,9 +168,9 @@ notes:
 - 'Dogfood finding: one-shot high-capability agents produced coherent implementations
   faster than over-decomposed contract batches. Prioritize supervisor-owned execution
   strategy and normalization before expanding multi-epic autonomy.'
-- 'Current top gap: planner and reviewer output still requires reactive schema-specific
-  normalization repairs; this should move behind reusable typed supervisor normalization
-  actions before strict admission stops.'
+- 'Current top gap: planner-output normalization is now the shipped typed decision path,
+  while reviewer and supervisor output still need the same reusable typed normalization
+  seam before strict admission stops.'
 - 'Next sequencing: planner-normalization-generalization, then governor-cockpit-v2
   and shared verification runtime.'
 - External targets should retain compact durable `.auto_develop/repo_state`, objectives,

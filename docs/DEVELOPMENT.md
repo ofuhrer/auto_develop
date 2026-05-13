@@ -130,7 +130,7 @@ evidence, but the sentinel is not runnable and is filtered out by
 records require explicit concrete validators; old artifacts without them must be
 backfilled or regenerated before they can drive autonomous retry behavior.
 
-Supervisor decision artifacts are persisted as deterministic JSON files under `runs/<run-id>/supervisor_decisions/` with filenames `<decision_type>__<decision_id>.json`. Loading these artifacts is strict: schema validation failures and missing referenced evidence paths are hard errors, not warning-only conditions. This typed record trail is implemented; the one-epic execution-strategy seam is shipped, model-output normalization now uses the same strict evidence-path and validator-rerun discipline, and the broader N-epic governor that would consume these artifacts across repeated epics remains planned.
+Supervisor decision artifacts are persisted as deterministic JSON files under `runs/<run-id>/supervisor_decisions/` with filenames `<decision_type>__<decision_id>.json`. Loading these artifacts is strict: schema validation failures and missing referenced evidence paths are hard errors, not warning-only conditions. This typed record trail is implemented; the one-epic execution-strategy seam is shipped, the planner-output normalization path uses the same strict evidence-path and validator-rerun discipline, and reviewer/supervisor normalization extensions remain planned until code and tests explicitly ship them. The broader N-epic governor that would consume these artifacts across repeated epics remains planned.
 
 ## Documentation Rules
 
