@@ -16,6 +16,7 @@ from agentic_devloop.models import (
     BacklogEpic,
     BacklogEvidenceManifest,
     BacklogPlan,
+    GovernorCycleContinuation,
     GovernorStopReason,
     ReleaseObjective,
 )
@@ -58,6 +59,7 @@ class BacklogRunResult:
     finalization_result: dict[str, Any] | None = None
     cleanup_result: dict[str, Any] | None = None
     blocked_finalization: dict[str, Any] | None = None
+    governor_cycle_continuation: GovernorCycleContinuation | None = None
     evidence_manifest: BacklogEvidenceManifest | None = None
 
 

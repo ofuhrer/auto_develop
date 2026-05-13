@@ -23,7 +23,9 @@ from agentic_devloop.models import (
     FeatureReviewDecision,
     FeatureReviewFinding,
     FeatureReviewRecommendation,
+    FeatureReviewRecheckStopReason,
     FeatureReviewSeverity,
+    GovernorFeatureReviewContinuation,
     Reviewer,
     TaskContract,
 )
@@ -753,4 +755,18 @@ def test_classify_feature_review_findings_for_convergence_rejects_finding_withou
             decision=decision,
             previous_decisions=[],
             verification_passed=True,
+        )
+
+
+def test_governor_feature_review_continuation_requires_rationale_and_evidence_for_accepted_with_rationale() -> None:
+    with pytest.raises(ValueError, match="accepted_with_rationale requires accepted_finding_ids"):
+        GovernorFeatureReviewContinuation(
+            recheck_stop_reason=FeatureReviewRecheckStopReason.ACCEPTED_WITH_RATIONALE,
+            accepted_risks=["Risk accepted with rationale."],
+        )
+
+    with pytest.raises(ValueError, match="accepted_with_rationale requires accepted_risks"):
+        GovernorFeatureReviewContinuation(
+            recheck_stop_reason=FeatureReviewRecheckStopReason.ACCEPTED_WITH_RATIONALE,
+            accepted_finding_ids=["finding-1"],
         )

@@ -667,6 +667,83 @@ class FeatureReviewRecheckRecord(StrictModel):
         return values
 
 
+class FeatureReviewFollowUpProposal(StrictModel):
+    finding_id: str = Field(min_length=1)
+    classification: str = Field(min_length=1)
+    selected_action: str = Field(min_length=1)
+    decision_artifact_path: str = Field(min_length=1)
+    matched_previous_finding_id: str | None = None
+    attempt: int = Field(ge=1)
+
+
+class GovernorContinuationAction(StrEnum):
+    CONTINUE = "continue"
+    STOP = "stop"
+
+
+class GovernorContinuationStopReason(StrEnum):
+    RELEASE_NOT_ACCEPTED = "release_not_accepted"
+    BLOCKED_FINALIZATION = "blocked_finalization"
+    UNRESOLVED_REQUIRED_REVIEW_FINDINGS = "unresolved_required_review_findings"
+    EXHAUSTED_REPAIR_BUDGET = "exhausted_repair_budget"
+    BLOCKED_BY_HARD_GATE = "blocked_by_hard_gate"
+
+
+class GovernorFeatureReviewContinuation(StrictModel):
+    feature_review_path: Path | None = None
+    feature_review_recheck_path: Path | None = None
+    finalization_gate: dict[str, object] | None = None
+    recheck_stop_reason: FeatureReviewRecheckStopReason | None = None
+    unresolved_finding_ids: list[str] = Field(default_factory=list)
+    accepted_finding_ids: list[str] = Field(default_factory=list)
+    deferred_finding_ids: list[str] = Field(default_factory=list)
+    accepted_risks: list[str] = Field(default_factory=list)
+    backlog_follow_up_proposals: list[FeatureReviewFollowUpProposal] = Field(default_factory=list)
+
+    @field_validator(
+        "unresolved_finding_ids",
+        "accepted_finding_ids",
+        "deferred_finding_ids",
+        "accepted_risks",
+        mode="before",
+    )
+    @classmethod
+    def normalize_items(cls, values: object) -> object:
+        return _normalize_non_empty_string_list(values, error_message="feature review continuation items must not be empty")
+
+    @field_validator("unresolved_finding_ids", "accepted_finding_ids", "deferred_finding_ids", "accepted_risks")
+    @classmethod
+    def items_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("feature review continuation items must not be empty")
+        return values
+
+    @model_validator(mode="after")
+    def accepted_with_rationale_requires_evidence(self) -> "GovernorFeatureReviewContinuation":
+        if self.recheck_stop_reason == FeatureReviewRecheckStopReason.ACCEPTED_WITH_RATIONALE:
+            if not self.accepted_finding_ids:
+                raise ValueError("accepted_with_rationale requires accepted_finding_ids")
+            if not self.accepted_risks:
+                raise ValueError("accepted_with_rationale requires accepted_risks")
+            if self.feature_review_path is None or self.feature_review_recheck_path is None:
+                raise ValueError("accepted_with_rationale requires serialized feature review and recheck paths")
+        return self
+
+
+class GovernorCycleContinuation(StrictModel):
+    action: GovernorContinuationAction
+    stop_reason: GovernorContinuationStopReason | None = None
+    feature_review: GovernorFeatureReviewContinuation | None = None
+
+    @model_validator(mode="after")
+    def validate_stop_reason(self) -> "GovernorCycleContinuation":
+        if self.action == GovernorContinuationAction.STOP and self.stop_reason is None:
+            raise ValueError("stop continuation requires stop_reason")
+        if self.action == GovernorContinuationAction.CONTINUE and self.stop_reason is not None:
+            raise ValueError("continue continuation must not include stop_reason")
+        return self
+
+
 class GeneratedContract(StrictModel):
     task_id: str = Field(min_length=1)
     title: str = Field(min_length=1)

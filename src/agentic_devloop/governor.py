@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, Protocol
@@ -11,6 +12,14 @@ from agentic_devloop.models import (
     BacklogEpic,
     BacklogEvidenceManifest,
     BacklogPlan,
+    FeatureReviewDecision,
+    FeatureReviewRecheckRecord,
+    FeatureReviewRecheckStopReason,
+    FeatureReviewFollowUpProposal,
+    GovernorContinuationAction,
+    GovernorContinuationStopReason,
+    GovernorCycleContinuation,
+    GovernorFeatureReviewContinuation,
     GovernorStopReason,
     ReleaseObjective,
 )
@@ -415,6 +424,10 @@ class GovernorLoop:
             state_review_snapshot_path=plan.state_review_snapshot_path,
             state_refresh_summary_path=plan.state_refresh_summary_path,
         )
+        blocked_finalization = _blocked_finalization_result(
+            release=release,
+            finalization_policy=release_finalize,
+        )
 
         return BacklogRunResult(
             selected_epic_id=epic.epic_id,
@@ -440,9 +453,10 @@ class GovernorLoop:
             release_tuning_path=release.tuning_path if release is not None else None,
             finalization_policy=release_finalize if release is not None else None,
             finalization_result=_release_finalization_result(release),
-            blocked_finalization=_blocked_finalization_result(
+            blocked_finalization=blocked_finalization,
+            governor_cycle_continuation=_governor_cycle_continuation(
                 release=release,
-                finalization_policy=release_finalize,
+                blocked_finalization=blocked_finalization,
             ),
             evidence_manifest=evidence_manifest,
             state_refresh_summary_path=plan.state_refresh_summary_path,
@@ -512,6 +526,7 @@ class GovernorLoop:
             objective=placeholder_objective,
             release_id="no_actionable_work",
             release=None,
+            governor_cycle_continuation=GovernorCycleContinuation(action=GovernorContinuationAction.CONTINUE),
             evidence_manifest=evidence_manifest,
             state_refresh_summary_path=plan.state_refresh_summary_path,
         )
@@ -627,3 +642,108 @@ def _blocked_finalization_result(
             "failed_step": getattr(finalize, "failed_step", None),
         }
     return None
+
+
+def _governor_cycle_continuation(
+    *,
+    release: object | None,
+    blocked_finalization: dict[str, object] | None,
+) -> GovernorCycleContinuation:
+    if release is None:
+        return GovernorCycleContinuation(action=GovernorContinuationAction.CONTINUE)
+    if _release_decision_value(release) != "accepted":
+        return GovernorCycleContinuation(
+            action=GovernorContinuationAction.STOP,
+            stop_reason=GovernorContinuationStopReason.RELEASE_NOT_ACCEPTED,
+        )
+
+    feature_review = _load_feature_review_continuation(release)
+    if blocked_finalization is not None:
+        stop_reason = GovernorContinuationStopReason.BLOCKED_FINALIZATION
+        if blocked_finalization.get("reason") == "unresolved_required_findings":
+            stop_reason = GovernorContinuationStopReason.UNRESOLVED_REQUIRED_REVIEW_FINDINGS
+        if (
+            feature_review is not None
+            and feature_review.recheck_stop_reason == FeatureReviewRecheckStopReason.BLOCKED_BY_RETRY_BUDGET
+        ):
+            stop_reason = GovernorContinuationStopReason.EXHAUSTED_REPAIR_BUDGET
+        elif (
+            feature_review is not None
+            and feature_review.recheck_stop_reason == FeatureReviewRecheckStopReason.BLOCKED_BY_HARD_GATE
+        ):
+            stop_reason = GovernorContinuationStopReason.BLOCKED_BY_HARD_GATE
+        return GovernorCycleContinuation(
+            action=GovernorContinuationAction.STOP,
+            stop_reason=stop_reason,
+            feature_review=feature_review,
+        )
+
+    return GovernorCycleContinuation(
+        action=GovernorContinuationAction.CONTINUE,
+        feature_review=feature_review,
+    )
+
+
+def _load_feature_review_continuation(release: object) -> GovernorFeatureReviewContinuation | None:
+    summary_path = getattr(release, "summary_path", None)
+    if summary_path is None:
+        return None
+    path = Path(summary_path)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    review_path_raw = payload.get("feature_review_path")
+    recheck_path_raw = payload.get("feature_review_recheck_path")
+    review_path = Path(review_path_raw) if isinstance(review_path_raw, str) and review_path_raw.strip() else None
+    recheck_path = Path(recheck_path_raw) if isinstance(recheck_path_raw, str) and recheck_path_raw.strip() else None
+
+    accepted_risks: list[str] = []
+    if review_path is not None and review_path.exists():
+        try:
+            review_payload = FeatureReviewDecision.model_validate_json(review_path.read_text(encoding="utf-8"))
+            accepted_risks = review_payload.accepted_risks
+        except Exception:  # noqa: BLE001
+            accepted_risks = []
+
+    recheck_payload: FeatureReviewRecheckRecord | None = None
+    if recheck_path is not None and recheck_path.exists():
+        try:
+            recheck_payload = FeatureReviewRecheckRecord.model_validate_json(recheck_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            recheck_payload = None
+
+    proposal_payload = payload.get("feature_review_proposals", [])
+    proposals: list[FeatureReviewFollowUpProposal] = []
+    if isinstance(proposal_payload, list):
+        for item in proposal_payload:
+            try:
+                proposal = FeatureReviewFollowUpProposal.model_validate(item)
+            except Exception:  # noqa: BLE001
+                continue
+            if proposal.classification == "backlog_follow_up":
+                proposals.append(proposal)
+
+    if (
+        review_path is None
+        and recheck_path is None
+        and recheck_payload is None
+        and not proposals
+        and not payload.get("finalization_gate")
+    ):
+        return None
+
+    return GovernorFeatureReviewContinuation(
+        feature_review_path=review_path,
+        feature_review_recheck_path=recheck_path,
+        finalization_gate=payload.get("finalization_gate"),
+        recheck_stop_reason=recheck_payload.stop_reason if recheck_payload is not None else None,
+        unresolved_finding_ids=recheck_payload.unresolved_finding_ids if recheck_payload is not None else [],
+        accepted_finding_ids=recheck_payload.accepted_finding_ids if recheck_payload is not None else [],
+        deferred_finding_ids=recheck_payload.deferred_finding_ids if recheck_payload is not None else [],
+        accepted_risks=accepted_risks,
+        backlog_follow_up_proposals=proposals,
+    )
