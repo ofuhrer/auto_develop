@@ -315,6 +315,44 @@ def test_model_output_normalization_requires_consistent_outcome_fields() -> None
             }
         )
 
+    with pytest.raises(ValidationError, match="requires validation_errors"):
+        ModelOutputNormalizationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+                "risk_level": DecisionRiskLevel.HIGH,
+                "raw_artifact_paths": ["runs/release/reviewer_raw.json"],
+                "validation_errors": [],
+                "selected_action": ModelOutputNormalizationAction.APPLY_NORMALIZATION,
+                "outcome": ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
+                "fallback_plan": "Escalate decisioning to stop path.",
+                "validators_to_rerun": ["review_findings_schema"],
+                "normalized_artifact_path": "runs/release/feature_review.normalized.json",
+            }
+        )
+
+    with pytest.raises(ValidationError, match="requires validators_to_rerun"):
+        ModelOutputNormalizationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+                "risk_level": DecisionRiskLevel.HIGH,
+                "raw_artifact_paths": ["runs/release/reviewer_raw.json"],
+                "validation_errors": [
+                    {
+                        "field": "findings[0].evidence_paths",
+                        "message": "Field required",
+                        "error_type": "missing",
+                    }
+                ],
+                "selected_action": ModelOutputNormalizationAction.APPLY_NORMALIZATION,
+                "outcome": ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
+                "fallback_plan": "Escalate decisioning to stop path.",
+                "validators_to_rerun": [],
+                "normalized_artifact_path": "runs/release/feature_review.normalized.json",
+            }
+        )
+
     with pytest.raises(ValidationError, match="requires refusal_reason"):
         ModelOutputNormalizationDecision.model_validate(
             {
@@ -335,6 +373,25 @@ def test_model_output_normalization_requires_consistent_outcome_fields() -> None
                 "validators_to_rerun": ["review_findings_schema"],
             }
         )
+
+
+def test_model_output_normalization_refused_allows_empty_validation_and_rerun_lists() -> None:
+    decision = ModelOutputNormalizationDecision.model_validate(
+        {
+            **BASE,
+            "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+            "risk_level": DecisionRiskLevel.HIGH,
+            "raw_artifact_paths": ["runs/release/reviewer_raw.json"],
+            "validation_errors": [],
+            "selected_action": ModelOutputNormalizationAction.REFUSE,
+            "outcome": ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+            "fallback_plan": "Escalate decisioning to stop path.",
+            "validators_to_rerun": [],
+            "refusal_reason": "Insufficient confidence in safe normalization.",
+        }
+    )
+
+    assert decision.outcome == ModelOutputNormalizationOutcome.REFUSED_AND_STOP
 
 
 def test_parse_supervisor_decision_rejects_unsupported_type() -> None:

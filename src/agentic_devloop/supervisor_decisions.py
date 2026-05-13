@@ -321,18 +321,11 @@ class ModelOutputNormalizationDecision(SupervisorDecisionBase):
             raise ValueError("raw artifact paths must not be empty")
         return values
 
-    @field_validator("validation_errors")
-    @classmethod
-    def validation_errors_must_not_be_empty(cls, values: list[ModelOutputValidationError]) -> list[ModelOutputValidationError]:
-        if not values:
-            raise ValueError("validation errors must not be empty")
-        return values
-
     @field_validator("validators_to_rerun")
     @classmethod
     def validators_to_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
-        if not values or any(not value.strip() for value in values):
-            raise ValueError("validators to rerun must not be empty")
+        if any(not value.strip() for value in values):
+            raise ValueError("validators to rerun must not include empty values")
         return values
 
     @model_validator(mode="after")
@@ -345,6 +338,10 @@ class ModelOutputNormalizationDecision(SupervisorDecisionBase):
         if self.outcome != expected_outcome:
             raise ValueError("selected_action must match outcome")
         if self.outcome == ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY:
+            if not self.validation_errors:
+                raise ValueError("normalized_and_retry requires validation_errors")
+            if not self.validators_to_rerun:
+                raise ValueError("normalized_and_retry requires validators_to_rerun")
             if self.normalized_artifact_path is None:
                 raise ValueError("normalized_and_retry requires normalized_artifact_path")
             if self.refusal_reason is not None:
