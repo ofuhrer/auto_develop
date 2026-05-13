@@ -1,15 +1,15 @@
-release_id: persistent-governor-memory
-active_objective: "Persist authoritative multi-epic governor memory so completed, skipped, blocked, active, reviewed, and candidate epics survive repeated runs and guide the next highest-value development cycle."
+release_id: supervisor-decision-records
+active_objective: "Introduce typed, auditable supervisor decision records so deterministic code emits facts and enforces hard validators while supervisor agents own scheduling, repair-loop continuation, finding adjudication, soft-budget acceptance, contract normalization, and environment repair decisions."
 current_tasks:
-  - durable-epic-state-schema
-  - release-outcome-summary-ingestion
-  - unresolved-finding-memory
-  - backlog-state-update-flow
+  - supervisor-decision-schema
+  - scheduling-decision-records
+  - review-finding-decision-records
+  - repair-budget-decision-records
   - docs-and-state-update
 next_steps:
   - Keep the implemented runtime-supervisor, planner-normalization, one-epic governor logging behavior, and semantic feature-review loop aligned with docs.
-  - Treat governor-state-review and agentic-feature-review-loop as completed for the current cycle.
-  - Implement persistent-governor-memory so completed, skipped, blocked, active, reviewed, and candidate epics are durable across repeated cycles.
+  - Treat governor-state-review, agentic-feature-review-loop, and persistent-governor-memory as completed for the current cycle.
+  - Implement supervisor-decision-records so scheduling, repair-loop continuation, finding adjudication, soft-budget acceptance, contract normalization, and environment repair can move out of procedural release-runner heuristics.
   - Preserve the implemented repair/resume seam while the broader N-epic governor loop remains planned until state review and feature review exist.
   - Identify procedural heuristics that can be retired once supervisor actions and the broader governor loop exist: deterministic backlog scoring, contract wording checks, log-pattern failure classification, budget-tuning prose, exact-overlap rejection, hard rejection for small budget overages, environment-command assumptions, and cockpit-summary filtering.
   - Keep deterministic gates authoritative for hard invariants; let the supervisor or reviewer agent decide soft findings such as modest budget overage, source-file overlap, model escalation, retry strategy, and environment repair with auditable rationale.
