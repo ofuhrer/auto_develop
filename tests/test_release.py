@@ -1420,7 +1420,7 @@ def _write_scope_risk_budget_policy_decision(
     return write_supervisor_decision_artifact(release_bundle_path=release_root, decision=decision)
 
 
-def test_run_release_blocks_soft_scope_overage_when_scope_risk_decision_is_missing(tmp_path) -> None:
+def test_run_release_generates_scope_risk_decision_and_blocks_without_explicit_acceptance(tmp_path) -> None:
     repo = _repo_with_initial_commit(tmp_path / "repo")
     config_dir = _write_demo_config(tmp_path, repo, max_strong_model_calls_per_release=10)
     contracts_dir = tmp_path / "contracts"
@@ -1445,7 +1445,24 @@ def test_run_release_blocks_soft_scope_overage_when_scope_risk_decision_is_missi
     assert result.decision == Decision.NEEDS_REVISION
     assert result.finalization is None
     assert summary["scope_risk_budget_policy_gate"]["allowed"] is False
-    assert "missing scope-risk budget policy decision" in summary["scope_risk_budget_policy_gate"]["blocking_reasons"][0]
+    assert any(
+        "requires replan_and_retry" in reason
+        for reason in summary["scope_risk_budget_policy_gate"]["blocking_reasons"]
+    )
+    decision_paths = summary["scope_risk_budget_policy_decision_paths"]
+    assert decision_paths
+    decision_path = Path(decision_paths[0])
+    decision = load_supervisor_decision_artifact(decision_path)
+    assert isinstance(decision, ScopeRiskBudgetPolicyDecision)
+    assert decision.selected_action == ScopeRiskAction.REPLAN
+    assert decision.outcome == ScopeRiskOutcome.REPLAN_AND_RETRY
+    assert decision.classification in {
+        ScopeRiskClassification.MECHANICAL,
+        ScopeRiskClassification.COHESIVE,
+    }
+    assert decision.evidence_paths
+    assert decision.fallback_plan
+    assert decision.validators_to_rerun
 
 
 def test_run_release_allows_soft_scope_overage_with_accepted_scope_risk_decision(tmp_path) -> None:

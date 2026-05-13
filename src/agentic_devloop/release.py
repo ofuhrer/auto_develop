@@ -4,6 +4,7 @@ import json
 import os
 import shlex
 import threading
+import re
 from hashlib import sha256
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
@@ -99,8 +100,10 @@ from agentic_devloop.supervisor_decisions import (
     ReleaseSchedulingDecision,
     ReleaseSchedulingStalenessInputs,
     SchedulingOutcome,
+    ScopeRiskAction,
     ScopeRiskAffectedScope,
     ScopeRiskBudgetPolicyDecision,
+    ScopeRiskClassification,
     ScopeRiskOutcome,
     SupervisorDecisionType,
     load_supervisor_decision_artifact,
@@ -252,6 +255,106 @@ def _scope_risk_task_ids_from_soft_gate_findings(task_results: list[TaskRunResul
                 task_ids.add(decision.task_id)
                 break
     return sorted(task_ids)
+
+
+_SCOPE_RISK_BUDGET_PATTERN = re.compile(r"over budget:\s*(?P<actual>\d+)\s+exceeds\s+(?P<limit>\d+)")
+
+
+def _parse_scope_risk_budget_from_finding(*, finding_id: str, risk: str) -> tuple[str, int, int] | None:
+    if finding_id.endswith(":changed_files_budget"):
+        budget_name = "changed_files"
+    elif finding_id.endswith(":diff_lines_budget"):
+        budget_name = "diff_lines"
+    else:
+        return None
+
+    match = _SCOPE_RISK_BUDGET_PATTERN.search(risk)
+    if match is None:
+        return None
+    actual = int(match.group("actual"))
+    configured = int(match.group("limit"))
+    if configured <= 0 or actual < configured:
+        return None
+    return (budget_name, configured, actual)
+
+
+def _ensure_scope_risk_budget_policy_decisions(
+    *,
+    release_root: Path,
+    release_id: str,
+    task_results: list[TaskRunResult],
+    required_task_ids: list[str],
+    default_changed_files_limit: int,
+    default_diff_size_limit: int,
+    now: datetime | None = None,
+) -> list[Path]:
+    generated_paths: list[Path] = []
+    loaded = _load_scope_risk_budget_policy_decisions(release_root=release_root)
+    existing_task_ids = {
+        decision.affected_task_id
+        for _, decision in loaded
+        if decision.affected_scope == ScopeRiskAffectedScope.TASK and decision.affected_task_id
+    }
+
+    task_results_by_id = {result.decision.task_id: result for result in task_results}
+    decided_at = now or datetime.now(UTC)
+    for task_id in required_task_ids:
+        if task_id in existing_task_ids:
+            continue
+        result = task_results_by_id.get(task_id)
+        if result is None:
+            continue
+        findings = getattr(result.decision, "soft_gate_findings", []) or []
+        parsed_findings = [
+            parsed
+            for finding in findings
+            for parsed in [_parse_scope_risk_budget_from_finding(finding_id=finding.finding_id, risk=finding.risk)]
+            if parsed is not None
+        ]
+        changed_values = [(configured, actual) for budget_name, configured, actual in parsed_findings if budget_name == "changed_files"]
+        diff_values = [(configured, actual) for budget_name, configured, actual in parsed_findings if budget_name == "diff_lines"]
+        configured_changed_files_limit = (
+            max(value[0] for value in changed_values) if changed_values else default_changed_files_limit
+        )
+        actual_changed_files = max(value[1] for value in changed_values) if changed_values else configured_changed_files_limit + 1
+        configured_diff_size_limit = max(value[0] for value in diff_values) if diff_values else default_diff_size_limit
+        actual_diff_size = max(value[1] for value in diff_values) if diff_values else configured_diff_size_limit + 1
+        classification = (
+            ScopeRiskClassification.COHESIVE
+            if diff_values
+            else ScopeRiskClassification.MECHANICAL
+        )
+        decision = ScopeRiskBudgetPolicyDecision.model_validate(
+            {
+                "decision_type": SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY,
+                "decision_id": f"{release_id}__scope_risk__{task_id}",
+                "release_id": release_id,
+                "decided_at": decided_at,
+                "decided_by": "deterministic_scope_risk_budget_policy",
+                "rationale": (
+                    "Generated deterministic scope-risk decision because no supervisor decision artifact "
+                    "was present for a task-level changed-files or diff-size soft overage."
+                ),
+                "evidence_paths": [Path("release_overlap_report.json")],
+                "classification": classification,
+                "selected_action": ScopeRiskAction.REPLAN,
+                "outcome": ScopeRiskOutcome.REPLAN_AND_RETRY,
+                "fallback_plan": (
+                    "Stop finalization for this run and require explicit supervisor adjudication "
+                    "before accepting the scope-risk overage."
+                ),
+                "validators_to_rerun": ["verification", "release_summary", "release_metrics", "release_budget"],
+                "configured_changed_files_limit": configured_changed_files_limit,
+                "actual_changed_files": actual_changed_files,
+                "configured_diff_size_limit": configured_diff_size_limit,
+                "actual_diff_size": actual_diff_size,
+                "affected_scope": ScopeRiskAffectedScope.TASK,
+                "affected_task_id": task_id,
+                "hard_safety_findings": [],
+            }
+        )
+        generated_paths.append(write_supervisor_decision_artifact(release_bundle_path=release_root, decision=decision))
+    return generated_paths
 
 
 def _load_scope_risk_budget_policy_decisions(
@@ -670,6 +773,21 @@ def run_release(
     scope_risk_required_task_ids = _scope_risk_task_ids_from_soft_gate_findings(task_results)
     if scope_risk_required_task_ids:
         try:
+            generated_scope_risk_paths = _ensure_scope_risk_budget_policy_decisions(
+                release_root=release_root,
+                release_id=release_id,
+                task_results=task_results,
+                required_task_ids=scope_risk_required_task_ids,
+                default_changed_files_limit=config.budget.max_changed_files_per_task,
+                default_diff_size_limit=config.budget.max_diff_lines_per_task,
+                now=now,
+            )
+            if generated_scope_risk_paths:
+                _report(
+                    progress,
+                    "event=scope_risk_budget_policy_decisions_generated paths="
+                    + json.dumps([str(path) for path in generated_scope_risk_paths], sort_keys=True),
+                )
             scope_risk_loaded = _load_scope_risk_budget_policy_decisions(release_root=release_root)
             scope_risk_budget_policy_decision_paths = [path for path, _ in scope_risk_loaded]
             scope_risk_budget_policy_gate = _scope_risk_budget_policy_gate(
