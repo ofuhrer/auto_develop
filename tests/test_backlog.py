@@ -1188,6 +1188,14 @@ def test_governor_loop_runs_multiple_epic_cycles_and_records_state(tmp_path) -> 
     assert result.stop_reason == GovernorStopReason.REQUESTED_EPIC_COUNT_REACHED
     assert [cycle.selected_epic_id for cycle in result.cycles] == ["epic-0001", "epic-0002"]
     assert [path.stem for path in run_calls] == ["demo-epic-0001", "demo-epic-0002"]
+    assert all(cycle.evidence_manifest is not None for cycle in result.cycles)
+    assert [
+        cycle.evidence_manifest.release_summary_path for cycle in result.cycles if cycle.evidence_manifest is not None
+    ] == [cycle.release.summary_path for cycle in result.cycles if cycle.release is not None]
+    assert [cycle.selected_release_id for cycle in result.cycles] == ["demo-epic-0001", "demo-epic-0002"]
+    assert [cycle.selected_epic_title for cycle in result.cycles] == ["Epic epic-0001", "Epic epic-0002"]
+    assert all(cycle.selected_epic_rationale == "Because." for cycle in result.cycles)
+    assert all(cycle.selected_epic_priority == 1 for cycle in result.cycles)
     state = state_store.load()
     assert state.completed_epics == ["epic-0001", "epic-0002"]
     assert [summary.release_id for summary in state.recent_run_summaries] == ["demo-epic-0002", "demo-epic-0001"]

@@ -221,8 +221,17 @@ class BacklogEvidenceManifest(StrictModel):
     release_soft_gate_decision_path: Path | None = None
     feature_review_path: Path | None = None
     feature_review_recheck_path: Path | None = None
+    feature_review_prompt_path: Path | None = None
+    feature_review_stdout_path: Path | None = None
+    feature_review_stderr_path: Path | None = None
+    feature_review_metadata_path: Path | None = None
+    feature_review_output_normalization_decision_path: Path | None = None
+    feature_review_normalized_artifact_path: Path | None = None
     feature_review_proposal_paths: list[Path] = Field(default_factory=list)
     finalization_summary_path: Path | None = None
+    finalization_decision_path: Path | None = None
+    final_review_continuation_decision_path: Path | None = None
+    final_integration_verification_path: Path | None = None
     cleanup_report_path: Path | None = None
     repo_state_proposal_plan_path: Path | None = None
     roadmap_proposal_plan_path: Path | None = None
