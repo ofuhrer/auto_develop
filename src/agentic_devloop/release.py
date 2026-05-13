@@ -348,6 +348,7 @@ def run_release(
         _report(progress, "event=release_budget_exceeded violations=" + json.dumps(budget_violations, sort_keys=True))
     finalization_gate = _build_release_finalization_gate(
         decision=decision,
+        feature_review_decision=feature_review_decision,
         feature_review_recheck=feature_review_recheck,
     )
     if not bool(finalization_gate["allowed"]):
@@ -1743,13 +1744,20 @@ def _write_release_review(
 def _build_release_finalization_gate(
     *,
     decision: Decision,
+    feature_review_decision: FeatureReviewDecision | None,
     feature_review_recheck: FeatureReviewRecheckRecord | None,
 ) -> dict[str, object]:
-    unresolved_required_finding_ids = (
-        list(feature_review_recheck.unresolved_finding_ids)
-        if feature_review_recheck and feature_review_recheck.unresolved_finding_ids
-        else []
+    unresolved_finding_ids = set(feature_review_recheck.unresolved_finding_ids) if feature_review_recheck else set()
+    required_finding_ids = (
+        {
+            finding.finding_id
+            for finding in feature_review_decision.findings
+            if finding.required_repairs
+        }
+        if feature_review_decision
+        else set()
     )
+    unresolved_required_finding_ids = sorted(unresolved_finding_ids.intersection(required_finding_ids))
     if unresolved_required_finding_ids:
         return {
             "allowed": False,

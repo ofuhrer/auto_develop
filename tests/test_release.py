@@ -14,10 +14,11 @@ import pytest
 from agentic_devloop.git_finalize import FinalizeResult
 from agentic_devloop.models import ExecutorResult, ProjectConfig, TaskContract
 from agentic_devloop.models import Decision, Reviewer, ReviewDecision
-from agentic_devloop.models import FeatureReviewDecision
+from agentic_devloop.models import FeatureReviewDecision, FeatureReviewRecheckRecord
 from agentic_devloop.orchestrator import TaskRunResult, executor_config_for_task, executor_configs_for_task
 from agentic_devloop.release import (
     collect_release_planning_state_review_snapshot,
+    _build_release_finalization_gate,
     _completed_release_task_ids,
     _ensure_no_existing_task_branches,
     _ensure_no_existing_worktrees,
@@ -2134,6 +2135,44 @@ def test_run_release_blocks_finalization_on_unresolved_required_feature_review_f
     assert summary["finalization_gate"]["unresolved_required_finding_ids"] == ["finding-required-1"]
     assert "- Gate reason: `unresolved_required_findings`" in review
     assert "- Unresolved required findings: `1`" in review
+
+
+def test_release_finalization_gate_only_counts_required_findings() -> None:
+    decision = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "demo-release",
+            "reviewer": "strong_model",
+            "summary": "review summary",
+            "recommendation": "escalate",
+            "findings": [
+                {
+                    "finding_id": "finding-optional-1",
+                    "severity": "moderate",
+                    "summary": "optional follow-up only",
+                    "affected_files": ["docs/demo.md"],
+                    "required_repairs": [],
+                    "optional_follow_ups": ["consider tightening wording"],
+                }
+            ],
+        }
+    )
+    gate = _build_release_finalization_gate(
+        decision=Decision.ESCALATED,
+        feature_review_decision=decision,
+        feature_review_recheck=FeatureReviewRecheckRecord.model_validate(
+            {
+                "release_id": "demo-release",
+                "unresolved_finding_ids": ["finding-optional-1"],
+                "resolved_finding_ids": [],
+                "accepted_finding_ids": [],
+                "stop_reason": "blocked_by_hard_gate",
+            }
+        ),
+    )
+
+    assert gate["allowed"] is False
+    assert gate["reason"] == "release_decision_not_accepted"
+    assert gate["unresolved_required_finding_ids"] == []
 
 
 def _task_contract(
