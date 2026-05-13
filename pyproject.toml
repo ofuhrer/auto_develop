@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A local orchestration loop for bounded AI development tasks."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "BSD-3-Clause" }
 authors = [
   { name = "Auto Develop Contributors" }
 ]
