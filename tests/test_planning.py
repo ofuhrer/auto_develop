@@ -635,6 +635,44 @@ def test_parse_planner_output_normalizes_contract_wrapper_drift_before_strict_va
     assert any("planner_contract_normalization=" in warning for warning in plan.warnings)
 
 
+def test_parse_planner_output_preserves_implementation_requirements_as_objective_detail() -> None:
+    plan = parse_planner_output(
+        {
+            "release_id": "v0.3.22",
+            "planner": "strong-model",
+            "generated_contracts": [
+                {
+                    "task_id": "v0.3.22-0001",
+                    "title": "State refresh artifact",
+                    "objective": "Persist a governor state refresh summary.",
+                    "rationale": "The planner emitted useful requirements outside the strict contract schema.",
+                    "suggested_contract": {
+                        "allowed_files": ["src/agentic_devloop/governor.py"],
+                        "forbidden_changes": ["Do not change release finalization semantics."],
+                        "implementation_requirements": [
+                            "Add one typed artifact before epic selection.",
+                            "Represent missing optional inputs explicitly.",
+                        ],
+                        "verification": [".venv/bin/python -m pytest tests/test_planning.py"],
+                        "stop_conditions": ["Stop if scope expands."],
+                    },
+                }
+            ],
+            "warnings": [],
+        },
+        release_id="v0.3.22",
+        planner="strong-model",
+    )
+
+    contract = plan.generated_contracts[0].suggested_contract
+    assert contract.task_id == "v0.3.22-0001"
+    assert "Implementation requirements:" in contract.objective
+    assert "- Add one typed artifact before epic selection." in contract.objective
+    assert contract.required_evidence == ["git diff", "changed-files list"]
+    assert contract.verification.commands == [".venv/bin/python -m pytest tests/test_planning.py"]
+    assert any("implementation_requirements" in warning for warning in plan.warnings)
+
+
 def test_parse_planner_output_stops_with_structured_evidence_for_overbroad_allowed_files() -> None:
     with pytest.raises(PlannerNormalizationError) as exc:
         parse_planner_output(
