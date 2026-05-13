@@ -1,6 +1,6 @@
 active_goal: Enable a freshly onboarded auto_develop checkout and target repository to run a high-level autonomous development loop for the next N highest-value epics, with a governor/supervisor agent that chooses the execution strategy, uses one-shot implementation or decomposed sub-agents as appropriate, diagnoses and repairs contract-contained subsystem failures, normalizes useful model output before strict validation, and stops only for major hard-policy problems.
 governor_mode: autonomous_first
-current_focus: review-loop-convergence-policy
+current_focus: multi-epic-run-governor
 active_epic: null
 completed_epics:
   - release-governor-1
@@ -17,50 +17,56 @@ completed_epics:
   - supervisor-owned-release-scheduling
   - supervisor-execution-strategy
   - model-output-normalization
+  - review-loop-convergence-policy
 blocked_epics: []
 candidate_epics:
-  - id: review-loop-convergence-policy
-    priority: 1
-    title: Add convergence policy for reviewer repair loops.
-    rationale: Multiple repair passes are useful for blocking findings, but repeated adjacent findings should be classified as blockers, soft findings, duplicates, false positives, scope expansion, or backlog follow-ups before retry budget churn.
-    next_release_id: review-loop-convergence-policy
   - id: multi-epic-run-governor
-    priority: 2
+    priority: 1
     title: Close the autonomous loop for repeated epic cycles.
     rationale: "Convert one-epic run-backlog into the intended high-level development loop: refresh repo state, choose the next highest-value epic, select one-shot or decomposed execution, run/review/repair/finalize it, compact learnings into durable memory, clean branches/worktrees, and continue until the requested epic count, budget, no-actionable-work state, or major hard-policy stop."
     next_release_id: multi-epic-run-governor
-  - id: governor-cockpit-v2
+  - id: review-repair-continuation
+    priority: 2
+    title: Treat final feature-review findings as autonomous continuation inputs.
+    rationale: "The review-loop-convergence cycle still required a human to interpret final reviewer findings, patch evidence semantics, rerun verification, and decide whether the branch was mergeable. The supervisor should normalize reviewer output, classify findings, create bounded repairs or one-shot repair prompts, rerun verification/review, and stop only for exhausted repair budget, hard gates, policy, or missing credentials."
+    next_release_id: review-repair-continuation
+  - id: autonomous-finalization-and-cleanup
     priority: 3
+    title: Land accepted feature branches and clean branches/worktrees by policy.
+    rationale: "Successful child releases still need human merge/push/delete steps. The governor should merge or prepare a PR according to project policy, push the final branch, delete merged feature/agent branches locally and remotely, prune worktrees, and record durable finalization state before the next epic."
+    next_release_id: autonomous-finalization-and-cleanup
+  - id: governor-cockpit-v2
+    priority: 4
     title: Expand governor cockpit logging for full N-epic runs.
     rationale: Operators need one `governor.log` stream that links state review, backlog selection, child releases, feature reviews, repair loops, state refresh, and next-epic selection across repeated cycles.
     next_release_id: governor-cockpit-v2
   - id: shared-verification-runtime
-    priority: 4
+    priority: 5
     title: Make isolated worktrees run tests through a configured shared runtime.
     rationale: Sub-agents repeatedly could not run pytest because task worktrees do not contain .venv; verification should use project runtime policy rather than worktree-local assumptions.
     next_release_id: shared-verification-runtime
   - id: environment-repair-actions
-    priority: 5
+    priority: 6
     title: Repair safe verification-environment drift autonomously.
     rationale: Stale editable installs, command-not-found errors, missing PYTHONPATH, and dependency runtime drift should become bounded repair actions when project policy declares a safe repair.
     next_release_id: environment-repair-actions
   - id: executor-liveness-supervision
-    priority: 6
+    priority: 7
     title: Classify active, stalled, hung, and environment-blocked executors.
     rationale: Long-running workers need process/output/file heartbeat evidence so the supervisor can wait, inspect, restart, or stop without human guessing.
     next_release_id: executor-liveness-supervision
   - id: target-artifact-ownership
-    priority: 7
+    priority: 8
     title: Store target development memory in the target repo or a durable control repo.
     rationale: Deleting and recloning the auto_develop controller should not lose target repo-state, objectives, contracts, completed-epic history, or next-epic planning context.
     next_release_id: target-artifact-ownership
   - id: governor-state-refresh
-    priority: 8
+    priority: 9
     title: Apply roadmap and repo-state updates after each epic.
     rationale: Ensures new learnings from artifacts, validation, metrics, review findings, and documentation feed the next planning cycle.
     next_release_id: governor-state-refresh
   - id: onboarding-bootstrap
-    priority: 9
+    priority: 10
     title: Bootstrap a freshly cloned target repository from one or two onboarding prompts.
     rationale: The target operator experience is minimal setup followed by a high-level epic-count loop.
     next_release_id: onboarding-bootstrap
@@ -100,3 +106,7 @@ notes:
   - "One-shot comparison finding: the experiment branch implementing the same frozen supervisor-owned scheduling epic with one high-capability agent changed the same files, passed the same tests, and produced a more coherent schema than the five-contract auto_develop run. The release run succeeded at worker isolation but blocked finalization on brittle reviewer-output validation. Execution strategy must be supervisor-owned before contract generation."
   - "Architecture pivot as of 2026-05-13: keep Git/worktree, verification, evidence, metrics, typed persistence, and hard gates deterministic; move judgment-heavy choices into a high-level supervisor agent, including one-shot versus decomposition, reviewer-output normalization, finding adjudication, soft-budget acceptance, and retry/split/replan decisions."
   - The supervisor-execution-strategy and model-output-normalization epics are merged. The remaining product gap is no longer single-epic execution; it is closing the autonomous loop so the governor can run repeated epic cycles, update durable memory, finalize/clean feature branches, and continue without routine human steering.
+  - The review-loop-convergence-policy epic is merged. The release-local reviewer can now classify duplicate, soft, false-positive, scope-expansion, and backlog-follow-up findings with typed evidence.
+  - The last two cycles exposed the remaining autonomy gap: final review findings, merge/push/branch cleanup, and roadmap/backlog update decisions still required human interpretation even when code and tests were green.
+  - Review repair should become a continuation state in the governor loop. Useful reviewer findings should produce bounded repair tasks or one-shot repair prompts, rerun verification/review, and only stop after repair budget, hard gates, unsafe policy expansion, missing credentials, or no actionable repair.
+  - Autonomous finalization needs explicit policy and state: accepted feature branches should be merged or turned into PR candidates, pushed, cleaned locally/remotely, and summarized into durable memory before the next epic starts.
