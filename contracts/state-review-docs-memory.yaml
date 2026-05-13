@@ -1,0 +1,49 @@
+task_id: state-review-docs-memory
+release_id: governor-state-review
+title: Document implemented state-review behavior and update repo-state memory
+task_type: code_only
+budget_class: M
+objective: Document the new governor state-review pass and update repo-state memory
+  with a concise implemented/planned distinction.
+allowed_files:
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/README.md
+- docs/design/README.md
+- docs/design/*.md
+- repo_state/**/*.md
+- README.md
+forbidden_changes:
+- Do not describe planned feature review, persistent memory, or N-epic looping as
+  implemented.
+- Do not add generated run artifacts under runs/.
+- Do not change config, objective, or contract examples unless required to explain
+  the implemented state-review artifact path.
+- Do not make unrelated roadmap rewrites.
+- Do not add target-specific durable state for external repositories.
+required_evidence:
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if documentation would require claiming behavior not implemented by the code
+  tasks.
+- Stop if repo_state changes would create external target durable state rather than
+  project memory.
+- Stop if broad documentation reorganization seems necessary.
+- Stop if generated evidence files appear in the diff.
+- Stop if scope or verification cannot remain within the generated contract.
+non_goals: []
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- state-review-snapshot-collector
+- state-review-backlog-context
+- state-review-focused-tests

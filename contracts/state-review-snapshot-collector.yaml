@@ -1,0 +1,47 @@
+task_id: state-review-snapshot-collector
+release_id: governor-state-review
+title: Collect deterministic governor state-review snapshot
+task_type: code_only
+budget_class: M
+objective: Implement a deterministic state-review snapshot collector and artifact
+  writer invoked by governor release planning before backlog epic selection.
+allowed_files:
+- src/agentic_devloop/release.py
+- src/agentic_devloop/state_review.py
+- src/agentic_devloop/models.py
+- tests/test_release.py
+- tests/test_orchestrator.py
+forbidden_changes:
+- Do not change task execution semantics for run-task.
+- Do not merge task branches or integration branches differently.
+- Do not add human approval prompts or interactive gates.
+- Do not delete or rewrite existing run evidence.
+- Do not require optional artifact directories to exist.
+- Do not add new external service dependencies.
+required_evidence:
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_release.py
+    -k state_review
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_orchestrator.py
+    -k state_review
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m compileall src
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if no existing release planning evidence directory can be identified and adding
+  one would require broad orchestration changes.
+- Stop if collecting branch state would require destructive Git commands.
+- Stop if snapshot collection depends on network access or non-local services.
+- Stop if implementing this requires changing deterministic hard gates or cleanup
+  behavior.
+- Stop if scope or verification cannot remain within the generated contract.
+non_goals: []
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

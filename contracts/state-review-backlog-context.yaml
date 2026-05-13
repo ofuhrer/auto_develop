@@ -1,0 +1,50 @@
+task_id: state-review-backlog-context
+release_id: governor-state-review
+title: Pass state-review snapshot into backlog planning evidence
+task_type: code_only
+budget_class: M
+objective: Ensure backlog planning receives the state-review snapshot as bounded context
+  before epic selection and records the snapshot path in governor or backlog planning
+  evidence.
+allowed_files:
+- src/agentic_devloop/planning.py
+- src/agentic_devloop/models.py
+- tests/test_planning.py
+- tests/test_release.py
+forbidden_changes:
+- Do not change objective parsing semantics beyond adding state-review context.
+- Do not add broad prompt context from unbounded files.
+- Do not weaken dependency, stale worktree, branch safety, or verification gates.
+- Do not add routine human approval gates.
+- Do not change run-release default integration branch behavior.
+- Do not alter task contract schema incompatibly unless tests and examples are updated
+  in a separate contract.
+required_evidence:
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_planning.py
+    -k state_review
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_release.py
+    -k state_review
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop
+    run-release --help
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if planner context inclusion would require sending unbounded repository contents
+  to an agent.
+- Stop if evidence path recording conflicts with existing run evidence schema in a
+  way that requires broad migration.
+- Stop if the implementation would add interactive approval steps to normal run-release
+  flow.
+- Stop if backlog planning cannot remain deterministic around hard safety gates.
+non_goals: []
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- state-review-snapshot-collector

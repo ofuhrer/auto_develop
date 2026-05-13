@@ -1,0 +1,44 @@
+task_id: state-review-focused-tests
+release_id: governor-state-review
+title: Add focused tests for state-review collection and planner linking
+task_type: code_only
+budget_class: M
+objective: Create focused tests using temporary repositories and fixtures to verify
+  the state-review behavior added for governor-state-review.
+allowed_files:
+- tests/test_release.py
+- tests/test_orchestrator.py
+- tests/test_planning.py
+- tests/conftest.py
+forbidden_changes:
+- Do not rely on the developer's local Git state.
+- Do not require network access.
+- Do not add tests that depend on persistent files outside pytest temporary directories.
+- Do not loosen existing assertions just to make new behavior pass.
+- Do not commit generated runtime evidence from runs/.
+required_evidence:
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_release.py
+    tests/test_orchestrator.py tests/test_planning.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if tests need to invoke real external agents or network services.
+- Stop if a test requires mutating branches outside a temporary repository.
+- Stop if existing test helpers make fixture setup ambiguous enough to risk deleting
+  real worktrees.
+- Stop if coverage requires broad release execution beyond the focused state-review
+  path.
+- Stop if scope or verification cannot remain within the generated contract.
+non_goals: []
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- state-review-snapshot-collector
+- state-review-backlog-context
