@@ -5,8 +5,8 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   subsystem failures, normalizes useful model output before strict validation, and
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
-current_focus: soft-scope-budget-policy
-active_epic: soft-scope-budget-policy
+current_focus: review-convergence-adjudicator
+active_epic: review-convergence-adjudicator
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -31,58 +31,52 @@ completed_epics:
 - governor-state-refresh
 - planner-admission-repair
 - governor-cockpit-v2
+- soft-scope-budget-policy
 blocked_epics: []
 candidate_epics:
-- id: soft-scope-budget-policy
-  title: Replace crude file-count hard stops with typed scope-risk decisions.
-  rationale: Many-file mechanical changes can be safe while small changes can be risky.
-    File and diff budgets should emit scope-risk findings for supervisor adjudication
-    instead of acting as universal hard stops.
-  priority: 1
-  next_release_id: soft-scope-budget-policy
 - id: review-convergence-adjudicator
   title: Stop reviewer churn with supervisor-owned final adjudication.
   rationale: Review agents can keep discovering adjacent findings after bounded repair
     waves. After configured attempts, the supervisor should run final verification
     and accept, defer, or block remaining findings with typed rationale.
-  priority: 2
+  priority: 1
   next_release_id: review-convergence-adjudicator
 - id: shared-verification-runtime
   title: Make isolated worktrees run tests through a configured shared runtime.
   rationale: Sub-agents repeatedly could not run pytest because task worktrees do
     not contain .venv; verification should use project runtime policy rather than
     worktree-local assumptions.
-  priority: 3
+  priority: 2
   next_release_id: shared-verification-runtime
 - id: environment-repair-actions
   title: Repair safe verification-environment drift autonomously.
   rationale: Stale editable installs, command-not-found errors, missing PYTHONPATH,
     and dependency runtime drift should become bounded repair actions when project
     policy declares a safe repair.
-  priority: 4
+  priority: 3
   next_release_id: environment-repair-actions
 - id: executor-liveness-supervision
   title: Classify active, stalled, hung, and environment-blocked executors.
   rationale: Long-running workers need process/output/file heartbeat evidence so the
     supervisor can wait, inspect, restart, or stop without human guessing.
-  priority: 5
+  priority: 4
   next_release_id: executor-liveness-supervision
 - id: target-artifact-ownership
   title: Store target development memory in the target repo or a durable control repo.
   rationale: Deleting and recloning the auto_develop controller should not lose target
     repo-state, objectives, contracts, completed-epic history, or next-epic planning
     context.
-  priority: 6
+  priority: 5
   next_release_id: target-artifact-ownership
 - id: onboarding-bootstrap
   title: Bootstrap a freshly cloned target repository from one or two onboarding prompts.
   rationale: The target operator experience is minimal setup followed by a high-level
     epic-count loop.
-  priority: 7
+  priority: 6
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
 active_epics:
-- epic_id: soft-scope-budget-policy
+- epic_id: review-convergence-adjudicator
   next_recommendations: []
   retry_count: 0
   repair_count: 0
@@ -92,9 +86,40 @@ active_epics:
   state_review_snapshot_references: []
   metrics_snapshot_references: []
   tuning_report_references: []
-  updated_at: '2026-05-13T22:35:45.579909Z'
+  updated_at: '2026-05-13T23:33:59Z'
 reviewed_epics: []
 completed_epic_records:
+- epic_id: soft-scope-budget-policy
+  status_reason: completed via feature/soft-scope-budget-policy after autonomous
+    task and repair execution plus manual final-review hardening; typed scope-risk
+    budget policy decisions, release-confined evidence copies, structured metric
+    derivation, deterministic blocking placeholders, docs, and tests are implemented
+  next_recommendations: []
+  retry_count: 1
+  repair_count: 5
+  outcome_references:
+  - release_id: soft-scope-budget-policy
+    outcome: accepted
+    run_summary_path: runs/soft-scope-budget-policy-cycle/20260513T223837Z_soft-scope-budget-policy_release/release_summary.json
+    recorded_at: '2026-05-13T23:33:59Z'
+  finalization_outcome_references: []
+  unresolved_finding_references:
+  - finding_id: review-convergence-adjudicator
+    summary: Release reached the configured feature-review convergence limit; final
+      scope-risk blockers were repaired manually and verified with focused and full
+      test suites.
+    severity: moderate
+    source_path: runs/soft-scope-budget-policy-cycle/20260513T223837Z_soft-scope-budget-policy_release/feature_review_recheck.json
+  state_review_snapshot_references: []
+  metrics_snapshot_references:
+  - metrics_path: runs/soft-scope-budget-policy-cycle/20260513T223837Z_soft-scope-budget-policy_release/release_metrics.json
+    recorded_at: '2026-05-13T23:33:59Z'
+    release_id: soft-scope-budget-policy
+  tuning_report_references:
+  - tuning_report_path: runs/soft-scope-budget-policy-cycle/20260513T223837Z_soft-scope-budget-policy_release/release_tuning.md
+    recorded_at: '2026-05-13T23:33:59Z'
+    release_id: soft-scope-budget-policy
+  updated_at: '2026-05-13T23:33:59Z'
 - epic_id: governor-cockpit-v2
   status_reason: completed via feature/governor-cockpit-v2 after manual final-review
     repair; parent governor cockpit events, typed event context, linked child artifact
@@ -288,11 +313,14 @@ notes:
 - 'Dogfood finding: one-shot high-capability agents produced coherent implementations
   faster than over-decomposed contract batches. Prioritize supervisor-owned execution
   strategy and normalization before expanding multi-epic autonomy.'
-- 'Current top gap has been addressed in the implementation path: hard file-count
+- 'Completed gap: hard file-count
   and diff-size budgets now produce supervisor-adjudicated scope-risk findings
   after hard gates pass, so broad-but-mechanical changes are no longer stopped
   automatically unless they cross a hard safety boundary.'
-- 'Next sequencing: soft-scope-budget-policy, review-convergence-adjudicator, shared-verification-runtime,
+- 'Current top gap: bounded review convergence still needs supervisor-owned final
+  adjudication. Recent cycles reached review convergence limits and required manual
+  final repair despite passing focused and full deterministic verification.'
+- 'Next sequencing: review-convergence-adjudicator, shared-verification-runtime,
   environment repair, then executor liveness.'
 - Hard file-count and diff-size budgets are implemented as scope-risk signals for
   supervisor adjudication unless they cross configured hard-policy boundaries; broad
