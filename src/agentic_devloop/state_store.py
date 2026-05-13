@@ -302,7 +302,14 @@ class StateStore:
                 if record.epic_id == epic_id:
                     return record
         record = EpicMemoryRecord(epic_id=epic_id, updated_at=datetime.now(UTC))
-        state.active_epics.insert(0, record)
+        target_records = state.active_epics
+        if epic_id in state.completed_epics:
+            target_records = state.completed_epic_records
+        elif epic_id in state.blocked_epics:
+            target_records = state.blocked_epic_records
+        elif state.active_epic == epic_id:
+            target_records = state.active_epics
+        target_records.insert(0, record)
         return record
 
     def _pop_existing_epic_record(self, state: BacklogState, epic_id: str) -> EpicMemoryRecord | None:

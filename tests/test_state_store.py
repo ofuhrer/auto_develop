@@ -297,6 +297,35 @@ def test_add_epic_references_reuses_non_active_record(
     assert state.active_epics == []
 
 
+def test_add_epic_reference_uses_legacy_completed_epics_bucket(tmp_path: Path) -> None:
+    state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        """
+completed_epics:
+  - epic-1
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    store = StateStore(state_path)
+
+    state = store.add_epic_outcome_reference(
+        "epic-1",
+        OutcomeReference(
+            release_id="persistent-governor-memory",
+            task_id="pgm-0002",
+            outcome="accepted",
+            run_summary_path=Path("runs/persistent-governor-memory/review_summary.json"),
+            recorded_at=datetime(2026, 5, 13, 8, 0, tzinfo=UTC),
+        ),
+    )
+
+    assert state.active_epics == []
+    assert [record.epic_id for record in state.completed_epic_records] == ["epic-1"]
+    assert state.completed_epic_records[0].outcome_references[0].release_id == "persistent-governor-memory"
+
+
 def test_epic_transition_preserves_existing_memory_record_fields(tmp_path: Path) -> None:
     state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
     store = StateStore(state_path)
