@@ -11,6 +11,8 @@ from agentic_devloop.models import (
     EvidenceBundle,
     FailureDiagnosis,
     ExecutorResult,
+    FeatureReviewDecision,
+    FeatureReviewRecheckRecord,
     ReleaseSoftGateDecisionRecord,
     ReviewDecision,
     TaskSoftGateDecisionRecord,
@@ -266,6 +268,51 @@ def write_release_soft_gate_decisions(
     }
     release_soft_gate_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return release_soft_gate_path
+
+
+def write_feature_review_decision(
+    release_bundle_path: Path,
+    decision: FeatureReviewDecision,
+) -> Path:
+    feature_review_path = release_bundle_path / "feature_review.json"
+    payload = {
+        "release_id": decision.release_id,
+        "reviewer": decision.reviewer.value,
+        "summary": decision.summary,
+        "recommendation": decision.recommendation.value,
+        "accepted_risks": decision.accepted_risks,
+        "rerun_verification_commands": decision.rerun_verification_commands,
+        "findings": [
+            {
+                "finding_id": finding.finding_id,
+                "severity": finding.severity.value,
+                "summary": finding.summary,
+                "affected_files": finding.affected_files,
+                "evidence_paths": [str(path) for path in finding.evidence_paths],
+                "required_repairs": finding.required_repairs,
+                "optional_follow_ups": finding.optional_follow_ups,
+            }
+            for finding in decision.findings
+        ],
+    }
+    feature_review_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return feature_review_path
+
+
+def write_feature_review_recheck(
+    release_bundle_path: Path,
+    record: FeatureReviewRecheckRecord,
+) -> Path:
+    feature_review_recheck_path = release_bundle_path / "feature_review_recheck.json"
+    payload = {
+        "release_id": record.release_id,
+        "unresolved_finding_ids": record.unresolved_finding_ids,
+        "resolved_finding_ids": record.resolved_finding_ids,
+        "accepted_finding_ids": record.accepted_finding_ids,
+        "stop_reason": record.stop_reason,
+    }
+    feature_review_recheck_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return feature_review_recheck_path
 
 
 def _decision_yaml(decision: ReviewDecision) -> str:

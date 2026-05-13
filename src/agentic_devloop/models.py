@@ -509,6 +509,69 @@ class ReleaseSoftGateDecisionRecord(StrictModel):
     decisions: list[TaskSoftGateDecisionRecord] = Field(default_factory=list)
 
 
+class FeatureReviewSeverity(StrEnum):
+    LOW = "low"
+    MODERATE = "moderate"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class FeatureReviewRecommendation(StrEnum):
+    APPROVE = "approve"
+    APPROVE_WITH_REPAIRS = "approve_with_repairs"
+    REQUIRE_REPAIRS = "require_repairs"
+    ESCALATE = "escalate"
+
+
+class FeatureReviewFinding(StrictModel):
+    finding_id: str = Field(min_length=1)
+    severity: FeatureReviewSeverity
+    summary: str = Field(min_length=1)
+    affected_files: list[str] = Field(default_factory=list)
+    evidence_paths: list[Path] = Field(default_factory=list)
+    required_repairs: list[str] = Field(default_factory=list)
+    optional_follow_ups: list[str] = Field(default_factory=list)
+
+    @field_validator("affected_files", "required_repairs", "optional_follow_ups")
+    @classmethod
+    def list_items_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("feature review list items must not be empty")
+        return values
+
+
+class FeatureReviewDecision(StrictModel):
+    release_id: str = Field(min_length=1)
+    reviewer: Reviewer
+    summary: str = Field(min_length=1)
+    findings: list[FeatureReviewFinding] = Field(default_factory=list)
+    accepted_risks: list[str] = Field(default_factory=list)
+    recommendation: FeatureReviewRecommendation
+    rerun_verification_commands: list[str] = Field(default_factory=list)
+
+    @field_validator("accepted_risks", "rerun_verification_commands")
+    @classmethod
+    def list_items_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("feature review list items must not be empty")
+        return values
+
+
+class FeatureReviewRecheckRecord(StrictModel):
+    release_id: str = Field(min_length=1)
+    unresolved_finding_ids: list[str] = Field(default_factory=list)
+    resolved_finding_ids: list[str] = Field(default_factory=list)
+    accepted_finding_ids: list[str] = Field(default_factory=list)
+    stop_reason: str | None = None
+
+    @field_validator("unresolved_finding_ids", "resolved_finding_ids", "accepted_finding_ids")
+    @classmethod
+    def finding_id_items_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("feature review finding IDs must not be empty")
+        return values
+
+
 class GeneratedContract(StrictModel):
     task_id: str = Field(min_length=1)
     title: str = Field(min_length=1)
