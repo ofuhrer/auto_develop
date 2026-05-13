@@ -1,0 +1,59 @@
+task_id: governor-cockpit-v2-0004
+release_id: governor-cockpit-v2
+title: Typed governor stop reason rendering
+task_type: code_only
+budget_class: M
+objective: Update `src/agentic_devloop/models.py`, `src/agentic_devloop/governor.py`,
+  `src/agentic_devloop/cli.py`, and focused tests so parent cockpit events and command
+  JSON expose typed stop-reason context for no-actionable-work, planning-only strategy,
+  non-accepted release, blocked finalization, state-refresh failure, missing planner
+  credentials, and hard-policy stops. The parent cockpit should include the stop category,
+  cycle index when available, release/epic identifiers when available, and linked
+  evidence artifact paths when available.
+allowed_files:
+- src/agentic_devloop/models.py
+- src/agentic_devloop/governor.py
+- src/agentic_devloop/cli.py
+- tests/test_cli.py
+- tests/test_backlog.py
+forbidden_changes:
+- Do not weaken hard-policy stops or convert them into successful governor runs.
+- Do not hide exceptions that should still produce a nonzero CLI exit.
+- Do not change child release acceptance semantics.
+- Do not require real missing credentials in tests; use deterministic fakes.
+- Do not broaden cleanup or finalization side effects.
+required_evidence:
+- Focused pytest output for `tests/test_cli.py -k governor`.
+- Focused pytest output for `tests/test_backlog.py -k governor`.
+- Assertions proving each required stop category renders distinct typed context in
+  parent output or parent events.
+- Assertions proving missing-credentials and hard-policy failures still exit nonzero
+  while writing parent cockpit stop context when possible.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_cli.py
+    -k governor
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_backlog.py
+    -k governor
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if credential or policy failure handling would require suppressing the original
+  error.
+- Stop if stop-reason rendering requires changing release review or task decision
+  schemas.
+- Stop if existing successful governor CLI JSON compatibility cannot be preserved.
+non_goals:
+- Do not implement credential discovery or secret management.
+- Do not change planner backend authentication behavior.
+- Do not update documentation in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- governor-cockpit-v2-0001
+- governor-cockpit-v2-0003

@@ -1,0 +1,52 @@
+task_id: governor-cockpit-v2-0005
+release_id: governor-cockpit-v2
+title: Governor cockpit documentation and smoke coverage
+task_type: documentation
+budget_class: S
+objective: 'Update user/developer documentation for the `run-governor --epic-count
+  N` cockpit: describe the parent `governor.log`, `governor.raw.log`, and `events.jsonl`,
+  the linked artifact categories, stop-reason categories, cleanup eligibility handoff,
+  and the fact that child release evidence remains unchanged and inspectable. Add
+  or adjust focused smoke assertions only where needed to cover help output and the
+  documented parent artifact paths.'
+allowed_files:
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- tests/test_cli.py
+forbidden_changes:
+- Do not describe planned behavior as implemented.
+- Do not change production code in this documentation task.
+- Do not alter CLI flags or command semantics.
+- Do not remove existing documentation for release-level evidence.
+required_evidence:
+- Focused pytest output for `tests/test_cli.py -k 'governor or help'`.
+- Documentation diff showing parent cockpit files and child artifact linking are described
+  separately.
+- Help smoke output for `run-governor --help`.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_cli.py
+    -k 'governor or help'
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop
+    run-governor --help
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if documentation would need to claim artifact links that earlier tasks did
+  not implement.
+- Stop if smoke coverage requires modifying production code.
+- Stop if documented behavior conflicts with existing release-level evidence documentation.
+- Stop if scope or verification cannot remain within the generated contract.
+non_goals:
+- Do not add new cockpit features in this task.
+- Do not rewrite unrelated guide sections.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- governor-cockpit-v2-0002
+- governor-cockpit-v2-0004

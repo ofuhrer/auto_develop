@@ -1,0 +1,57 @@
+task_id: governor-cockpit-v2-0002
+release_id: governor-cockpit-v2
+title: Governor CLI cockpit artifact graph
+task_type: code_only
+budget_class: L
+objective: 'Update `src/agentic_devloop/cli.py` and focused CLI tests so `run-governor
+  --epic-count N` writes parent cockpit events with stable names and artifact links
+  for each cycle: state-review snapshots, state-refresh summaries or errors, backlog
+  plans, generated objectives, contract plans, release logs/summaries, release review
+  artifacts, feature-review and recheck artifacts, repair decisions, final integration
+  verification evidence, finalization outcomes, cleanup dry-run eligibility reports,
+  and next-epic selection. Preserve child release artifacts and only summarize/link
+  them from the governor cockpit.'
+allowed_files:
+- src/agentic_devloop/cli.py
+- tests/test_cli.py
+forbidden_changes:
+- Do not change release-level evidence file names, schemas, or locations.
+- Do not replace child release logs with parent cockpit content.
+- Do not change `run-release` behavior.
+- Do not add broad filesystem scans for artifacts; use existing result and manifest
+  fields.
+- Do not write generated runtime evidence into tracked source files.
+required_evidence:
+- Focused pytest output for `tests/test_cli.py` governor-related tests.
+- Assertions proving `events.jsonl` links child release summary and release log paths
+  for at least one cycle.
+- Assertions proving cleanup eligibility is linked when cleanup dry-run evidence is
+  created.
+- Assertions proving final verification, feature review, and repair artifacts are
+  linked when present in the manifest.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_cli.py
+    -k governor
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop
+    run-governor --help
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if the implementation requires changing `ReleaseRunResult` artifact semantics.
+- Stop if the cockpit can only find artifacts by recursively scanning `runs/`.
+- Stop if CLI output would stop being valid JSON for existing callers.
+- Stop if scope or verification cannot remain within the generated contract.
+non_goals:
+- Do not modify backlog planning algorithms.
+- Do not modify state-store persistence.
+- Do not implement new cleanup deletion behavior.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- governor-cockpit-v2-0001

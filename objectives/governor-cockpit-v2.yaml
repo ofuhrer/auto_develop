@@ -1,0 +1,24 @@
+release_id: governor-cockpit-v2
+title: Expand governor cockpit logging for full N-epic runs
+objective: Make the top-level governor log and event stream the primary operator cockpit
+  for repeated epic execution by linking state review, backlog selection, objective
+  and contract generation, child release execution, feature review, repair loops,
+  final verification, finalization, cleanup, state refresh, and next-epic selection
+  in one coherent artifact trail.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- '`run-governor --epic-count N` writes a top-level `governor.log`, `governor.raw.log`,
+  and `events.jsonl` that expose each major cycle phase with stable event names and
+  linked child artifact paths.'
+- The cockpit links state-review snapshots, state-refresh summaries, backlog plans,
+  objectives, contract plans, release logs, feature-review artifacts, repair decisions,
+  final verification evidence, finalization outcomes, cleanup eligibility, and next-epic
+  selection.
+- Stop reasons are visible in the parent cockpit with enough typed context to distinguish
+  no-actionable-work, planning-only, non-accepted release, blocked finalization, state-refresh
+  failure, missing credentials, and hard-policy stops.
+- Existing release-level evidence remains unchanged and inspectable; the governor
+  cockpit summarizes and links rather than replacing child artifacts.
+- Focused tests cover event emission, artifact manifest links, stop-reason rendering,
+  and at least one multi-cycle path with child release summary references.

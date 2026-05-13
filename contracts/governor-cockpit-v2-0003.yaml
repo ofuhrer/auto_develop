@@ -1,0 +1,58 @@
+task_id: governor-cockpit-v2-0003
+release_id: governor-cockpit-v2
+title: Governor cycle phase and manifest completeness
+task_type: code_only
+budget_class: L
+objective: Update `src/agentic_devloop/governor.py`, `src/agentic_devloop/backlog.py`,
+  `src/agentic_devloop/models.py`, and focused backlog tests so each `BacklogRunResult`/`BacklogEvidenceManifest`
+  carries the artifacts needed by the top-level cockpit for every cycle. Cover state-review
+  snapshot paths, state-refresh summary/error paths, backlog plan paths, generated
+  objective paths, contract plan paths, release summary/log paths, feature-review
+  paths already exposed by child releases, finalization references, cleanup report
+  handoff fields, and enough next-cycle selection context to show why the next epic
+  was selected or why execution stopped.
+allowed_files:
+- src/agentic_devloop/governor.py
+- src/agentic_devloop/backlog.py
+- src/agentic_devloop/models.py
+- tests/test_backlog.py
+forbidden_changes:
+- Do not alter task execution, merge, finalization, or cleanup side effects.
+- Do not change child release artifact schemas.
+- Do not remove existing dataclass fields from `BacklogRunResult` or `BacklogMultiRunResult`.
+- Do not rely on developer local Git state in tests.
+- Do not add runtime artifacts under `runs/` to source control.
+required_evidence:
+- Focused pytest output for `tests/test_backlog.py` governor-loop tests.
+- A multi-cycle test proving each cycle exposes child release summary references in
+  its evidence manifest.
+- Assertions proving state-refresh failure records an error artifact path in the cycle
+  manifest.
+- Assertions proving next-epic selection context is available for the parent cockpit
+  without reading child logs.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_backlog.py
+    -k governor
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if manifest completeness requires modifying release-level evidence files.
+- Stop if a multi-cycle test would need real planner credentials or non-temporary
+  repositories.
+- Stop if adding fields breaks existing serialized output compatibility for optional
+  manifest fields.
+- Stop if scope or verification cannot remain within the generated contract.
+non_goals:
+- Do not change backlog scoring or epic prioritization.
+- Do not change CLI rendering in this task.
+- Do not update documentation in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- governor-cockpit-v2-0001

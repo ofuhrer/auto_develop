@@ -1,0 +1,48 @@
+task_id: governor-cockpit-v2-0001
+release_id: governor-cockpit-v2
+title: Typed governor cockpit event schema
+task_type: code_only
+budget_class: M
+objective: Update `src/agentic_devloop/governor_log.py` and focused tests so governor
+  events support stable cockpit phase names and typed context while preserving the
+  existing `governor.log`, `governor.raw.log`, and `events.jsonl` files. Add event
+  names for state review, state refresh summary/error, backlog selection, objective
+  generation, contract generation, child release start/completion, feature review,
+  repair decision, final verification, finalization, cleanup eligibility, next-epic
+  selection, stop reason, and governor completion. JSONL records must retain existing
+  keys and add a typed `context` object; human/raw logs should include enough compact
+  context for operator scanning.
+allowed_files:
+- src/agentic_devloop/governor_log.py
+- tests/test_governor_log.py
+forbidden_changes:
+- Do not change child release artifact formats or paths.
+- Do not remove or rename existing `event_type`, `message`, `artifacts`, or `timestamp`
+  JSONL keys.
+- Do not change CLI argument parsing or governor execution flow in this task.
+- Do not write runtime evidence under `runs/`.
+required_evidence:
+- Focused pytest output for `tests/test_governor_log.py`.
+- Assertions proving legacy event JSONL keys remain present.
+- Assertions proving new typed context is emitted and raw/human logs remain readable.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_governor_log.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if adding typed context requires changing release-level evidence schemas.
+- Stop if existing governor log tests cannot remain backward compatible.
+- Stop if stable event names cannot be represented without broad changes outside the
+  allowed files.
+non_goals:
+- Do not integrate the new events into `run-governor` in this task.
+- Do not update documentation in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []
