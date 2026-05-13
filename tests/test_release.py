@@ -2637,6 +2637,7 @@ def test_run_release_feature_review_optional_findings_are_accepted_not_resolved(
     assert result.decision == Decision.ACCEPTED
     assert recheck["resolved_finding_ids"] == []
     assert recheck["accepted_finding_ids"] == ["optional-1"]
+    assert recheck["deferred_finding_ids"] == []
     assert recheck["stop_reason"] == "accepted_with_rationale"
 
     classification_path = supervisor_decision_artifact_path(
@@ -2755,7 +2756,8 @@ def test_run_release_feature_review_persists_deferred_duplicate_classification_e
     log_text = result.log_path.read_text(encoding="utf-8")
 
     assert result.decision == Decision.ACCEPTED
-    assert recheck["accepted_finding_ids"] == ["optional-dup"]
+    assert recheck["accepted_finding_ids"] == []
+    assert recheck["deferred_finding_ids"] == ["optional-dup"]
     assert "event=feature_review_non_blocking_finding_classified" in log_text
     assert "matched_previous_finding_id=prior-a" in log_text
 
@@ -2880,7 +2882,10 @@ def test_run_release_feature_review_records_scope_and_backlog_follow_up_proposal
         )
 
     summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
     proposals = summary["feature_review_proposals"]
+    assert recheck["accepted_finding_ids"] == []
+    assert recheck["deferred_finding_ids"] == ["followup-backlog", "followup-scope"]
     assert isinstance(proposals, list)
     kinds = {item["finding_id"]: item["classification"] for item in proposals}
     assert kinds["followup-backlog"] == "backlog_follow_up"

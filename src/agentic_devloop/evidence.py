@@ -323,6 +323,7 @@ def write_feature_review_recheck(
         "unresolved_finding_ids": _normalized_string_list(record.unresolved_finding_ids),
         "resolved_finding_ids": _normalized_string_list(record.resolved_finding_ids),
         "accepted_finding_ids": _normalized_string_list(record.accepted_finding_ids),
+        "deferred_finding_ids": _normalized_string_list(record.deferred_finding_ids),
         "stop_reason": record.stop_reason,
     }
     feature_review_recheck_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")

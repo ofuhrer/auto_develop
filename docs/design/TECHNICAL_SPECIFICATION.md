@@ -650,7 +650,7 @@ This review loop is intentionally agentic. Deterministic code should assemble ev
 The release-local reviewer loop needs explicit convergence behavior so repeated findings do not churn the retry budget without adding signal.
 
 - Required findings remain blockers until they are resolved, explicitly accepted with rationale, or stopped by retry budget, hard gates, missing policy/credentials, or configured human escalation.
-- Duplicate findings are treated as deferred non-blocking findings (tracked via reviewer re-check and typed supervisor decision artifacts, not via `accepted_finding_ids`), while false-positive findings are the non-blocking acceptance path. Both paths require evidence and rationale.
+- Duplicate findings are treated as deferred non-blocking findings (tracked via `feature_review_recheck.json.deferred_finding_ids` and typed supervisor decision artifacts, not via `accepted_finding_ids`), while false-positive findings are the non-blocking acceptance path. Both paths require evidence and rationale.
 - Soft findings are retained as auditable decisions with evidence paths, rationale, fallback plan, and validator rerun metadata.
 - Findings that expand scope or imply follow-up work should be recorded as proposals for the next planning cycle rather than being folded into the current release objective.
 - The broader multi-epic governor that would apply this policy across repeated epics remains planned, even though the release-local review loop itself is implemented.
@@ -730,6 +730,13 @@ Implemented re-check stop taxonomy for `feature_review_recheck.json`:
 - `blocked_by_hard_gate`
 
 `FeatureReviewRecheckRecord.stop_reason` is constrained to this enumerated set.
+
+`FeatureReviewRecheckRecord.accepted_finding_ids` and
+`FeatureReviewRecheckRecord.deferred_finding_ids` are intentionally distinct.
+Accepted IDs mean the release continues with explicit rationale. Deferred IDs
+mean the supervisor stopped pursuing a duplicate, scope expansion, or backlog
+follow-up inside the current release and left evidence for the next planning
+cycle.
 
 `accepted_with_rationale` means optional findings remained at re-check time, or a required finding was adjudicated as verification-only/conditional after the configured integration verification rerun passed. If the reviewer omitted acceptance rationale, the release flow persists an explicit rationale entry in `feature_review.json.accepted_risks`.
 

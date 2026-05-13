@@ -322,12 +322,14 @@ def test_feature_review_models_validate() -> None:
         unresolved_finding_ids=["feature-001"],
         resolved_finding_ids=[],
         accepted_finding_ids=[],
+        deferred_finding_ids=["feature-002"],
         stop_reason="blocked_by_hard_gate",
     )
 
     assert decision.findings[0].severity == FeatureReviewSeverity.HIGH
     assert decision.recommendation == FeatureReviewRecommendation.APPROVE_WITH_REPAIRS
     assert recheck.stop_reason == "blocked_by_hard_gate"
+    assert recheck.deferred_finding_ids == ["feature-002"]
 
 
 def test_feature_review_recheck_normalizes_legacy_blocked_by_stop_reason() -> None:
@@ -337,6 +339,7 @@ def test_feature_review_recheck_normalizes_legacy_blocked_by_stop_reason() -> No
             "unresolved_finding_ids": ["feature-001"],
             "resolved_finding_ids": [],
             "accepted_finding_ids": [],
+            "deferred_finding_ids": [],
             "stop_reason": "blocked_by",
         }
     )

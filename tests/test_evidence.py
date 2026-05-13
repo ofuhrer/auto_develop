@@ -323,6 +323,7 @@ def test_write_feature_review_recheck_writes_stable_json(tmp_path) -> None:
         unresolved_finding_ids=["feature-001"],
         resolved_finding_ids=["feature-002"],
         accepted_finding_ids=["feature-003"],
+        deferred_finding_ids=["feature-004"],
         stop_reason="blocked_by_retry_budget",
     )
 
@@ -334,6 +335,7 @@ def test_write_feature_review_recheck_writes_stable_json(tmp_path) -> None:
     assert payload["unresolved_finding_ids"] == ["feature-001"]
     assert payload["resolved_finding_ids"] == ["feature-002"]
     assert payload["accepted_finding_ids"] == ["feature-003"]
+    assert payload["deferred_finding_ids"] == ["feature-004"]
     assert payload["stop_reason"] == "blocked_by_retry_budget"
 
 

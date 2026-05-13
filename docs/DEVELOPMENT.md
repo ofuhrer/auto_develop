@@ -110,6 +110,14 @@ Feature review backend notes (implemented today):
 
 Soft-gate exceptions are recorded in the evidence bundle or release root, not hidden in logs. Task-level findings live at `runs/<run-id>/<task-id>/evidence/soft_gate_decision.json`; release-level budget exceptions live at `runs/<run-id>/soft_gate_decisions.json`. Each record includes the finding identifier, severity, risk, recommended actions, evidence paths, decision, rationale, fallback plan, and `validators_rerun`. The rerun list is the reviewer/supervisor checklist for repeating or re-reading the relevant validators before the soft exception is treated as durable. Hard validation still comes first, and the reviewer loop remains bounded to one integrated feature branch per release. Typed supervisor decision records under `runs/<run-id>/**/supervisor_decisions/` are the implemented durable audit trail for the scheduler, repair, and soft-budget choices that support that loop, including `release_scheduling` decisions with `selected_action`, `fallback_plan`, `validators_to_rerun`, and strict staleness inputs. Loading them is strict rather than warning-only.
 
+Legacy supervisor decision artifacts that predate `validators_to_rerun` are only
+partially compatible. Selected decision types load with the sentinel
+`legacy_schema_v1_validators_unspecified` so humans and agents can inspect old
+evidence, but the sentinel is not runnable and is filtered out by
+`effective_validators_to_rerun()`. Applied `model_output_normalization` retry
+records require explicit concrete validators; old artifacts without them must be
+backfilled or regenerated before they can drive autonomous retry behavior.
+
 Supervisor decision artifacts are persisted as deterministic JSON files under `runs/<run-id>/supervisor_decisions/` with filenames `<decision_type>__<decision_id>.json`. Loading these artifacts is strict: schema validation failures and missing referenced evidence paths are hard errors, not warning-only conditions. This typed record trail is implemented; the one-epic execution-strategy seam is shipped, model-output normalization now uses the same strict evidence-path and validator-rerun discipline, and the broader N-epic governor that would consume these artifacts across repeated epics remains planned.
 
 ## Documentation Rules

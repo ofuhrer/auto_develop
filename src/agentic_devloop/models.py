@@ -617,6 +617,7 @@ class FeatureReviewRecheckRecord(StrictModel):
     unresolved_finding_ids: list[str] = Field(default_factory=list)
     resolved_finding_ids: list[str] = Field(default_factory=list)
     accepted_finding_ids: list[str] = Field(default_factory=list)
+    deferred_finding_ids: list[str] = Field(default_factory=list)
     stop_reason: FeatureReviewRecheckStopReason | None = None
 
     @field_validator("stop_reason", mode="before")
@@ -626,12 +627,18 @@ class FeatureReviewRecheckRecord(StrictModel):
             return FeatureReviewRecheckStopReason.BLOCKED_BY_HARD_GATE
         return value
 
-    @field_validator("unresolved_finding_ids", "resolved_finding_ids", "accepted_finding_ids", mode="before")
+    @field_validator(
+        "unresolved_finding_ids",
+        "resolved_finding_ids",
+        "accepted_finding_ids",
+        "deferred_finding_ids",
+        mode="before",
+    )
     @classmethod
     def normalize_finding_id_items(cls, values: object) -> object:
         return _normalize_non_empty_string_list(values, error_message="feature review finding IDs must not be empty")
 
-    @field_validator("unresolved_finding_ids", "resolved_finding_ids", "accepted_finding_ids")
+    @field_validator("unresolved_finding_ids", "resolved_finding_ids", "accepted_finding_ids", "deferred_finding_ids")
     @classmethod
     def finding_id_items_must_not_be_empty(cls, values: list[str]) -> list[str]:
         if any(not value.strip() for value in values):
