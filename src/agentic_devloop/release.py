@@ -71,6 +71,7 @@ from agentic_devloop.runtime_supervisor import (
     BacklogStateReference,
     BudgetLedgerPaths,
     EvidenceBundlePaths,
+    PlannerAdmissionRepairDecisionArtifact,
     RawLogPaths,
     ReleaseEvent,
     ReleaseEventKind,
@@ -82,6 +83,7 @@ from agentic_devloop.runtime_supervisor import (
     RuntimeSupervisorStopReason,
     RuntimeSupervisorInput,
     TuningReportPaths,
+    load_planner_admission_repair_decision_artifact,
 )
 from agentic_devloop.supervisor_decisions import (
     DecisionRiskLevel,
@@ -248,13 +250,21 @@ def _persist_planner_admission_repairs_from_warnings(
     warnings: list[str],
 ) -> Path | None:
     records: list[dict[str, object]] = []
+    decision_paths: list[Path] = []
     for warning in warnings:
+        if warning.startswith("supervisor_admission_repair_decision_path="):
+            decision_paths.append(Path(warning.split("=", 1)[1]))
+            continue
         if not warning.startswith("planner_contract_normalization="):
             continue
         payload_text = warning.split("=", 1)[1]
         try:
             payload = json.loads(payload_text)
         except json.JSONDecodeError:
+            continue
+        decision_path = payload.get("supervisor_admission_repair_decision_path")
+        if isinstance(decision_path, str) and decision_path.strip():
+            decision_paths.append(Path(decision_path))
             continue
         supervisor_decision = payload.get("supervisor_admission_repair_decision")
         if isinstance(supervisor_decision, dict):
@@ -296,6 +306,9 @@ def _persist_planner_admission_repairs_from_warnings(
                 ),
             }
         )
+    for decision_path in decision_paths:
+        decision = load_planner_admission_repair_decision_artifact(decision_path)
+        records.append(_planner_admission_record_from_decision(release_id=release_id, decision=decision))
     if not records:
         return None
     artifact_path = release_root / "runtime_supervisor" / "planner_admission_repairs.json"
@@ -314,6 +327,29 @@ def _persist_planner_admission_repairs_from_warnings(
         encoding="utf-8",
     )
     return artifact_path
+
+
+def _planner_admission_record_from_decision(
+    *,
+    release_id: str,
+    decision: PlannerAdmissionRepairDecisionArtifact,
+) -> dict[str, object]:
+    task_id = "unknown"
+    if decision.action_payload.admission_failure_inputs:
+        candidate = decision.action_payload.admission_failure_inputs[0].task_id.strip()
+        if candidate:
+            task_id = candidate
+    return {
+        "release_id": release_id,
+        "task_id": task_id,
+        "selected_action": decision.action_payload.selected_action.value,
+        "outcome": decision.action_payload.outcome.value,
+        "validators_to_rerun": list(decision.validators_to_rerun),
+        "validator_rerun_succeeded": True,
+        "planner_admission_repair_applied": decision.applied,
+        "action_kind": decision.action_kind.value,
+        "decision_type": decision.decision_type.value,
+    }
 
 
 def run_release(

@@ -33,6 +33,10 @@ from agentic_devloop.models import (
 )
 from agentic_devloop.planner_backend import PlannerBackendResult
 from agentic_devloop.runtime_supervisor import RuntimeSupervisor, RuntimeSupervisorApplierStopKind
+from agentic_devloop.runtime_supervisor import (
+    PlannerAdmissionRepairDecisionArtifact,
+    write_planner_admission_repair_decision_artifact,
+)
 from agentic_devloop.supervisor_decisions import (
     ModelOutputNormalizationAction,
     ModelOutputNormalizationOutcome,
@@ -756,6 +760,24 @@ def _persist_planner_admission_repair_stop(
         "action_payload": action_payload.model_dump(mode="json"),
         "applied": supervisor_result.applied,
     }
+    decision_artifact = PlannerAdmissionRepairDecisionArtifact.model_validate(
+        {
+            "decision_id": f"{plan.release_id}__{failure_inputs[0].task_id}__stop",
+            "release_id": plan.release_id,
+            "decided_at": datetime.now(UTC),
+            "decided_by": "runtime_supervisor",
+            "rationale": action_payload.rationale,
+            "validators_to_rerun": list(validators_to_rerun),
+            "evidence_paths": persisted_evidence_paths,
+            "action_kind": supervisor_result.action_kind,
+            "applied": supervisor_result.applied,
+            "action_payload": action_payload,
+        }
+    )
+    decision_artifact_path = write_planner_admission_repair_decision_artifact(
+        release_bundle_path=bundle_path,
+        decision=decision_artifact,
+    )
     target_path = bundle_path / "planner_admission_repair_stop.json"
     target_path.write_text(
         json.dumps(
@@ -766,6 +788,7 @@ def _persist_planner_admission_repair_stop(
                     "validators_to_rerun": list(validators_to_rerun),
                 },
                 "supervisor_admission_repair_decision": supervisor_decision_payload,
+                "supervisor_admission_repair_decision_path": str(decision_artifact_path),
                 # Backward-compatible mirrored fields.
                 "applied": supervisor_result.applied,
                 "action_kind": supervisor_result.action_kind.value,
@@ -1009,6 +1032,28 @@ def _normalize_contracts_for_admission(
             source_evidence_paths=tuple(path.resolve() for path in repair_action_payload.evidence_paths),
             action_payload=repair_action_payload,
         )
+        if plan.planner_metadata_path is not None:
+            decision_id = f"{plan.release_id}__{generated.task_id}__admission_repair"
+            decision_artifact = PlannerAdmissionRepairDecisionArtifact.model_validate(
+                {
+                    "decision_id": decision_id,
+                    "release_id": plan.release_id,
+                    "decided_at": datetime.now(UTC),
+                    "decided_by": "runtime_supervisor",
+                    "rationale": repair_action_payload.rationale,
+                    "validators_to_rerun": list(validators_to_rerun),
+                    "evidence_paths": repair_action_payload.evidence_paths,
+                    "action_kind": supervisor_result.action_kind,
+                    "applied": supervisor_result.applied,
+                    "action_payload": repair_action_payload,
+                }
+            )
+            admission_decision_path = write_planner_admission_repair_decision_artifact(
+                release_bundle_path=plan.planner_metadata_path.parent,
+                decision=decision_artifact,
+            )
+        else:
+            admission_decision_path = None
         normalized_generated.append(normalized_generated_contract)
         normalized_evidence.append(
             "planner_contract_normalization="
@@ -1025,6 +1070,9 @@ def _normalize_contracts_for_admission(
                         "action_payload": repair_action_payload.model_dump(mode="json"),
                         "applied": supervisor_result.applied,
                     },
+                    "supervisor_admission_repair_decision_path": (
+                        str(admission_decision_path) if admission_decision_path is not None else None
+                    ),
                     # Backward-compatible mirrored fields.
                     "planner_admission_repair_action": repair_action_payload.model_dump(mode="json"),
                     "planner_admission_repair_applied": supervisor_result.applied,

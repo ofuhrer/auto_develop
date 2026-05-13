@@ -7,13 +7,15 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from pydantic import ValidationError
+from pydantic import Field, ValidationError, field_validator, model_validator
 
 from agentic_devloop.contracts import normalize_planner_contract_plan_payload
 from agentic_devloop.models import (
     ContractPlan,
     ModelOutputNormalizationActionPayload,
+    PlannerAdmissionRepairDecisionType,
     PlannerAdmissionRepairActionPayload,
+    StrictModel,
     TaskContract,
 )
 from agentic_devloop.supervisor_decisions import (
@@ -319,6 +321,41 @@ class RuntimeSupervisorDecision:
     remaining_retries: int
     action: RepairAction | None = None
     stop_reason: RuntimeSupervisorStopReason | None = None
+
+
+class PlannerAdmissionRepairDecisionArtifact(StrictModel):
+    schema_version: str = "1.0"
+    decision_type: PlannerAdmissionRepairDecisionType = PlannerAdmissionRepairDecisionType.PLANNER_ADMISSION_REPAIR
+    decision_id: str = Field(min_length=1)
+    release_id: str = Field(min_length=1)
+    decided_at: datetime
+    decided_by: str = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+    validators_to_rerun: list[str]
+    evidence_paths: list[Path]
+    action_kind: RepairActionKind = RepairActionKind.PLANNER_ADMISSION_REPAIR
+    applied: bool
+    action_payload: PlannerAdmissionRepairActionPayload
+
+    @field_validator("validators_to_rerun")
+    @classmethod
+    def validators_to_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if not values or any(not value.strip() for value in values):
+            raise ValueError("validators_to_rerun must not be empty")
+        return values
+
+    @field_validator("evidence_paths")
+    @classmethod
+    def evidence_paths_must_not_be_empty(cls, values: list[Path]) -> list[Path]:
+        if not values:
+            raise ValueError("evidence_paths must not be empty")
+        return values
+
+    @model_validator(mode="after")
+    def validators_must_match_action_payload(self) -> "PlannerAdmissionRepairDecisionArtifact":
+        if self.validators_to_rerun != self.action_payload.validators_to_rerun:
+            raise ValueError("validators_to_rerun must match action_payload.validators_to_rerun")
+        return self
 
 
 class RuntimeSupervisor:
@@ -659,3 +696,57 @@ def _is_relative_to(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def planner_admission_repair_decision_artifact_path(
+    *,
+    release_bundle_path: Path,
+    decision_id: str,
+) -> Path:
+    safe_id = decision_id.strip().replace("/", "_").replace("\\", "_")
+    if not safe_id or ".." in safe_id:
+        raise ValueError("decision_id must be a non-empty filename token without path traversal")
+    return release_bundle_path / "supervisor_decisions" / f"planner_admission_repair__{safe_id}.json"
+
+
+def write_planner_admission_repair_decision_artifact(
+    *,
+    release_bundle_path: Path,
+    decision: PlannerAdmissionRepairDecisionArtifact,
+) -> Path:
+    artifact_path = planner_admission_repair_decision_artifact_path(
+        release_bundle_path=release_bundle_path,
+        decision_id=decision.decision_id,
+    )
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(decision.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    return artifact_path
+
+
+def load_planner_admission_repair_decision_artifact(path: Path) -> PlannerAdmissionRepairDecisionArtifact:
+    if not path.exists():
+        raise FileNotFoundError(f"planner admission repair decision artifact does not exist: {path}")
+    payload = path.read_text(encoding="utf-8")
+    decision = PlannerAdmissionRepairDecisionArtifact.model_validate_json(payload)
+    _validate_planner_admission_evidence_paths(decision=decision, artifact_path=path)
+    return decision
+
+
+def _validate_planner_admission_evidence_paths(
+    *,
+    decision: PlannerAdmissionRepairDecisionArtifact,
+    artifact_path: Path,
+) -> None:
+    artifact_bundle_dir = artifact_path.parent.parent.resolve()
+    for evidence_path in decision.evidence_paths:
+        candidate = evidence_path if evidence_path.is_absolute() else artifact_bundle_dir / evidence_path
+        if not evidence_path.is_absolute():
+            candidate_resolved = candidate.resolve()
+            if not candidate_resolved.is_relative_to(artifact_bundle_dir):
+                raise ValueError(
+                    f"planner admission repair decision evidence path escapes artifact bundle: {evidence_path}"
+                )
+        if not candidate.exists():
+            raise ValueError(
+                f"missing evidence path in planner admission repair decision artifact {artifact_path}: {evidence_path}"
+            )

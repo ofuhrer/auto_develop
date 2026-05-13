@@ -49,6 +49,10 @@ from agentic_devloop.supervisor_decisions import (
     load_supervisor_decision_artifact,
     supervisor_decision_artifact_path,
 )
+from agentic_devloop.runtime_supervisor import (
+    PlannerAdmissionRepairDecisionArtifact,
+    write_planner_admission_repair_decision_artifact,
+)
 
 
 class FakeExecutor:
@@ -941,16 +945,44 @@ def test_run_release_persists_planner_admission_repairs_and_logs_attempts(tmp_pa
         contracts_dir / "demo-0001.yaml",
         _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
     )
-    warning_payload = {
-        "planner_admission_repair_action": {
-            "admission_failure_inputs": [{"task_id": "demo-0001"}],
-            "selected_action": "accept_broad_but_mechanical",
-            "outcome": "accept_with_mechanical_guards",
+    planning_bundle = tmp_path / "runs" / "20260513T000000Z_v0.1.0_plan"
+    evidence_path = planning_bundle / "planner_stdout.json"
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    evidence_path.write_text("{}", encoding="utf-8")
+    decision = PlannerAdmissionRepairDecisionArtifact.model_validate(
+        {
+            "decision_id": "v0.1.0__demo-0001__admission_repair",
+            "release_id": "v0.1.0",
+            "decided_at": datetime.now(UTC),
+            "decided_by": "runtime_supervisor",
+            "rationale": "Broad mechanical update accepted with bounded guardrails.",
             "validators_to_rerun": ["ContractPlan", "TaskContract"],
-        },
-        "planner_admission_repair_applied": True,
-        "validator_rerun_succeeded": True,
-    }
+            "evidence_paths": [evidence_path.resolve()],
+            "applied": True,
+            "action_payload": {
+                "admission_failure_inputs": [
+                    {
+                        "release_id": "v0.1.0",
+                        "task_id": "demo-0001",
+                        "validation_errors": ["allowed_files count exceeds project budget"],
+                        "policy_constraints": ["Budget limits remain hard-gated."],
+                        "validators_to_rerun": ["ContractPlan", "TaskContract"],
+                    }
+                ],
+                "selected_action": "accept_broad_but_mechanical",
+                "outcome": "accept_with_mechanical_guards",
+                "rationale": "Broad mechanical update accepted with bounded guardrails.",
+                "fallback_plan": "Split if rerun validators fail.",
+                "validators_to_rerun": ["ContractPlan", "TaskContract"],
+                "evidence_paths": [evidence_path.resolve()],
+                "accepted_scope_notes": ["Mechanical-only edits."],
+            },
+        }
+    )
+    decision_path = write_planner_admission_repair_decision_artifact(
+        release_bundle_path=planning_bundle,
+        decision=decision,
+    )
 
     result = run_release(
         project_id="demo",
@@ -960,7 +992,7 @@ def test_run_release_persists_planner_admission_repairs_and_logs_attempts(tmp_pa
         runs_dir=tmp_path / "runs",
         executor=FakeExecutor(),
         merge_on_accept=True,
-        planning_warnings=[f"planner_contract_normalization={json.dumps(warning_payload, sort_keys=True)}"],
+        planning_warnings=[f"supervisor_admission_repair_decision_path={decision_path}"],
     )
 
     assert result.decision == Decision.ACCEPTED
