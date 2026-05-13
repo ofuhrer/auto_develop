@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -109,4 +110,36 @@ def test_load_supervisor_decision_artifact_fails_for_missing_evidence_path(tmp_p
     )
 
     with pytest.raises(ValueError, match="missing evidence path"):
+        load_supervisor_decision_artifact(artifact_path)
+
+
+def test_load_supervisor_decision_artifact_rejects_relative_evidence_path_traversal(
+    tmp_path: Path,
+) -> None:
+    escaped_evidence = tmp_path / "escape.log"
+    escaped_evidence.write_text("outside bundle\n", encoding="utf-8")
+    artifact_path = tmp_path / "supervisor_decisions" / "traversal.json"
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION_V1,
+                "decision_id": "traversal",
+                "release_id": "supervisor-decision-records",
+                "decided_at": "2026-05-13T08:00:00",
+                "decided_by": "supervisor-agent",
+                "rationale": "Traversal should be rejected.",
+                "evidence_paths": ["../escape.log"],
+                "decision_type": "release_scheduling",
+                "risk_level": "moderate",
+                "overlap_findings": [],
+                "outcome": "proceed_sequential",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="escapes artifact directory"):
         load_supervisor_decision_artifact(artifact_path)
