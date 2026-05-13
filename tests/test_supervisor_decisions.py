@@ -15,6 +15,10 @@ from agentic_devloop.supervisor_decisions import (
     ExecutionStrategyAction,
     ExecutionStrategyDecision,
     ExecutionStrategyOutcome,
+    FeatureReviewFindingAction,
+    FeatureReviewFindingClassification,
+    FeatureReviewFindingClassificationDecision,
+    FeatureReviewFindingOutcome,
     FindingAdjudicationOutcome,
     FindingSeverity,
     ModelOutputNormalizationAction,
@@ -29,6 +33,8 @@ from agentic_devloop.supervisor_decisions import (
     SchedulingOutcome,
     SoftBudgetAcceptanceDecision,
     SupervisorDecisionType,
+    LEGACY_VALIDATORS_UNSPECIFIED,
+    effective_validators_to_rerun,
     parse_supervisor_decision,
 )
 
@@ -91,6 +97,22 @@ def test_parse_execution_strategy_decision() -> None:
     assert decision.selected_action == ExecutionStrategyAction.ONE_SHOT
 
 
+def test_parse_legacy_execution_strategy_decision_adds_validators_migration_default() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.EXECUTION_STRATEGY,
+        "risk_level": DecisionRiskLevel.MODERATE,
+        "selected_action": ExecutionStrategyAction.ONE_SHOT,
+        "outcome": ExecutionStrategyOutcome.PROCEED_ONE_SHOT,
+        "fallback_plan": "Decompose into sequential contracts if one-shot verification fails.",
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, ExecutionStrategyDecision)
+    assert decision.validators_to_rerun == [LEGACY_VALIDATORS_UNSPECIFIED]
+
+
 def test_execution_strategy_rejects_invalid_action_outcome_combination() -> None:
     with pytest.raises(ValidationError, match="selected_action must match outcome"):
         ExecutionStrategyDecision.model_validate(
@@ -130,6 +152,18 @@ def test_execution_strategy_requires_fallback_and_validators() -> None:
                 "outcome": ExecutionStrategyOutcome.REPLAN,
                 "fallback_plan": "Escalate to replanning.",
                 "validators_to_rerun": [],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="Field required"):
+        ExecutionStrategyDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.EXECUTION_STRATEGY,
+                "risk_level": DecisionRiskLevel.MODERATE,
+                "selected_action": ExecutionStrategyAction.REPLAN,
+                "outcome": ExecutionStrategyOutcome.REPLAN,
+                "fallback_plan": "Escalate to replanning.",
             }
         )
 
@@ -243,6 +277,136 @@ def test_parse_environment_repair_decision() -> None:
     assert decision.outcome == EnvironmentRepairOutcome.APPLY_AND_RETRY
 
 
+def test_parse_feature_review_finding_classification_decision() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+        "finding_id": "fr-321",
+        "classification": FeatureReviewFindingClassification.SOFT_FINDING,
+        "selected_action": FeatureReviewFindingAction.ACCEPT,
+        "outcome": FeatureReviewFindingOutcome.CONTINUE,
+        "fallback_plan": "Re-open as repair if related verification regresses.",
+        "validators_to_rerun": ["review_findings_schema", "release_review_gate"],
+        "evidence_paths": ["runs/release/release_review.md"],
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, FeatureReviewFindingClassificationDecision)
+    assert decision.decision_type == SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION
+    assert decision.classification == FeatureReviewFindingClassification.SOFT_FINDING
+    assert decision.selected_action == FeatureReviewFindingAction.ACCEPT
+
+
+def test_parse_legacy_feature_review_finding_classification_decision_adds_validators_migration_default() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+        "finding_id": "fr-legacy-001",
+        "classification": FeatureReviewFindingClassification.BLOCKER,
+        "selected_action": FeatureReviewFindingAction.REPAIR,
+        "outcome": FeatureReviewFindingOutcome.CONTINUE,
+        "fallback_plan": "Escalate if bounded repair cannot resolve the blocker safely.",
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, FeatureReviewFindingClassificationDecision)
+    assert decision.validators_to_rerun == [LEGACY_VALIDATORS_UNSPECIFIED]
+
+
+def test_feature_review_finding_classification_requires_expected_action_outcome_mapping() -> None:
+    with pytest.raises(ValidationError, match="repair or accept requires continue outcome"):
+        FeatureReviewFindingClassificationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+                "finding_id": "fr-321",
+                "classification": FeatureReviewFindingClassification.BLOCKER,
+                "selected_action": FeatureReviewFindingAction.REPAIR,
+                "outcome": FeatureReviewFindingOutcome.STOP,
+                "fallback_plan": "Escalate to hard stop if repair cannot be scoped safely.",
+                "validators_to_rerun": ["verification"],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="defer requires stop outcome"):
+        FeatureReviewFindingClassificationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+                "finding_id": "fr-321",
+                "classification": FeatureReviewFindingClassification.BACKLOG_FOLLOW_UP,
+                "selected_action": FeatureReviewFindingAction.DEFER,
+                "outcome": FeatureReviewFindingOutcome.CONTINUE,
+                "fallback_plan": "Track follow-up in backlog before next cycle.",
+                "validators_to_rerun": ["review_findings_schema"],
+            }
+        )
+
+
+def test_feature_review_finding_classification_non_blocking_accept_requires_evidence() -> None:
+    with pytest.raises(ValidationError, match="requires evidence_paths"):
+        FeatureReviewFindingClassificationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+                "finding_id": "fr-321",
+                "classification": FeatureReviewFindingClassification.SOFT_FINDING,
+                "selected_action": FeatureReviewFindingAction.ACCEPT,
+                "outcome": FeatureReviewFindingOutcome.CONTINUE,
+                "fallback_plan": "Re-open if related verification regresses.",
+                "validators_to_rerun": ["review_findings_schema", "release_review_gate"],
+                "evidence_paths": [],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="duplicate classification must not use accept action"):
+        FeatureReviewFindingClassificationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+                "finding_id": "fr-321",
+                "classification": FeatureReviewFindingClassification.DUPLICATE,
+                "selected_action": FeatureReviewFindingAction.ACCEPT,
+                "outcome": FeatureReviewFindingOutcome.CONTINUE,
+                "fallback_plan": "Re-open if duplicate linkage cannot be verified.",
+                "validators_to_rerun": ["review_findings_schema", "release_review_gate"],
+                "evidence_paths": ["runs/release/feature_review.json"],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="must not use accept action"):
+        FeatureReviewFindingClassificationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+                "finding_id": "fr-321",
+                "classification": FeatureReviewFindingClassification.BLOCKER,
+                "selected_action": FeatureReviewFindingAction.ACCEPT,
+                "outcome": FeatureReviewFindingOutcome.CONTINUE,
+                "fallback_plan": "Escalate to stop if blocker cannot be repaired safely.",
+                "validators_to_rerun": ["verification"],
+                "evidence_paths": ["runs/release/release_review.md"],
+            }
+        )
+
+
+def test_feature_review_finding_classification_requires_validators_to_rerun_field() -> None:
+    with pytest.raises(ValidationError, match="Field required"):
+        FeatureReviewFindingClassificationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+                "finding_id": "fr-321",
+                "classification": FeatureReviewFindingClassification.BLOCKER,
+                "selected_action": FeatureReviewFindingAction.REPAIR,
+                "outcome": FeatureReviewFindingOutcome.CONTINUE,
+                "fallback_plan": "Escalate if repair cannot be scoped safely.",
+            }
+        )
+
+
 def test_parse_model_output_normalization_decision() -> None:
     payload = {
         **BASE,
@@ -269,6 +433,29 @@ def test_parse_model_output_normalization_decision() -> None:
     assert decision.decision_type == SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION
     assert decision.selected_action == ModelOutputNormalizationAction.APPLY_NORMALIZATION
     assert decision.outcome == ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY
+
+
+def test_parse_legacy_model_output_normalization_decision_requires_explicit_rerun_validators() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+        "risk_level": DecisionRiskLevel.HIGH,
+        "raw_artifact_paths": ["runs/release/reviewer_raw.json"],
+        "validation_errors": [
+            {
+                "field": "findings[0].evidence_paths",
+                "message": "Field required",
+                "error_type": "missing",
+            }
+        ],
+        "selected_action": ModelOutputNormalizationAction.APPLY_NORMALIZATION,
+        "outcome": ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
+        "fallback_plan": "Refuse and stop if rerun validation still fails.",
+        "normalized_artifact_path": "runs/release/feature_review.normalized.json",
+    }
+
+    with pytest.raises(ValidationError, match="requires explicit validators_to_rerun"):
+        parse_supervisor_decision(payload)
 
 
 def test_model_output_normalization_requires_consistent_outcome_fields() -> None:
@@ -331,7 +518,7 @@ def test_model_output_normalization_requires_consistent_outcome_fields() -> None
             }
         )
 
-    with pytest.raises(ValidationError, match="requires validators_to_rerun"):
+    with pytest.raises(ValidationError, match="requires explicit validators_to_rerun"):
         ModelOutputNormalizationDecision.model_validate(
             {
                 **BASE,
@@ -405,6 +592,11 @@ def test_parse_supervisor_decision_rejects_unsupported_type() -> None:
 
     with pytest.raises(ValidationError):
         parse_supervisor_decision(payload)
+
+
+def test_effective_validators_to_rerun_filters_legacy_sentinel() -> None:
+    assert effective_validators_to_rerun([LEGACY_VALIDATORS_UNSPECIFIED]) == []
+    assert effective_validators_to_rerun(["verification"]) == ["verification"]
 
 
 def test_invalid_schema_version_is_rejected() -> None:

@@ -13,6 +13,11 @@ from agentic_devloop.supervisor_decisions import (
     ExecutionStrategyAction,
     ExecutionStrategyDecision,
     ExecutionStrategyOutcome,
+    FeatureReviewFindingAction,
+    FeatureReviewFindingClassification,
+    FeatureReviewFindingClassificationDecision,
+    FeatureReviewFindingOutcome,
+    LEGACY_VALIDATORS_UNSPECIFIED,
     ModelOutputNormalizationAction,
     ModelOutputNormalizationDecision,
     ModelOutputNormalizationOutcome,
@@ -105,6 +110,29 @@ def _model_output_normalization_decision(*, evidence_paths: list[Path]) -> Model
     )
 
 
+def _feature_review_finding_classification_decision(
+    *, evidence_paths: list[Path]
+) -> FeatureReviewFindingClassificationDecision:
+    return FeatureReviewFindingClassificationDecision.model_validate(
+        {
+            "schema_version": SCHEMA_VERSION_V1,
+            "decision_id": "finding-classification-001",
+            "release_id": "review-loop-convergence-policy",
+            "decided_at": datetime(2026, 5, 13, 8, 0, 0),
+            "decided_by": "supervisor-agent",
+            "rationale": "Finding is a soft issue and accepted with bounded follow-up checks.",
+            "evidence_paths": evidence_paths,
+            "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+            "finding_id": "fr-321",
+            "classification": FeatureReviewFindingClassification.SOFT_FINDING,
+            "selected_action": FeatureReviewFindingAction.ACCEPT,
+            "outcome": FeatureReviewFindingOutcome.CONTINUE,
+            "fallback_plan": "Re-open as repair if related verification regresses.",
+            "validators_to_rerun": ["review_findings_schema", "release_review_gate"],
+        }
+    )
+
+
 def test_supervisor_decision_artifact_path_is_deterministic(tmp_path: Path) -> None:
     path = supervisor_decision_artifact_path(
         release_bundle_path=tmp_path,
@@ -184,6 +212,126 @@ def test_write_and_load_execution_strategy_artifact_round_trip(tmp_path: Path) -
     assert loaded == decision
 
 
+def test_load_legacy_execution_strategy_artifact_adds_validators_migration_default(
+    tmp_path: Path,
+) -> None:
+    evidence_file = tmp_path / "strategy-evidence.log"
+    evidence_file.write_text("selected one-shot\n", encoding="utf-8")
+    artifact_path = tmp_path / "supervisor_decisions" / "legacy-execution-strategy.json"
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION_V1,
+                "decision_id": "legacy-strategy-001",
+                "release_id": "supervisor-execution-strategy",
+                "decided_at": "2026-05-13T08:00:00",
+                "decided_by": "supervisor-agent",
+                "rationale": "Legacy artifact predates explicit validator rerun storage.",
+                "evidence_paths": ["strategy-evidence.log"],
+                "decision_type": SupervisorDecisionType.EXECUTION_STRATEGY,
+                "risk_level": DecisionRiskLevel.MODERATE,
+                "selected_action": ExecutionStrategyAction.ONE_SHOT,
+                "outcome": ExecutionStrategyOutcome.PROCEED_ONE_SHOT,
+                "fallback_plan": "Decompose to sequential contracts if one-shot verification fails.",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.warns(UserWarning, match="legacy supervisor decision artifact"):
+        loaded = load_supervisor_decision_artifact(artifact_path)
+
+    assert isinstance(loaded, ExecutionStrategyDecision)
+    assert loaded.validators_to_rerun == [LEGACY_VALIDATORS_UNSPECIFIED]
+
+
+def test_load_legacy_model_output_normalization_artifact_requires_explicit_rerun_validators(
+    tmp_path: Path,
+) -> None:
+    evidence_file = tmp_path / "normalization-evidence.log"
+    evidence_file.write_text("normalized output accepted\n", encoding="utf-8")
+    raw_artifact = tmp_path / "feature_review.raw.json"
+    raw_artifact.write_text("{}\n", encoding="utf-8")
+    normalized_artifact = tmp_path / "feature_review.normalized.json"
+    normalized_artifact.write_text("{}\n", encoding="utf-8")
+    artifact_path = tmp_path / "supervisor_decisions" / "legacy-model-output-normalization.json"
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION_V1,
+                "decision_id": "legacy-normalization-001",
+                "release_id": "model-output-normalization",
+                "decided_at": "2026-05-13T08:00:00",
+                "decided_by": "supervisor-agent",
+                "rationale": "Legacy artifact predates explicit validator rerun storage.",
+                "evidence_paths": ["normalization-evidence.log"],
+                "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+                "risk_level": DecisionRiskLevel.MODERATE,
+                "raw_artifact_paths": ["feature_review.raw.json"],
+                "validation_errors": [
+                    {
+                        "field": "findings[0].evidence_paths",
+                        "message": "Field required",
+                        "error_type": "missing",
+                    }
+                ],
+                "selected_action": ModelOutputNormalizationAction.APPLY_NORMALIZATION,
+                "outcome": ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
+                "fallback_plan": "Refuse and stop if normalized output still fails validation.",
+                "normalized_artifact_path": "feature_review.normalized.json",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.warns(UserWarning, match="legacy supervisor decision artifact"):
+        with pytest.raises(ValidationError, match="requires explicit validators_to_rerun"):
+            load_supervisor_decision_artifact(artifact_path)
+
+
+def test_load_legacy_feature_review_finding_classification_artifact_adds_validators_migration_default(
+    tmp_path: Path,
+) -> None:
+    evidence_file = tmp_path / "finding-classification-evidence.log"
+    evidence_file.write_text("legacy finding classification\n", encoding="utf-8")
+    artifact_path = tmp_path / "supervisor_decisions" / "legacy-feature-review-finding-classification.json"
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION_V1,
+                "decision_id": "legacy-finding-classification-001",
+                "release_id": "review-loop-convergence-policy",
+                "decided_at": "2026-05-13T08:00:00",
+                "decided_by": "supervisor-agent",
+                "rationale": "Legacy artifact predates explicit validator rerun storage.",
+                "evidence_paths": ["finding-classification-evidence.log"],
+                "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+                "finding_id": "fr-legacy-001",
+                "classification": FeatureReviewFindingClassification.BACKLOG_FOLLOW_UP,
+                "selected_action": FeatureReviewFindingAction.DEFER,
+                "outcome": FeatureReviewFindingOutcome.STOP,
+                "fallback_plan": "Track backlog follow-up and stop the current finding.",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.warns(UserWarning, match="legacy supervisor decision artifact"):
+        loaded = load_supervisor_decision_artifact(artifact_path)
+
+    assert isinstance(loaded, FeatureReviewFindingClassificationDecision)
+    assert loaded.validators_to_rerun == [LEGACY_VALIDATORS_UNSPECIFIED]
+
+
 def test_write_and_load_model_output_normalization_artifact_round_trip(tmp_path: Path) -> None:
     evidence_file = tmp_path / "normalization-evidence.log"
     evidence_file.write_text("normalized output accepted\n", encoding="utf-8")
@@ -194,6 +342,21 @@ def test_write_and_load_model_output_normalization_artifact_round_trip(tmp_path:
     decision = _model_output_normalization_decision(
         evidence_paths=[evidence_file, raw_artifact, normalized_artifact]
     )
+
+    artifact_path = write_supervisor_decision_artifact(
+        release_bundle_path=tmp_path,
+        decision=decision,
+    )
+    loaded = load_supervisor_decision_artifact(artifact_path)
+
+    assert artifact_path.exists()
+    assert loaded == decision
+
+
+def test_write_and_load_feature_review_finding_classification_artifact_round_trip(tmp_path: Path) -> None:
+    evidence_file = tmp_path / "finding-classification-evidence.log"
+    evidence_file.write_text("duplicate accepted with evidence\n", encoding="utf-8")
+    decision = _feature_review_finding_classification_decision(evidence_paths=[evidence_file])
 
     artifact_path = write_supervisor_decision_artifact(
         release_bundle_path=tmp_path,

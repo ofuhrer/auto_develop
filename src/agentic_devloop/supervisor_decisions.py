@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import warnings
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -13,6 +14,7 @@ from agentic_devloop.models import ContractNormalizationRefusalReason, StrictMod
 
 
 SCHEMA_VERSION_V1 = "1.0"
+LEGACY_VALIDATORS_UNSPECIFIED = "legacy_schema_v1_validators_unspecified"
 
 
 class DecisionRiskLevel(StrEnum):
@@ -31,6 +33,15 @@ class SupervisorDecisionType(StrEnum):
     CONTRACT_NORMALIZATION = "contract_normalization"
     MODEL_OUTPUT_NORMALIZATION = "model_output_normalization"
     ENVIRONMENT_REPAIR = "environment_repair"
+    FEATURE_REVIEW_FINDING_CLASSIFICATION = "feature_review_finding_classification"
+
+
+_LEGACY_VALIDATORS_DECISION_TYPES = {
+    SupervisorDecisionType.RELEASE_SCHEDULING.value,
+    SupervisorDecisionType.EXECUTION_STRATEGY.value,
+    SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION.value,
+    SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION.value,
+}
 
 
 class SupervisorDecisionBase(StrictModel):
@@ -99,7 +110,7 @@ class ReleaseSchedulingDecision(SupervisorDecisionBase):
     selected_action: ReleaseSchedulingAction
     outcome: SchedulingOutcome
     fallback_plan: str = Field(min_length=1)
-    validators_to_rerun: list[str] = Field(default_factory=list)
+    validators_to_rerun: list[str]
     staleness_inputs: ReleaseSchedulingStalenessInputs
 
     @field_validator("overlap_findings")
@@ -155,7 +166,7 @@ class ExecutionStrategyDecision(SupervisorDecisionBase):
     selected_action: ExecutionStrategyAction
     outcome: ExecutionStrategyOutcome
     fallback_plan: str = Field(min_length=1)
-    validators_to_rerun: list[str] = Field(default_factory=list)
+    validators_to_rerun: list[str]
 
     @field_validator("validators_to_rerun")
     @classmethod
@@ -234,6 +245,71 @@ class ReviewFindingAdjudicationDecision(SupervisorDecisionBase):
         return values
 
 
+class FeatureReviewFindingClassification(StrEnum):
+    BLOCKER = "blocker"
+    SOFT_FINDING = "soft_finding"
+    DUPLICATE = "duplicate"
+    FALSE_POSITIVE = "false_positive"
+    SCOPE_EXPANSION = "scope_expansion"
+    BACKLOG_FOLLOW_UP = "backlog_follow_up"
+
+
+class FeatureReviewFindingAction(StrEnum):
+    REPAIR = "repair"
+    ACCEPT = "accept"
+    DEFER = "defer"
+
+
+class FeatureReviewFindingOutcome(StrEnum):
+    CONTINUE = "continue"
+    STOP_FINDING = "stop"
+    STOP = STOP_FINDING
+
+
+class FeatureReviewFindingClassificationDecision(SupervisorDecisionBase):
+    decision_type: Literal[SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION] = (
+        SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION
+    )
+    finding_id: str = Field(min_length=1)
+    classification: FeatureReviewFindingClassification
+    selected_action: FeatureReviewFindingAction
+    outcome: FeatureReviewFindingOutcome
+    fallback_plan: str = Field(min_length=1)
+    validators_to_rerun: list[str]
+
+    @field_validator("validators_to_rerun")
+    @classmethod
+    def validators_to_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if not values or any(not value.strip() for value in values):
+            raise ValueError("validators to rerun must not be empty")
+        return values
+
+    @model_validator(mode="after")
+    def classification_rules_must_be_satisfied(self) -> "FeatureReviewFindingClassificationDecision":
+        if self.selected_action in {FeatureReviewFindingAction.REPAIR, FeatureReviewFindingAction.ACCEPT}:
+            if self.outcome != FeatureReviewFindingOutcome.CONTINUE:
+                raise ValueError("repair or accept requires continue outcome")
+        if self.selected_action == FeatureReviewFindingAction.DEFER and self.outcome != FeatureReviewFindingOutcome.STOP_FINDING:
+            raise ValueError("defer requires stop outcome")
+        if (
+            self.classification == FeatureReviewFindingClassification.BLOCKER
+            and self.selected_action == FeatureReviewFindingAction.ACCEPT
+        ):
+            raise ValueError("blocker classification must not use accept action")
+        if (
+            self.classification == FeatureReviewFindingClassification.DUPLICATE
+            and self.selected_action == FeatureReviewFindingAction.ACCEPT
+        ):
+            raise ValueError("duplicate classification must not use accept action")
+        if (
+            self.classification != FeatureReviewFindingClassification.BLOCKER
+            and self.selected_action == FeatureReviewFindingAction.ACCEPT
+            and not self.evidence_paths
+        ):
+            raise ValueError("non-blocking accepted classification requires evidence_paths")
+        return self
+
+
 class BudgetAcceptanceOutcome(StrEnum):
     ACCEPT_OVERAGE = "accept_overage"
     SPLIT_TASK = "split_task"
@@ -310,7 +386,7 @@ class ModelOutputNormalizationDecision(SupervisorDecisionBase):
     selected_action: ModelOutputNormalizationAction
     outcome: ModelOutputNormalizationOutcome
     fallback_plan: str = Field(min_length=1)
-    validators_to_rerun: list[str] = Field(default_factory=list)
+    validators_to_rerun: list[str]
     normalized_artifact_path: Path | None = None
     refusal_reason: str | None = None
 
@@ -340,8 +416,11 @@ class ModelOutputNormalizationDecision(SupervisorDecisionBase):
         if self.outcome == ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY:
             if not self.validation_errors:
                 raise ValueError("normalized_and_retry requires validation_errors")
-            if not self.validators_to_rerun:
-                raise ValueError("normalized_and_retry requires validators_to_rerun")
+            if not effective_validators_to_rerun(self.validators_to_rerun):
+                raise ValueError(
+                    "normalized_and_retry requires explicit validators_to_rerun; "
+                    "legacy_schema_v1_validators_unspecified is not runnable"
+                )
             if self.normalized_artifact_path is None:
                 raise ValueError("normalized_and_retry requires normalized_artifact_path")
             if self.refusal_reason is not None:
@@ -384,6 +463,7 @@ SupervisorDecisionRecord = Annotated[
         | ContractNormalizationDecision
         | ModelOutputNormalizationDecision
         | EnvironmentRepairDecision
+        | FeatureReviewFindingClassificationDecision
     ),
     Field(discriminator="decision_type"),
 ]
@@ -392,7 +472,29 @@ _SUPERVISOR_DECISION_ADAPTER = TypeAdapter(SupervisorDecisionRecord)
 
 
 def parse_supervisor_decision(payload: object) -> SupervisorDecisionRecord:
-    return _SUPERVISOR_DECISION_ADAPTER.validate_python(payload)
+    normalized_payload, _ = _normalize_legacy_supervisor_decision_payload(payload)
+    return _SUPERVISOR_DECISION_ADAPTER.validate_python(normalized_payload)
+
+
+def effective_validators_to_rerun(validators_to_rerun: list[str]) -> list[str]:
+    """Return concrete validators; the legacy sentinel means unspecified."""
+    return [validator for validator in validators_to_rerun if validator != LEGACY_VALIDATORS_UNSPECIFIED]
+
+
+def _normalize_legacy_supervisor_decision_payload(payload: object) -> tuple[object, bool]:
+    if not isinstance(payload, dict):
+        return payload, False
+    decision_type = payload.get("decision_type")
+    if (
+        payload.get("schema_version") != SCHEMA_VERSION_V1
+        or decision_type not in _LEGACY_VALIDATORS_DECISION_TYPES
+        or "validators_to_rerun" in payload
+    ):
+        return payload, False
+
+    normalized_payload = dict(payload)
+    normalized_payload["validators_to_rerun"] = [LEGACY_VALIDATORS_UNSPECIFIED]
+    return normalized_payload, True
 
 
 def supervisor_decision_artifact_path(
@@ -443,7 +545,14 @@ def load_supervisor_decision_artifact(path: Path) -> SupervisorDecisionRecord:
     if not path.exists():
         raise FileNotFoundError(f"supervisor decision artifact does not exist: {path}")
     payload = json.loads(path.read_text(encoding="utf-8"))
-    decision = parse_supervisor_decision(payload)
+    normalized_payload, migrated = _normalize_legacy_supervisor_decision_payload(payload)
+    if migrated:
+        warnings.warn(
+            f"loaded legacy supervisor decision artifact without validators_to_rerun: {path}",
+            UserWarning,
+            stacklevel=2,
+        )
+    decision = _SUPERVISOR_DECISION_ADAPTER.validate_python(normalized_payload)
     _validate_evidence_paths(decision=decision, artifact_path=path)
     return decision
 

@@ -49,6 +49,24 @@ should be used.
   report hash, base-branch commit, execution mode, and release-input hash used
   to detect stale scheduling artifacts.
 
+`repair_loop_continuation` and `review_finding_adjudication` are the decision
+types that carry release-local review convergence behavior:
+
+- `repair_loop_continuation` records whether a bounded repair pass should keep
+  going, stop, or split after a reviewer pass or repair attempt;
+- `review_finding_adjudication` records how a finding is classified for the
+  release-local gate, including blocker, soft finding, duplicate, false
+  positive, scope expansion, or backlog follow-up handling; and
+- both decision types should retain evidence paths, rationale, fallback plan,
+  and validator rerun metadata so the review trail remains inspectable.
+
+Duplicate, scope-expansion, and backlog-follow-up findings are deferred,
+non-blocking classifications. They are written to `deferred_finding_ids` in
+`feature_review_recheck.json` and to typed supervisor decision artifacts with
+`selected_action=defer`; they are not `accepted_finding_ids`. Accepted IDs are
+reserved for soft findings and false-positive adjudications that continue the
+release with explicit rationale.
+
 ## Artifact Layout
 
 Supervisor decision artifacts are persisted as JSON files under:
@@ -80,6 +98,19 @@ Loading is strict:
 
 Evidence validation is deliberate. A supervisor record is only useful if the
 referenced files are still inspectable.
+
+Legacy artifacts created before `validators_to_rerun` became required have a
+narrow compatibility path. `release_scheduling`, `execution_strategy`,
+`model_output_normalization`, and `feature_review_finding_classification`
+records missing the field are loaded with the sentinel value
+`legacy_schema_v1_validators_unspecified`. Consumers must treat that sentinel as
+audit metadata only: `effective_validators_to_rerun()` filters it out and no
+validator should be executed from it. This keeps old artifacts readable without
+pretending that their rerun checklist is complete. Applied
+`model_output_normalization` decisions remain stricter: if the outcome is
+`normalized_and_retry`, the artifact must contain at least one concrete validator
+after sentinel filtering. Older normalization artifacts therefore require manual
+backfill or regeneration before they can drive an autonomous retry.
 
 `release_scheduling` artifacts are now consumed by release execution. Normal
 source overlap produces an overlap-risk report plus a typed scheduling

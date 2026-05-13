@@ -21,8 +21,10 @@ from agentic_devloop.evidence import (
     write_release_soft_gate_decisions,
 )
 from agentic_devloop.feature_review import (
+    FeatureReviewClassificationError,
     FeatureReviewContextError,
     assemble_feature_review_context,
+    classify_feature_review_findings_for_convergence,
     generate_repair_contracts_for_required_findings,
     invoke_feature_reviewer,
     render_feature_review_prompt,
@@ -75,6 +77,10 @@ from agentic_devloop.runtime_supervisor import (
 )
 from agentic_devloop.supervisor_decisions import (
     DecisionRiskLevel,
+    FeatureReviewFindingAction,
+    FeatureReviewFindingClassification,
+    FeatureReviewFindingClassificationDecision,
+    FeatureReviewFindingOutcome,
     ModelOutputNormalizationAction,
     ModelOutputNormalizationDecision,
     ModelOutputNormalizationOutcome,
@@ -119,6 +125,7 @@ class FeatureReviewLoopResult:
     feature_review_recheck_path: Path | None
     feature_review_decision: FeatureReviewDecision | None
     feature_review_recheck: FeatureReviewRecheckRecord | None
+    feature_review_proposals: list["FeatureReviewProposalRecord"]
     gating_decision: Decision
 
 
@@ -172,6 +179,23 @@ class ReleaseFinalizationGate(StrictModel):
                 "finalization gate reason='release_decision_not_accepted' requires decision != 'accepted'"
             )
         return self
+
+
+class FeatureReviewProposalRecord(StrictModel):
+    finding_id: str
+    classification: Literal["scope_expansion", "backlog_follow_up"]
+    selected_action: Literal["defer"]
+    decision_artifact_path: str
+    matched_previous_finding_id: str | None = None
+    attempt: int = Field(ge=1)
+
+    @field_validator("finding_id", "decision_artifact_path")
+    @classmethod
+    def required_strings_must_be_non_empty(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("value must be non-empty")
+        return cleaned
 
 
 def make_release_run_id(release_id: str, now: datetime | None = None) -> str:
@@ -382,6 +406,7 @@ def run_release(
     feature_review_recheck_path: Path | None = None
     feature_review_decision: FeatureReviewDecision | None = None
     feature_review_recheck: FeatureReviewRecheckRecord | None = None
+    feature_review_proposals: list[FeatureReviewProposalRecord] = []
 
     task_decision = (
         Decision.ACCEPTED
@@ -414,6 +439,7 @@ def run_release(
         feature_review_recheck_path = feature_review_loop.feature_review_recheck_path
         feature_review_decision = feature_review_loop.feature_review_decision
         feature_review_recheck = feature_review_loop.feature_review_recheck
+        feature_review_proposals = feature_review_loop.feature_review_proposals
         task_decision = _release_decision([result.decision for result in task_results])
         if feature_review_loop.gating_decision != Decision.ACCEPTED:
             task_decision = feature_review_loop.gating_decision
@@ -501,6 +527,7 @@ def run_release(
         release_soft_gate_decision_path=release_soft_gate_decision_path,
         feature_review_path=feature_review_path,
         feature_review_recheck_path=feature_review_recheck_path,
+        feature_review_proposals=feature_review_proposals,
         finalization_gate=finalization_gate,
     )
     review_path = _write_release_review(
@@ -1240,6 +1267,10 @@ def _run_feature_review_and_repair_loop(
     feature_review_decision: FeatureReviewDecision | None = None
     feature_review_recheck: FeatureReviewRecheckRecord | None = None
     outstanding_required_finding_ids: set[str] = set()
+    previous_review_decisions: list[FeatureReviewDecision] = []
+    last_verification_ok = False
+    last_verification_log_path: Path | None = None
+    proposal_by_finding_id: dict[str, FeatureReviewProposalRecord] = {}
 
     def allowed_verification_commands() -> list[str]:
         commands: list[str] = []
@@ -1266,6 +1297,12 @@ def _run_feature_review_and_repair_loop(
             seen.add(normalized)
             ordered.append(normalized)
         return ordered
+
+    def current_proposals() -> list[FeatureReviewProposalRecord]:
+        return sorted(
+            proposal_by_finding_id.values(),
+            key=lambda record: record.finding_id,
+        )
 
     def run_review(attempt: int) -> FeatureReviewDecision:
         nonlocal feature_review_path
@@ -1319,6 +1356,8 @@ def _run_feature_review_and_repair_loop(
         return decision
 
     def rerun_verification(attempt: int, decision: FeatureReviewDecision) -> bool:
+        nonlocal last_verification_ok
+        nonlocal last_verification_log_path
         rerun_dir = output_root / f"verification_rerun_{attempt:02d}"
         rerun_dir.mkdir(parents=True, exist_ok=True)
         commands = list(config.verification_profiles["default"].commands)
@@ -1334,18 +1373,23 @@ def _run_feature_review_and_repair_loop(
             requested = [cmd for cmd in decision.rerun_verification_commands if cmd in allowed]
             if requested:
                 commands = requested
-        return _run_integration_verification_rerun(
+        log_path = rerun_dir / "verification.log"
+        ok = _run_integration_verification_rerun(
             repo_path=config.repo_path,
             integration_branch=integration_branch,
             worktree_path=rerun_dir / "worktree",
             commands=commands,
             timeout_seconds=verification_timeout_seconds,
-            log_path=rerun_dir / "verification.log",
+            log_path=log_path,
             progress=progress,
         )
+        last_verification_ok = ok
+        last_verification_log_path = log_path
+        return ok
 
     all_task_results = list(task_results)
     decision = run_review(attempt=1)
+    previous_review_decisions.append(decision)
 
     for loop_index in range(_FEATURE_REVIEW_MAX_REPAIR_LOOPS + 1):
         required_findings = [finding for finding in decision.findings if finding.required_repairs]
@@ -1357,14 +1401,30 @@ def _run_feature_review_and_repair_loop(
             if not finding.required_repairs and finding.optional_follow_ups
         ]
 
-        if decision.recommendation == FeatureReviewRecommendation.ESCALATE:
+        def compute_convergence():
+            return classify_feature_review_findings_for_convergence(
+                decision=decision,
+                previous_decisions=previous_review_decisions[:-1],
+                verification_passed=last_verification_ok,
+            )
+
+        try:
+            convergence = compute_convergence()
+        except FeatureReviewClassificationError as error:
             gating_decision = Decision.ESCALATED
-            unresolved_finding_ids = [finding.finding_id for finding in decision.findings]
-            if not unresolved_finding_ids and outstanding_required_finding_ids:
-                unresolved_finding_ids = sorted(outstanding_required_finding_ids)
+            decision = decision.model_copy(
+                update={
+                    "reviewer": "deterministic",
+                    "summary": f"Feature review finding classification failed: {error}",
+                    "recommendation": "escalate",
+                }
+            )
+            feature_review_decision = decision
+            feature_review_path = write_feature_review_decision(release_root, decision)
             feature_review_recheck = FeatureReviewRecheckRecord(
                 release_id=release_id,
-                unresolved_finding_ids=unresolved_finding_ids or [f"{release_id}:feature_review_blocked"],
+                unresolved_finding_ids=[finding.finding_id for finding in decision.findings]
+                or [f"{release_id}:feature_review_classification_failed"],
                 resolved_finding_ids=[],
                 accepted_finding_ids=[],
                 stop_reason="blocked_by_hard_gate",
@@ -1376,12 +1436,244 @@ def _run_feature_review_and_repair_loop(
                 feature_review_recheck_path=feature_review_recheck_path,
                 feature_review_decision=feature_review_decision,
                 feature_review_recheck=feature_review_recheck,
+                feature_review_proposals=current_proposals(),
+                gating_decision=gating_decision,
+            )
+
+        def optional_recheck_ids() -> tuple[list[str], list[str]]:
+            optional_finding_ids = {finding.finding_id for finding in optional_findings}
+            accepted_ids = sorted(optional_finding_ids.intersection(convergence.accepted_finding_ids))
+            deferred_ids = sorted(optional_finding_ids.intersection(convergence.deferred_finding_ids))
+            return accepted_ids, deferred_ids
+
+        def write_required_finding_classifications(
+            *,
+            attempt: int,
+            accepted_required_finding_ids: set[str] | None = None,
+            write_stable_latest: bool = True,
+        ) -> dict[str, Path]:
+            accepted_required_finding_ids = accepted_required_finding_ids or set()
+            written: dict[str, Path] = {}
+            validators_to_rerun = list(config.verification_profiles["default"].commands) or ["integration_verification"]
+            for finding in required_findings:
+                finding_id = finding.finding_id
+                is_accepted = finding_id in accepted_required_finding_ids
+                classification = (
+                    FeatureReviewFindingClassification.FALSE_POSITIVE
+                    if is_accepted
+                    else FeatureReviewFindingClassification.BLOCKER
+                )
+                selected_action = (
+                    FeatureReviewFindingAction.ACCEPT if is_accepted else FeatureReviewFindingAction.REPAIR
+                )
+                outcome = FeatureReviewFindingOutcome.CONTINUE
+                evidence_paths: list[str] = []
+                if feature_review_path is not None:
+                    evidence_paths.append(str(feature_review_path.resolve()))
+                if last_verification_log_path is not None and (write_stable_latest or is_accepted):
+                    evidence_paths.append(str(last_verification_log_path.resolve()))
+                stable_decision_id = f"{release_id}__feature_review_finding__{finding_id}"
+                attempt_decision_id = f"{stable_decision_id}__attempt_{attempt}"
+                decision_record = FeatureReviewFindingClassificationDecision.model_validate(
+                    {
+                        "decision_id": attempt_decision_id,
+                        "release_id": release_id,
+                        "decided_at": datetime.now(UTC),
+                        "decided_by": "run_release_feature_review_loop",
+                        "rationale": (
+                            "Classified required finding as verification-only false positive after passing configured "
+                            "integration verification rerun; stop generating repair contracts for this finding."
+                            if is_accepted
+                            else "Classified required finding as release-blocking; generate bounded repair contract."
+                        ),
+                        "evidence_paths": evidence_paths,
+                        "finding_id": finding_id,
+                        "classification": classification.value,
+                        "selected_action": selected_action.value,
+                        "outcome": outcome.value,
+                        "fallback_plan": "Stop release finalization and escalate if blockers remain unresolved.",
+                        "validators_to_rerun": validators_to_rerun,
+                    }
+                )
+                attempt_path = write_supervisor_decision_artifact(
+                    release_bundle_path=release_root, decision=decision_record
+                )
+                written[finding_id] = attempt_path
+
+                if write_stable_latest:
+                    stable_record = decision_record.model_copy(update={"decision_id": stable_decision_id})
+                    write_supervisor_decision_artifact(release_bundle_path=release_root, decision=stable_record)
+                _report(
+                    progress,
+                    "event=feature_review_finding_classified attempt="
+                    + str(attempt)
+                    + " finding_id="
+                    + finding_id
+                    + " classification="
+                    + classification.value
+                    + " action="
+                    + selected_action.value,
+                )
+            return written
+
+        def write_non_blocking_finding_classifications(*, attempt: int) -> dict[str, Path]:
+            written: dict[str, Path] = {}
+            non_blocking_items = [
+                item for item in convergence.findings if item.finding_id not in convergence.blocking_finding_ids
+            ]
+            if not non_blocking_items:
+                return written
+            for item in non_blocking_items:
+                if item.selected_action == "accept":
+                    outcome = FeatureReviewFindingOutcome.CONTINUE
+                else:
+                    outcome = FeatureReviewFindingOutcome.STOP_FINDING
+                evidence_paths: list[str] = []
+                if feature_review_path is not None:
+                    evidence_paths.append(str(feature_review_path.resolve()))
+                match_hint = item.matched_previous_finding_id or "none"
+                rationale = (
+                    "Classified non-blocking finding with convergence context; "
+                    f"classification={item.classification} action={item.selected_action} "
+                    "defer_outcome_scope=stop_pursuing_this_finding "
+                    f"matched_previous_finding_id={match_hint} "
+                    f"repeated_by_finding_id={str(item.repeated_by_finding_id).lower()} "
+                    f"adjacent_similarity={item.adjacent_similarity:.3f}."
+                )
+                fallback_plan = (
+                    "Rerun reviewer re-check and deterministic finalization gate if the same finding escalates or "
+                    "new blocking evidence appears."
+                )
+                stable_decision_id = f"{release_id}__feature_review_finding__{item.finding_id}"
+                attempt_decision_id = f"{stable_decision_id}__attempt_{attempt}"
+                decision_record = FeatureReviewFindingClassificationDecision.model_validate(
+                    {
+                        "decision_id": attempt_decision_id,
+                        "release_id": release_id,
+                        "decided_at": datetime.now(UTC),
+                        "decided_by": "run_release_feature_review_loop",
+                        "rationale": rationale,
+                        "evidence_paths": evidence_paths,
+                        "finding_id": item.finding_id,
+                        "classification": item.classification,
+                        "selected_action": item.selected_action,
+                        "outcome": outcome.value,
+                        "fallback_plan": fallback_plan,
+                        "validators_to_rerun": ["feature_review_recheck"],
+                    }
+                )
+                attempt_path = write_supervisor_decision_artifact(
+                    release_bundle_path=release_root, decision=decision_record
+                )
+                written[item.finding_id] = attempt_path
+                stable_record = decision_record.model_copy(update={"decision_id": stable_decision_id})
+                stable_path = write_supervisor_decision_artifact(
+                    release_bundle_path=release_root, decision=stable_record
+                )
+                if item.classification in {"scope_expansion", "backlog_follow_up"} and item.selected_action == "defer":
+                    proposal_by_finding_id[item.finding_id] = FeatureReviewProposalRecord.model_validate(
+                        {
+                            "finding_id": item.finding_id,
+                            "classification": item.classification,
+                            "selected_action": item.selected_action,
+                            "decision_artifact_path": str(stable_path),
+                            "matched_previous_finding_id": item.matched_previous_finding_id,
+                            "attempt": attempt,
+                        }
+                    )
+                _report(
+                    progress,
+                    "event=feature_review_non_blocking_finding_classified attempt="
+                    + str(attempt)
+                    + " finding_id="
+                    + item.finding_id
+                    + " classification="
+                    + item.classification
+                    + " action="
+                    + item.selected_action
+                    + " matched_previous_finding_id="
+                    + match_hint
+                    + " adjacent_similarity="
+                    + f"{item.adjacent_similarity:.3f}",
+                )
+            return written
+
+        if (
+            loop_index >= _FEATURE_REVIEW_MAX_REPAIR_LOOPS
+            and required_findings
+            and decision.recommendation != FeatureReviewRecommendation.ESCALATE
+        ):
+            _report(
+                progress,
+                "event=feature_review_convergence_limit_reached "
+                f"limit={_FEATURE_REVIEW_MAX_REPAIR_LOOPS} unresolved_required_findings="
+                + json.dumps([finding.finding_id for finding in required_findings], sort_keys=True),
+            )
+            rerun_verification(loop_index + 1, decision)
+            try:
+                convergence = compute_convergence()
+            except FeatureReviewClassificationError as error:
+                gating_decision = Decision.ESCALATED
+                decision = decision.model_copy(
+                    update={
+                        "reviewer": "deterministic",
+                        "summary": f"Feature review finding classification failed: {error}",
+                        "recommendation": "escalate",
+                    }
+                )
+                feature_review_decision = decision
+                feature_review_path = write_feature_review_decision(release_root, decision)
+                feature_review_recheck = FeatureReviewRecheckRecord(
+                    release_id=release_id,
+                    unresolved_finding_ids=[finding.finding_id for finding in decision.findings]
+                    or [f"{release_id}:feature_review_classification_failed"],
+                    resolved_finding_ids=[],
+                    accepted_finding_ids=[],
+                    stop_reason="blocked_by_hard_gate",
+                )
+                feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+                return FeatureReviewLoopResult(
+                    task_results=all_task_results,
+                    feature_review_path=feature_review_path,
+                    feature_review_recheck_path=feature_review_recheck_path,
+                    feature_review_decision=feature_review_decision,
+                    feature_review_recheck=feature_review_recheck,
+                    feature_review_proposals=current_proposals(),
+                    gating_decision=gating_decision,
+                )
+
+        write_non_blocking_finding_classifications(attempt=loop_index + 1)
+
+        if decision.recommendation == FeatureReviewRecommendation.ESCALATE:
+            write_required_finding_classifications(attempt=loop_index + 1, write_stable_latest=True)
+            gating_decision = Decision.ESCALATED
+            unresolved_finding_ids = [finding.finding_id for finding in decision.findings]
+            if not unresolved_finding_ids and outstanding_required_finding_ids:
+                unresolved_finding_ids = sorted(outstanding_required_finding_ids)
+            accepted_optional_ids, deferred_optional_ids = optional_recheck_ids()
+            feature_review_recheck = FeatureReviewRecheckRecord(
+                release_id=release_id,
+                unresolved_finding_ids=unresolved_finding_ids or [f"{release_id}:feature_review_blocked"],
+                resolved_finding_ids=[],
+                accepted_finding_ids=accepted_optional_ids,
+                deferred_finding_ids=deferred_optional_ids,
+                stop_reason="blocked_by_hard_gate",
+                )
+            feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+            return FeatureReviewLoopResult(
+                task_results=all_task_results,
+                feature_review_path=feature_review_path,
+                feature_review_recheck_path=feature_review_recheck_path,
+                feature_review_decision=feature_review_decision,
+                feature_review_recheck=feature_review_recheck,
+                feature_review_proposals=current_proposals(),
                 gating_decision=gating_decision,
             )
 
         if not required_findings:
             stop_reason = "resolved" if not decision.findings else "accepted_with_rationale"
             optional_finding_ids = {finding.finding_id for finding in optional_findings}
+            accepted_optional_ids, deferred_optional_ids = optional_recheck_ids()
             if stop_reason == "accepted_with_rationale" and not decision.accepted_risks:
                 decision = decision.model_copy(
                     update={
@@ -1403,7 +1695,8 @@ def _run_feature_review_and_repair_loop(
                     for finding in decision.findings
                     if finding.finding_id not in optional_finding_ids
                 ],
-                accepted_finding_ids=sorted(optional_finding_ids),
+                accepted_finding_ids=accepted_optional_ids,
+                deferred_finding_ids=deferred_optional_ids,
                 stop_reason=stop_reason,
             )
             feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
@@ -1413,17 +1706,22 @@ def _run_feature_review_and_repair_loop(
                 feature_review_recheck_path=feature_review_recheck_path,
                 feature_review_decision=feature_review_decision,
                 feature_review_recheck=feature_review_recheck,
+                feature_review_proposals=current_proposals(),
                 gating_decision=gating_decision,
             )
 
         if loop_index >= _FEATURE_REVIEW_MAX_REPAIR_LOOPS:
-            verification_ok = rerun_verification(loop_index + 1, decision)
+            verification_ok = last_verification_ok
             adjudicated_finding_ids = (
                 _verification_adjudicated_required_finding_ids(required_findings)
                 if verification_ok
                 else []
             )
             if adjudicated_finding_ids and len(adjudicated_finding_ids) == len(required_findings):
+                write_required_finding_classifications(
+                    attempt=loop_index + 1,
+                    accepted_required_finding_ids=set(adjudicated_finding_ids),
+                )
                 accepted_risks = list(decision.accepted_risks)
                 accepted_risks.append(
                     "Accepted required feature-review finding(s) after retry budget because "
@@ -1447,14 +1745,18 @@ def _run_feature_review_and_repair_loop(
                     feature_review_recheck_path=feature_review_recheck_path,
                     feature_review_decision=feature_review_decision,
                     feature_review_recheck=feature_review_recheck,
+                    feature_review_proposals=current_proposals(),
                     gating_decision=gating_decision,
                 )
+            write_required_finding_classifications(attempt=loop_index + 1)
             gating_decision = Decision.NEEDS_REVISION
+            accepted_optional_ids, deferred_optional_ids = optional_recheck_ids()
             feature_review_recheck = FeatureReviewRecheckRecord(
                 release_id=release_id,
                 unresolved_finding_ids=[finding.finding_id for finding in required_findings],
                 resolved_finding_ids=[],
-                accepted_finding_ids=[finding.finding_id for finding in optional_findings],
+                accepted_finding_ids=accepted_optional_ids,
+                deferred_finding_ids=deferred_optional_ids,
                 stop_reason="blocked_by_retry_budget",
             )
             feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
@@ -1464,20 +1766,59 @@ def _run_feature_review_and_repair_loop(
                 feature_review_recheck_path=feature_review_recheck_path,
                 feature_review_decision=feature_review_decision,
                 feature_review_recheck=feature_review_recheck,
+                feature_review_proposals=current_proposals(),
                 gating_decision=gating_decision,
             )
 
+        write_required_finding_classifications(attempt=loop_index + 1, write_stable_latest=False)
+
+        repair_blocker_ids = set(convergence.blocking_finding_ids)
+        if not repair_blocker_ids:
+            gating_decision = Decision.ACCEPTED
+            write_required_finding_classifications(attempt=loop_index + 1, write_stable_latest=True)
+            accepted_optional_ids, deferred_optional_ids = optional_recheck_ids()
+            feature_review_recheck = FeatureReviewRecheckRecord(
+                release_id=release_id,
+                unresolved_finding_ids=[],
+                resolved_finding_ids=[],
+                accepted_finding_ids=accepted_optional_ids,
+                deferred_finding_ids=deferred_optional_ids,
+                stop_reason="accepted_with_rationale",
+            )
+            feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+            return FeatureReviewLoopResult(
+                task_results=all_task_results,
+                feature_review_path=feature_review_path,
+                feature_review_recheck_path=feature_review_recheck_path,
+                feature_review_decision=feature_review_decision,
+                feature_review_recheck=feature_review_recheck,
+                feature_review_proposals=current_proposals(),
+                gating_decision=gating_decision,
+            )
+
+        repair_decision = decision.model_copy(
+            update={
+                "findings": [
+                    finding
+                    for finding in decision.findings
+                    if finding.finding_id in repair_blocker_ids and finding.required_repairs
+                ]
+            }
+        )
+
         generated = generate_repair_contracts_for_required_findings(
-            decision=decision,
+            decision=repair_decision,
             source_contracts=source_contracts,
         )
         if not generated:
             gating_decision = Decision.NEEDS_REVISION
+            accepted_optional_ids, deferred_optional_ids = optional_recheck_ids()
             feature_review_recheck = FeatureReviewRecheckRecord(
                 release_id=release_id,
                 unresolved_finding_ids=[finding.finding_id for finding in required_findings],
                 resolved_finding_ids=[],
-                accepted_finding_ids=[finding.finding_id for finding in optional_findings],
+                accepted_finding_ids=accepted_optional_ids,
+                deferred_finding_ids=deferred_optional_ids,
                 stop_reason="blocked_by_hard_gate",
             )
             feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
@@ -1487,6 +1828,7 @@ def _run_feature_review_and_repair_loop(
                 feature_review_recheck_path=feature_review_recheck_path,
                 feature_review_decision=feature_review_decision,
                 feature_review_recheck=feature_review_recheck,
+                feature_review_proposals=current_proposals(),
                 gating_decision=gating_decision,
             )
 
@@ -1516,11 +1858,13 @@ def _run_feature_review_and_repair_loop(
             all_task_results.append(result)
             if result.decision.decision != Decision.ACCEPTED:
                 gating_decision = Decision.NEEDS_REVISION
+                accepted_optional_ids, deferred_optional_ids = optional_recheck_ids()
                 feature_review_recheck = FeatureReviewRecheckRecord(
                     release_id=release_id,
                     unresolved_finding_ids=[finding.finding_id for finding in required_findings],
                     resolved_finding_ids=[],
-                    accepted_finding_ids=[finding.finding_id for finding in optional_findings],
+                    accepted_finding_ids=accepted_optional_ids,
+                    deferred_finding_ids=deferred_optional_ids,
                     stop_reason="blocked_by_hard_gate",
                 )
                 feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
@@ -1530,17 +1874,20 @@ def _run_feature_review_and_repair_loop(
                     feature_review_recheck_path=feature_review_recheck_path,
                     feature_review_decision=feature_review_decision,
                     feature_review_recheck=feature_review_recheck,
+                    feature_review_proposals=current_proposals(),
                     gating_decision=gating_decision,
                 )
 
         verification_ok = rerun_verification(loop_index + 1, decision)
         if not verification_ok:
             gating_decision = Decision.NEEDS_REVISION
+            accepted_optional_ids, deferred_optional_ids = optional_recheck_ids()
             feature_review_recheck = FeatureReviewRecheckRecord(
                 release_id=release_id,
                 unresolved_finding_ids=[finding.finding_id for finding in required_findings],
                 resolved_finding_ids=[],
-                accepted_finding_ids=[finding.finding_id for finding in optional_findings],
+                accepted_finding_ids=accepted_optional_ids,
+                deferred_finding_ids=deferred_optional_ids,
                 stop_reason="blocked_by_hard_gate",
             )
             feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
@@ -1550,9 +1897,12 @@ def _run_feature_review_and_repair_loop(
                 feature_review_recheck_path=feature_review_recheck_path,
                 feature_review_decision=feature_review_decision,
                 feature_review_recheck=feature_review_recheck,
+                feature_review_proposals=current_proposals(),
                 gating_decision=gating_decision,
             )
+        write_required_finding_classifications(attempt=loop_index + 1, write_stable_latest=True)
         decision = run_review(attempt=loop_index + 2)
+        previous_review_decisions.append(decision)
 
     gating_decision = Decision.NEEDS_REVISION
     feature_review_recheck = FeatureReviewRecheckRecord(
@@ -1569,6 +1919,7 @@ def _run_feature_review_and_repair_loop(
         feature_review_recheck_path=feature_review_recheck_path,
         feature_review_decision=feature_review_decision,
         feature_review_recheck=feature_review_recheck,
+        feature_review_proposals=current_proposals(),
         gating_decision=gating_decision,
     )
 
@@ -2201,6 +2552,7 @@ def _write_release_summary(
     release_soft_gate_decision_path: Path | None,
     feature_review_path: Path | None,
     feature_review_recheck_path: Path | None,
+    feature_review_proposals: list[FeatureReviewProposalRecord],
     finalization_gate: dict[str, object],
 ) -> Path:
     summary_dir = runs_dir / run_id
@@ -2220,6 +2572,7 @@ def _write_release_summary(
         "release_soft_gate_decision_path": str(release_soft_gate_decision_path) if release_soft_gate_decision_path else None,
         "feature_review_path": str(feature_review_path) if feature_review_path else None,
         "feature_review_recheck_path": str(feature_review_recheck_path) if feature_review_recheck_path else None,
+        "feature_review_proposals": [record.model_dump(mode="json") for record in feature_review_proposals],
         "finalization_gate": finalization_gate,
         "integration_branch": integration_branch,
         "integration_commit": integration_commit,

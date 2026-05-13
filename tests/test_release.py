@@ -35,6 +35,7 @@ from agentic_devloop.release import (
     run_release,
 )
 from agentic_devloop.supervisor_decisions import (
+    FeatureReviewFindingClassificationDecision,
     ReleaseSchedulingAction,
     SupervisorDecisionType,
     load_supervisor_decision_artifact,
@@ -1951,6 +1952,18 @@ def test_run_release_feature_review_repair_loop_records_artifacts(tmp_path: Path
     recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
     assert recheck["stop_reason"] == "resolved"
 
+    classification_path = supervisor_decision_artifact_path(
+        release_bundle_path=result.summary_path.parent,
+        decision_type=SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+        decision_id="v0.1.0__feature_review_finding__finding-1",
+    )
+    assert classification_path.exists()
+    loaded = load_supervisor_decision_artifact(classification_path)
+    assert isinstance(loaded, FeatureReviewFindingClassificationDecision)
+    assert loaded.finding_id == "finding-1"
+    assert loaded.classification.value == "blocker"
+    assert loaded.selected_action.value == "repair"
+
 
 def test_run_release_feature_review_uses_all_release_contracts_for_continuation_repairs(tmp_path: Path) -> None:
     repo = _repo_with_initial_commit(tmp_path / "repo")
@@ -2624,7 +2637,271 @@ def test_run_release_feature_review_optional_findings_are_accepted_not_resolved(
     assert result.decision == Decision.ACCEPTED
     assert recheck["resolved_finding_ids"] == []
     assert recheck["accepted_finding_ids"] == ["optional-1"]
+    assert recheck["deferred_finding_ids"] == []
     assert recheck["stop_reason"] == "accepted_with_rationale"
+
+    classification_path = supervisor_decision_artifact_path(
+        release_bundle_path=result.summary_path.parent,
+        decision_type=SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+        decision_id="v0.1.0__feature_review_finding__optional-1",
+    )
+    assert classification_path.exists()
+    loaded = load_supervisor_decision_artifact(classification_path)
+    assert isinstance(loaded, FeatureReviewFindingClassificationDecision)
+    assert loaded.finding_id == "optional-1"
+    assert loaded.classification.value == "soft_finding"
+    assert loaded.selected_action.value == "accept"
+    assert loaded.outcome.value == "continue"
+    assert "matched_previous_finding_id=none" in loaded.rationale
+
+
+def test_run_release_feature_review_persists_deferred_duplicate_classification_evidence(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            "model_roles": {
+                "worker": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+                "reviewer": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    decisions = [
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Required repair first.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "prior-a",
+                        "severity": "high",
+                        "summary": "Update docs wording for safety and consistency.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Update docs wording."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Approve with deferred duplicate follow-up.",
+                "recommendation": "approve_with_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "optional-dup",
+                        "severity": "low",
+                        "summary": "Update docs wording for safety and consistency.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": [],
+                        "optional_follow_ups": ["Consider a cleanup pass later."],
+                    }
+                ],
+            }
+        ),
+    ]
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    def fake_invoke_feature_reviewer(*_args, **_kwargs):
+        if not decisions:
+            raise AssertionError("unexpected reviewer invocation")
+        return FakeBackendResult(decisions.pop(0))
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
+    log_text = result.log_path.read_text(encoding="utf-8")
+
+    assert result.decision == Decision.ACCEPTED
+    assert recheck["accepted_finding_ids"] == []
+    assert recheck["deferred_finding_ids"] == ["optional-dup"]
+    assert "event=feature_review_non_blocking_finding_classified" in log_text
+    assert "matched_previous_finding_id=prior-a" in log_text
+
+    classification_path = supervisor_decision_artifact_path(
+        release_bundle_path=result.summary_path.parent,
+        decision_type=SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+        decision_id="v0.1.0__feature_review_finding__optional-dup",
+    )
+    assert classification_path.exists()
+    loaded = load_supervisor_decision_artifact(classification_path)
+    assert isinstance(loaded, FeatureReviewFindingClassificationDecision)
+    assert loaded.finding_id == "optional-dup"
+    assert loaded.classification.value == "duplicate"
+    assert loaded.selected_action.value == "defer"
+    assert loaded.outcome.value == "stop"
+    assert "matched_previous_finding_id=prior-a" in loaded.rationale
+    assert "adjacent_similarity=" in loaded.rationale
+
+
+def test_run_release_feature_review_records_scope_and_backlog_follow_up_proposals(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            "model_roles": {
+                "worker": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+                "reviewer": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    decisions = [
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Needs a repair.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "required-1",
+                        "severity": "high",
+                        "summary": "Fix required.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Update docs."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Repairs applied; new follow-ups are out of scope.",
+                "recommendation": "approve_with_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "followup-backlog",
+                        "severity": "low",
+                        "summary": "Consider tightening docs wording further.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": [],
+                        "optional_follow_ups": ["Track a later polish pass."],
+                    },
+                    {
+                        "finding_id": "followup-scope",
+                        "severity": "low",
+                        "summary": "Consider adding a README example.",
+                        "affected_files": ["README.md"],
+                        "required_repairs": [],
+                        "optional_follow_ups": ["Track adding a README example later."],
+                    },
+                ],
+            }
+        ),
+    ]
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    def fake_invoke_feature_reviewer(*_args, **_kwargs):
+        if not decisions:
+            raise AssertionError("unexpected reviewer invocation")
+        return FakeBackendResult(decisions.pop(0))
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
+    proposals = summary["feature_review_proposals"]
+    assert recheck["accepted_finding_ids"] == []
+    assert recheck["deferred_finding_ids"] == ["followup-backlog", "followup-scope"]
+    assert isinstance(proposals, list)
+    kinds = {item["finding_id"]: item["classification"] for item in proposals}
+    assert kinds["followup-backlog"] == "backlog_follow_up"
+    assert kinds["followup-scope"] == "scope_expansion"
+
+    for finding_id in ["followup-backlog", "followup-scope"]:
+        classification_path = supervisor_decision_artifact_path(
+            release_bundle_path=result.summary_path.parent,
+            decision_type=SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+            decision_id=f"v0.1.0__feature_review_finding__{finding_id}",
+        )
+        loaded = load_supervisor_decision_artifact(classification_path)
+        assert isinstance(loaded, FeatureReviewFindingClassificationDecision)
+        assert loaded.finding_id == finding_id
+        assert loaded.selected_action.value == "defer"
+        assert loaded.evidence_paths
 
 
 def test_run_release_feature_review_repair_recheck_allows_finalization_gate(tmp_path: Path) -> None:
@@ -3089,6 +3366,302 @@ def test_run_release_blocks_finalization_on_unresolved_required_feature_review_f
     assert summary["finalization_gate"]["unresolved_required_finding_ids"] == ["finding-required-1"]
     assert "- Gate reason: `unresolved_required_findings`" in review
     assert "- Unresolved required findings: `1`" in review
+
+
+def test_run_release_feature_review_required_findings_stop_at_convergence_limit(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {
+                "worker": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+                "reviewer": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    decisions = [
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Needs a repair.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "finding-repeat",
+                        "severity": "high",
+                        "summary": "Fix required.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Update docs."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Still needs the same repair.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "finding-repeat",
+                        "severity": "high",
+                        "summary": "Fix required.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Update docs again."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Still blocked after repairs.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "finding-repeat",
+                        "severity": "high",
+                        "summary": "Fix required.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Update docs yet again."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+    ]
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    def fake_invoke_feature_reviewer(*_args, **_kwargs):
+        if not decisions:
+            raise AssertionError("unexpected reviewer invocation")
+        return FakeBackendResult(decisions.pop(0))
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
+    log_text = result.log_path.read_text(encoding="utf-8")
+
+    assert recheck["stop_reason"] == "blocked_by_retry_budget"
+    assert recheck["unresolved_finding_ids"] == ["finding-repeat"]
+    assert "event=feature_review_convergence_limit_reached" in log_text
+
+    classification_path = supervisor_decision_artifact_path(
+        release_bundle_path=result.summary_path.parent,
+        decision_type=SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+        decision_id="v0.1.0__feature_review_finding__finding-repeat",
+    )
+    assert classification_path.exists()
+    loaded = load_supervisor_decision_artifact(classification_path)
+    assert isinstance(loaded, FeatureReviewFindingClassificationDecision)
+    assert loaded.finding_id == "finding-repeat"
+    assert loaded.classification.value == "blocker"
+
+
+def test_run_release_feature_review_accepts_verification_only_required_finding_after_retry_budget(
+    tmp_path: Path,
+) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {
+                "worker": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+                "reviewer": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    decisions = [
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Needs a verification-only repair.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "verification-only",
+                        "severity": "high",
+                        "summary": "Verify syntax and rerun pytest to confirm.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Rerun pytest if needed."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Still wants verification.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "verification-only",
+                        "severity": "high",
+                        "summary": "Verify syntax and rerun pytest to confirm.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Rerun pytest if needed."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Retry budget reached; accept based on verification rerun.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "verification-only",
+                        "severity": "high",
+                        "summary": "Verify syntax and rerun pytest to confirm.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Rerun pytest if needed."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+    ]
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    def fake_invoke_feature_reviewer(*_args, **_kwargs):
+        if not decisions:
+            raise AssertionError("unexpected reviewer invocation")
+        return FakeBackendResult(decisions.pop(0))
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
+    assert result.decision == Decision.ACCEPTED
+    assert recheck["stop_reason"] == "accepted_with_rationale"
+    assert recheck["accepted_finding_ids"] == ["verification-only"]
+
+    classification_path = supervisor_decision_artifact_path(
+        release_bundle_path=result.summary_path.parent,
+        decision_type=SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+        decision_id="v0.1.0__feature_review_finding__verification-only",
+    )
+    loaded = load_supervisor_decision_artifact(classification_path)
+    assert isinstance(loaded, FeatureReviewFindingClassificationDecision)
+    assert loaded.classification.value == "false_positive"
+    assert loaded.selected_action.value == "accept"
+    assert any("verification.log" in str(path) for path in loaded.evidence_paths)
 
 
 def test_release_finalization_gate_only_counts_required_findings() -> None:
