@@ -290,7 +290,7 @@ acceptance_criteria:
 
 Use objectives for planning. Use contracts for execution.
 
-The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the current governor service chooses one epic at a time, produces an objective, and feeds the existing objective/contract/release machinery. The runtime supervisor now records structured repair/resume evidence for recoverable release failures, and the broader multi-epic governor loop plus always-on state refresh remain planned beyond the current one-epic governor boundary.
+The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the current governor service chooses one epic at a time, produces an objective, and feeds the existing objective/contract/release machinery. The runtime supervisor now records structured repair/resume evidence for recoverable release failures. The broader multi-epic governor loop, live pre-epic repository state review, independent feature-review agent, reviewer-comment repair loop, and always-on state refresh remain planned beyond the current one-epic governor boundary.
 
 Use backlog planning first:
 
@@ -708,7 +708,7 @@ Key options:
 - `--mode strong-model --execute-planner`: have the configured planner agent choose and prioritize epics from the documentation, roadmap, and goal.
 - `--write-objective`: write the selected epic into `objectives/`.
 
-Use this command before `plan-release` or `run-objective` when the next development epic should be selected by the roadmap-governor agent instead of manually supplied. Deterministic mode is only a fallback and test scaffold. The current governor path can use run artifacts, validation findings, metrics, and tuning reports to inform the next one-epic cycle; fully automated repeated-cycle refresh is still planned.
+Use this command before `plan-release` or `run-objective` when the next development epic should be selected by the roadmap-governor agent instead of manually supplied. Deterministic mode is only a fallback and test scaffold. The current governor path can use bounded docs, roadmap, repo-state memory, run artifacts, validation findings, metrics, and tuning reports to inform the next one-epic cycle. It does not yet perform a full live repository review over source layout, branch state, unresolved findings, and compact release history before selection; that state-review pass is planned for the multi-epic governor.
 
 Key options:
 
@@ -830,6 +830,8 @@ Relationship to nearby commands:
 - `run-backlog` forwards the usual release execution and finalization flags, so `--commit-on-accept`, `--merge-on-accept`, `--push-on-accept`, and `--release-finalize` still control task commits and release finalization.
 
 `run-backlog` is intentionally one epic per invocation. A multi-epic governor command is planned but not yet the documented user workflow.
+
+Current review behavior is also narrower than the target workflow. `run-release` writes a deterministic `release_review.md`, but that file is an evidence summary, not an independent semantic PR-style review. The target workflow should add a reviewer agent that inspects the integrated feature branch diff and evidence, emits structured findings, and launches bounded repair agents before PR creation, merge-to-main, or policy-approved autonomous finalization.
 
 The planned multi-epic governor should expose one parent log stream:
 
@@ -1072,13 +1074,15 @@ Then decide whether to repair manually, narrow the contract, or rerun from a cle
 
 ## Current Limits
 
-`auto_develop` is useful for bounded autonomous development today. The active direction is a complete autonomous project governor with runtime supervision: it should choose epics from docs/roadmap/state, decompose them, run workers, verify, repair contract-contained failures, update memory, and continue until configured stopping criteria are reached.
+`auto_develop` is useful for bounded autonomous development today. The active direction is a complete autonomous project governor with runtime supervision: it should review current repository state, choose epics from docs/roadmap/state/artifacts, decompose them, run workers, verify, run independent feature review, repair reviewer findings and contract-contained failures, update memory, and continue until configured stopping criteria are reached.
 
 Current important limits:
 
 - The strongest workflow still depends on well-written objectives and contracts.
 - Fully dynamic model-driven orchestration is still evolving.
 - The broader multi-epic governor loop remains planned.
+- Full live state-review before backlog selection remains planned.
+- Independent reviewer-agent plus reviewer-comment repair loop remains planned.
 - Pull request creation is not yet automated by the CLI.
 - Remote execution adapters, such as cluster or SLURM execution, are still project-specific work.
 - Human review is still recommended before merging significant work into `main`.

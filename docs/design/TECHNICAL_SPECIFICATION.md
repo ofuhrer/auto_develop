@@ -626,6 +626,22 @@ For `environment_blocked`, the preferred repair is policy-driven command/runtime
 
 The output objective is intended to feed `run-objective`. This keeps the high-level roadmap-governor agent separate from contract generation and execution while preserving an auditable handoff through `backlog_planner_prompt.md`, planner stdout/stderr/metadata, and `backlog_plan.json`. The highest-level loop should later apply the governor's roadmap and repo-state updates after each epic so new validation findings, benchmark evidence, and implementation learnings feed the next planning cycle.
 
+Current limitation: the implemented backlog planner reads bounded documentation, roadmap, repo-state files, and the explicit goal. It does not yet perform a full live state-review pass over source layout, dirty state, open branches, recent release diffs, unresolved reviewer findings, compact release history, and artifact summaries before choosing the next epic. The target governor must make that state-review pass explicit and persist the resulting state snapshot so backlog prioritization is based on current evidence rather than a stale roadmap alone.
+
+### Feature Review and Repair Flow
+
+The existing `release_review.md` is a deterministic release evidence summary. The target autonomous workflow needs a separate semantic feature-review loop:
+
+1. After accepted task branches are integrated into `feature/<release>`, build a review packet containing objective, contracts, `base..feature` diff, changed-files list, release summary, verification logs, soft-gate artifacts, metrics, tuning reports, docs touched, and relevant architecture constraints.
+2. Invoke a reviewer agent that did not implement the worker tasks.
+3. Require structured review output with findings, severity, affected files, evidence references, required repairs, optional follow-ups, and final recommendation.
+4. Convert required findings into bounded repair contracts on the feature branch.
+5. Run repair agents, rerun verification, and rerun reviewer checks on unresolved findings.
+6. Stop only when required findings are resolved, explicitly accepted with rationale, retry budget is exhausted, hard gates fail, credentials/policy are missing, or configured policy requires human escalation.
+7. Persist `feature_review.json`, human-readable `feature_review.md`, repair contracts, repair evidence, and reviewer re-check results as release/governor child artifacts.
+
+This review loop is intentionally agentic. Deterministic code should assemble evidence, enforce hard invariants, validate review schemas, and rerun verification; it should not try to encode semantic architecture review as brittle heuristics.
+
 ### Domain Validation Evidence
 
 For benchmark and domain-validation tasks, deterministic review records:
@@ -683,6 +699,16 @@ class Reviewer:
 ```
 
 Review may be deterministic, model-based, strong-model-assisted, hybrid, or human-escalated. The default path should be autonomous deterministic/model review, with human review reserved for configured policy boundaries.
+
+The feature-review reviewer is a higher-level interface than task review. It reviews the integrated branch as a coherent change set:
+
+```python
+class FeatureReviewer:
+    def review(self, packet: FeatureReviewPacket) -> FeatureReviewDecision:
+        ...
+```
+
+`FeatureReviewPacket` should include the release objective, task contracts, integrated branch, base branch, diff, changed files, evidence links, verification results, soft-gate decisions, metrics, and architecture/context references. `FeatureReviewDecision` should include structured findings, required repairs, optional follow-ups, accepted risks, and a merge/PR/finalization recommendation.
 
 ## Security and Auth
 

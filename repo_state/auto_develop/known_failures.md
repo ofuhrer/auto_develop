@@ -20,10 +20,28 @@
   validated `BacklogPlan`.
 - `run-backlog` now chains selected-epic backlog planning into objective,
   contract, and release execution for one epic.
-- The next gap is runtime supervision: structured release observation,
-  autonomous repair action selection, bounded repair execution, and release
-  resume. The persistent multi-epic loop should build on that instead of
-  stopping whenever planner, environment, contract, or budget repair is needed.
+- Runtime supervision, planner-output normalization, and one-epic governor
+  logging are now partially implemented. The remaining governor gap is the
+  high-level loop around them: before selecting the next epic, the governor
+  should inspect live repository state, branch state, source layout, recent run
+  artifacts, release reviews, metrics, tuning reports, unresolved findings, and
+  tracked repo-state memory.
+- The current governor can select one epic, but it does not yet own a durable
+  state-review snapshot, update memory before prioritization, or loop over the
+  next N highest-reward epics.
+
+## Current Gap: independent feature review
+
+- `release_review.md` is currently a deterministic evidence summary. It is not
+  a full semantic PR-style review by an independent reviewer agent.
+- The target workflow needs a reviewer agent that inspects the integrated
+  feature branch (`base..feature/<release>`), contracts, evidence, verification
+  logs, soft-gate decisions, docs, metrics, and architecture constraints.
+- Reviewer findings should be structured and become bounded repair contracts for
+  repair agents. Verification and reviewer re-checks should repeat until
+  required findings are resolved, accepted with rationale, or stopped by retry
+  budget, hard gates, missing policy/credentials, or configured human
+  escalation.
 
 ## Closed-loop run learning: run-backlog autonomous loop
 

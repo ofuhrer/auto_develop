@@ -1,6 +1,6 @@
 # Architecture Summary
 
-`agentic-devloop` is an autonomous-first local Python CLI that orchestrates agentic software development in Git worktrees. The runtime-supervisor repair/resume seam is now implemented above the deterministic release kernel so recoverable release failures can be diagnosed, repaired, and resumed without human intervention. The broader N-epic governor loop remains planned until it is actually implemented.
+`agentic-devloop` is an autonomous-first local Python CLI that orchestrates agentic software development in Git worktrees. The runtime-supervisor repair/resume seam is now implemented above the deterministic release kernel so recoverable release failures can be diagnosed, repaired, and resumed without human intervention. Planner-output normalization and one-epic governor logging are implemented. The broader N-epic governor loop, live pre-epic repository state review, and independent feature-review/repair loop remain planned until they are actually implemented.
 
 Current flow:
 
@@ -16,6 +16,24 @@ Current flow:
 10. The supervisor applies bounded repair actions such as environment repair, planner-contract normalization, task splitting or scope narrowing, release resume, long-running worker inspection, model escalation, and repo-state update proposals.
 11. A reviewer/supervisor agent should decide soft findings such as modest budget overage, normal source-file overlap, retry strategy, environment repair, model escalation, and task splitting; deterministic code remains authoritative for hard invariants.
 12. The release path records structured stop evidence and the broader governor/backlog refresh loop remains planned until the N-epic flow is implemented.
+
+Target additions:
+
+1. Before selecting an epic, a state-review governor agent should inspect live repository state: branch status, dirty state, open feature/agent branches, source layout drift, changed docs, recent release artifacts, release reviews, metrics, tuning reports, unresolved findings, and tracked repo-state memory.
+2. After accepted worker tasks are integrated into `feature/<release>`, an independent reviewer agent should review the full feature diff and evidence as a PR-style change set.
+3. Reviewer findings should become bounded repair contracts executed by repair agents, followed by verification reruns and reviewer re-checks.
+4. The system should finalize only after required reviewer findings are resolved, explicitly accepted with rationale, or stopped by retry budget, hard gates, missing policy/credentials, or configured human escalation.
+
+Prioritized architectural gaps:
+
+1. State-review governor before backlog selection.
+2. Independent feature-review and review-repair loop.
+3. Persistent governor memory for repeated epic cycles.
+4. N-epic governor command once selection, review, and memory are reliable.
+5. Governor cockpit expansion for full multi-epic visibility.
+6. Shared verification runtime and bounded environment repair.
+7. Executor liveness supervision.
+8. Target artifact ownership and onboarding bootstrap.
 
 The orchestrator owns policy, state, budgets, verification, evidence, roadmap governance, and finalization. Worker agents own implementation inside narrow task contracts. Humans provide goals and hard safety boundaries rather than routine approvals.
 
@@ -44,6 +62,7 @@ Target flow:
 
 1. A freshly cloned `auto_develop` checkout and target repository are onboarded with one or two prompts plus repository policy/configuration.
 2. The operator requests a number of epics to implement.
-3. The governor loops over the next highest-value epics.
+3. The governor refreshes repository state before each selection, then loops over the next highest-value epics.
 4. The runtime supervisor repairs and retries contract-contained subsystem failures without routine human gates.
-5. The loop stops only for major problems: exhausted autonomous repair, missing credentials, unsafe policy expansion, destructive operations not delegated, hard budget or invariant limits, no actionable work, or completion of the requested epic count.
+5. An independent reviewer agent reviews each integrated feature branch, and repair agents address findings before PR, merge, or configured autonomous finalization.
+6. The loop stops only for major problems: exhausted autonomous repair, unresolved required review findings, missing credentials, unsafe policy expansion, destructive operations not delegated, hard budget or invariant limits, no actionable work, or completion of the requested epic count.

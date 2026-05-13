@@ -167,7 +167,7 @@ Remaining Phase 3 work is now small:
 
 Goal:
 
-Let the governor agent own the upstream development loop and let a runtime supervisor own recovery while the loop is running. The governor reads the roadmap, documentation, repository state, run artifacts, and repository goal; infers the next backlog epics; prioritizes them by expected reward; selects one or more epics; decomposes them into objectives, contracts, and worker tasks; runs the work; reviews the result; updates roadmap/backlog state; and repeats. The runtime supervisor observes release events and evidence, diagnoses recoverable failures, applies bounded repairs, and resumes execution without routine human intervention.
+Let the governor agent own the upstream development loop and let a runtime supervisor own recovery while the loop is running. The governor performs a state-review pass over roadmap, documentation, repository state, source/branch state, recent run artifacts, release reviews, metrics, tuning reports, and the repository goal; infers the next backlog epics; prioritizes them by expected reward; selects one or more epics; decomposes them into objectives, contracts, and worker tasks; runs the work; triggers an independent feature-review agent; routes reviewer findings to repair agents; updates roadmap/backlog state; and repeats. The runtime supervisor observes release events and evidence, diagnoses recoverable failures, applies bounded repairs, and resumes execution without routine human intervention.
 
 Target operator experience:
 
@@ -182,18 +182,21 @@ The system should not stop for routine worker or subsystem failures. A high-leve
 Required capabilities:
 
 1. Read roadmap, repo-state memory, recent run summaries, and tuning artifacts.
-2. Identify actionable epics and reject duplicate or already-completed work.
-3. Prioritize epics against an explicit repository goal.
-4. Write a selected epic as a bounded release objective.
-5. Generate contracts for that objective through `plan-release`.
-6. Run the resulting release through `run-objective` or `run-release`.
-7. Update repo-state memory and backlog state after each accepted or failed epic.
-8. Continue until the requested epic count, budget, explicit stopping criteria, or no actionable epics remain.
-9. For validation-heavy or simulation repositories, promote new findings from benchmarks, failed validations, generated artifacts, and changed assumptions into future roadmap/backlog decisions.
-10. Diagnose and repair failed subsystem steps before stopping, including planner schema mismatches, verification-environment drift, flaky tests, and small integration conflicts.
-11. Observe long-running workers through heartbeats, process liveness, raw audit streams, and worktree diff/file activity; classify active, quiet-alive, stalled, hung, or environment-blocked execution before deciding whether to wait, inspect, interrupt, retry, or escalate.
-12. Repair failed release plans by normalizing contracts, splitting genuinely over-budget tasks, accepting cohesive verified soft-over-budget work with evidence when appropriate, narrowing unsafe allowed-file overlap, and resuming from previously accepted work.
-13. Decide the execution DAG dynamically: run low-risk tasks in parallel, serialize or stack dependent work, allow normal source overlap when the expected reward exceeds merge risk, and create merge-repair tasks for manageable conflicts.
+2. Inspect live repository state before epic selection, including current branch, dirty state, open feature/agent branches, source layout drift, changed docs, recent release artifacts, and unresolved findings.
+3. Identify actionable epics and reject duplicate or already-completed work.
+4. Prioritize epics against an explicit repository goal.
+5. Write a selected epic as a bounded release objective.
+6. Generate contracts for that objective through `plan-release`.
+7. Run the resulting release through `run-objective` or `run-release`.
+8. Review the integrated feature branch with an independent reviewer agent that did not implement the work.
+9. Dispatch bounded repair agents for reviewer findings and rerun verification/review until accepted or stopped by policy.
+10. Update repo-state memory and backlog state after each accepted or failed epic.
+11. Continue until the requested epic count, budget, explicit stopping criteria, or no actionable epics remain.
+12. For validation-heavy or simulation repositories, promote new findings from benchmarks, failed validations, generated artifacts, and changed assumptions into future roadmap/backlog decisions.
+13. Diagnose and repair failed subsystem steps before stopping, including planner schema mismatches, verification-environment drift, flaky tests, and small integration conflicts.
+14. Observe long-running workers through heartbeats, process liveness, raw audit streams, and worktree diff/file activity; classify active, quiet-alive, stalled, hung, or environment-blocked execution before deciding whether to wait, inspect, interrupt, retry, or escalate.
+15. Repair failed release plans by normalizing contracts, splitting genuinely over-budget tasks, accepting cohesive verified soft-over-budget work with evidence when appropriate, narrowing unsafe allowed-file overlap, and resuming from previously accepted work.
+16. Decide the execution DAG dynamically: run low-risk tasks in parallel, serialize or stack dependent work, allow normal source overlap when the expected reward exceeds merge risk, and create merge-repair tasks for manageable conflicts.
 
 Current implementation status:
 
@@ -205,25 +208,36 @@ Current implementation status:
 - `agent-loop run-backlog` chains backlog planning, selected-epic objective creation or reuse, objective-to-contract planning, and release execution for one selected epic.
 - Release continuation now recognizes previously accepted and merged tasks for the same release from prior `release_summary.json` artifacts, enabling step-by-step reruns.
 - `run-backlog` records artifact paths for backlog plans, generated objectives, contract plans, release summaries, metrics, budgets, tuning reports, and an evidence manifest.
+- Planner-output normalization now repairs bounded wrapper/schema drift, missing evidence, stop-condition wording gaps, and worktree-local verification runtime assumptions before generated-contract admission stops when task meaning is unchanged.
+- `run-backlog` now writes governor-level log artifacts for a one-epic invocation, but the current parent log is not yet the complete N-epic cockpit.
 - The `governor-service-boundaries` dogfood run showed the exact missing layer: the deterministic kernel correctly caught environment drift, invalid generated contracts, unsafe overlap, long-running worker ambiguity, and over-budget documentation scope, but a human had to act as runtime supervisor to repair and resume.
 - The first full closed-loop run showed that the system can recover from subsystem failures, but recovery still required manual patches for planner schema mismatch, verification-environment drift, and one worker-generated dataclass ordering error.
 - The runtime-supervisor dogfood run showed that deterministic hard stops are sometimes too blunt: a verified cohesive diff only 19 lines over a 600-line budget should usually become a soft review finding, not automatic wasted work; strict exact-overlap rejection should become governor DAG judgment; worktree verification must use a configured shared runtime instead of assuming `.venv` exists in each worktree.
 - The controller/target split needs tightening. Self-development can track `repo_state`, objectives, and contracts in the `auto_develop` repo because it is also the target. External targets should keep durable state, objectives, and contracts in the target repo or a dedicated control repo. Raw `runs/` evidence is local/archival and must not be the only source of development memory, completed-epic history, or next-epic planning state.
 - The soft-gates dogfood run showed a planner-output normalization gap: the generated contracts were semantically usable but missed required `git diff`/changed-files evidence and used worktree-local `.venv` verification commands. Fully autonomous execution should repair those bounded defects, rerun deterministic contract admission, and continue without manual materialization.
 - The same run showed an observability gap for multi-epic operation: per-release `release.log` files are useful child artifacts, but operators need one top-level `governor.log` to watch backlog planning, objective/contract generation, contract normalization, release execution, repair, finalization, state refresh, and next-epic selection across the whole run.
+- The governor-log-and-contract-normalization run showed the next review gap: after worker integration, an independent semantic feature review should inspect the complete `main..feature` diff, docs, tests, evidence, and architecture constraints, then produce reviewer findings that repair agents address before merge or PR.
 
-Remaining Phase 4 work:
+Prioritized Phase 4 epics:
 
-1. Add autonomous planner-output normalization before contract admission stops: repair missing required evidence, worktree-local verification commands, and schema drift when task meaning is unchanged, then rerun deterministic admission.
-2. Add a top-level governor run/log stream (`governor.log`, `governor.raw.log`, `events.jsonl`) so one tail command monitors the full N-epic run and links child release logs.
-3. Add shared verification-runtime configuration so isolated worktrees can run tests through a known Python/toolchain without requiring a per-worktree `.venv`.
-4. Add environment repair for missing `.venv`, command-not-found, missing `PYTHONPATH`, and dependency-runtime drift when project policy declares a safe repair.
-5. Improve executor liveness detection with process, output, heartbeat, and file/diff activity signals before declaring a worker stuck.
-6. Add target-artifact ownership support: project-configured artifact directories, target-repo `.auto_develop/` layout, and compact release/epic outcome summaries in tracked repo-state so deleting the controller checkout does not lose target development memory or next-epic context.
-7. Extend the current one-epic governor boundary into a top-level `run-governor` or extended `run-backlog` loop that accepts an epic count and continues through the next N highest-priority epics.
-8. Make persistent backlog state authoritative for completed, skipped, blocked, active, and candidate epics across runs.
-9. Teach the governor to apply or commit policy-compliant roadmap/backlog/repo-state updates after each epic with outcome, metrics, lessons, and next recommendations.
-10. Add a bootstrap/onboarding command or checklist that turns a freshly cloned target repo plus one or two prompts into the required config, repo-state memory, objective/backlog directories, and initial doctor checks.
+1. `governor-state-review`: add a pre-epic repository state-review step that inspects source/branch state, docs, repo-state memory, recent runs, metrics, release reviews, unresolved findings, and artifact summaries before prioritizing the next epic. This is the highest-priority gap because every later N-epic loop depends on selecting work from current evidence rather than stale roadmap text.
+2. `agentic-feature-review-loop`: add an independent agentic feature-review loop over the integrated feature branch, with structured findings, bounded repair contracts, repair agents, verification reruns, and reviewer re-check before PR, merge, or autonomous finalization. This is the highest-risk missing safety layer for human-out-of-the-loop operation.
+3. `persistent-governor-memory`: make persistent backlog/repo-state authoritative for completed, skipped, blocked, active, candidate, and reviewed epics across runs. This should include compact release/epic outcome summaries, unresolved review findings, retry counts, and state-review snapshots.
+4. `multi-epic-run-governor`: extend the current one-epic governor boundary into a top-level `run-governor` or extended `run-backlog` loop that accepts an epic count and continues through the next N highest-priority epics. This should come after state review, feature review, and persistent memory exist, otherwise it will repeat stale or insufficiently reviewed work.
+5. `governor-cockpit-v2`: expand the governor run/log stream (`governor.log`, `governor.raw.log`, `events.jsonl`) so one tail command monitors the full N-epic run and links state-review snapshots, child release logs, feature reviews, repair loops, state updates, and next-epic selection.
+6. `shared-verification-runtime`: add shared verification-runtime configuration so isolated worktrees can run tests through a known Python/toolchain without requiring a per-worktree `.venv`.
+7. `environment-repair-actions`: add environment repair for missing `.venv`, command-not-found, missing `PYTHONPATH`, and dependency-runtime drift when project policy declares a safe repair.
+8. `executor-liveness-supervision`: improve executor liveness detection with process, output, heartbeat, and file/diff activity signals before declaring a worker stuck.
+9. `target-artifact-ownership`: add target-artifact ownership support with project-configured artifact directories, target-repo `.auto_develop/` layout, and compact release/epic outcome summaries in tracked repo-state so deleting the controller checkout does not lose target development memory or next-epic context.
+10. `governor-state-refresh`: teach the governor to apply or commit policy-compliant roadmap/backlog/repo-state updates after each epic with outcome, metrics, lessons, review findings, and next recommendations.
+11. `onboarding-bootstrap`: add a bootstrap/onboarding command or checklist that turns a freshly cloned target repo plus one or two prompts into the required config, repo-state memory, objective/backlog directories, and initial doctor checks.
+
+Important dependency order:
+
+1. Implement state review and feature review before N-epic looping.
+2. Implement persistent memory before relying on repeated autonomous cycles.
+3. Keep shared verification runtime and environment repair close behind, because repeated worktree test failures are a known source of unnecessary stops.
+4. Expand the cockpit log as soon as multiple child artifacts exist, otherwise operators cannot monitor long runs coherently.
 
 Architecture consolidation needed before this should grow much further:
 

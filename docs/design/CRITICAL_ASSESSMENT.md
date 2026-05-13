@@ -24,19 +24,20 @@ The main risk is unbounded autonomy, not autonomy itself. The system should be a
 - Subprocess isolation is not a real sandbox.
 - A generic adapter interface may become too abstract before two real target repositories exist.
 - The implementation currently concentrates too many responsibilities in a few large modules. `release.py` owns release coordination, scheduling, logging, summaries, metrics, cleanup, dependency analysis, and finalization. `orchestrator.py` owns task execution, model routing, verification, evidence, review, finalization, and conflict repair. This slows evolution toward a multi-epic governor.
-- The implementation now exposes a one-epic `GovernorLoop` boundary, a typed `StateStore` seam, and a `RepairPolicy` seam, but the broader multi-epic governor still has to prove those boundaries across repeated cycles.
+- The implementation now exposes a one-epic `GovernorLoop` boundary, a typed `StateStore` seam, a `RepairPolicy` seam, planner-output normalization, and one-epic governor logging, but the broader multi-epic governor still has to prove those boundaries across repeated cycles.
 - The soft-gate implementation now records accepted exceptions as evidence-backed artifacts, but the broader multi-epic governor automation that would consume them across repeated cycles remains planned.
 - The current state model is still intentionally narrow. The typed `StateStore` seam improves persistence discipline, but the longer-running backlog memory for active epics, completed epics, retry counts, blocked work, and governor decisions still needs the full multi-epic loop.
-- The system now has a repair decision seam, but not a runtime supervisor. The deterministic kernel correctly detects invalid generated contracts, unsafe overlap, over-budget tasks, verification-environment drift, stale editable installs, long-running workers, and needs-revision outcomes, but those events still require a high-level agent to diagnose, repair, and resume.
+- The system now has runtime-supervisor repair/resume seams, but it still lacks a pre-epic state-review governor and an independent feature-review loop. The deterministic kernel can execute and summarize releases, but it does not yet make backlog selection from a fresh source/branch/artifact state snapshot or review the integrated feature branch as a coherent PR-style change set.
 - The CLI is not a thin boundary. It wires backend construction and workflow-specific behavior that should move into application services as the command set grows.
 
 ## Architectural Refactoring Priorities
 
 High-priority seams:
 
-- Add a `RuntimeSupervisor` above the deterministic release kernel. It should observe structured events and evidence, diagnose failures, choose bounded repair actions, and resume execution without routine human intervention.
-- Extend the `GovernorLoop` from the current one-epic service boundary to a multi-epic "run the next N epics" loop with stopping criteria, retry policy, runtime supervision, and state refresh.
+- Add a state-review governor service before backlog selection. It should collect branch/source/doc/run/review/metric/tuning evidence, persist a state snapshot, and pass that snapshot into backlog planning.
+- Add an independent feature-review service after feature-branch integration. It should assemble a review packet, call a reviewer agent, validate structured findings, create bounded repair contracts, rerun verification, and re-check unresolved findings.
 - Extend the `StateStore` API over repo-state files, run summaries, active releases, completed/blocked epics, and known learnings into authoritative multi-epic state.
+- Extend the `GovernorLoop` from the current one-epic service boundary to a multi-epic "run the next N epics" loop with stopping criteria, retry policy, runtime supervision, feature review, and state refresh.
 - Extract release scheduling, cockpit reporting, finalization, and metrics from `release.py`.
 - Extract task execution, evidence, finalization, and repair from `orchestrator.py`.
 - Extend `RepairPolicy` so it can map failure categories to executable repair actions: schema normalization, contract splitting, scope narrowing, environment repair, long-running-worker inspection, stronger-model diagnosis, retry, or stop across repeated epic cycles.

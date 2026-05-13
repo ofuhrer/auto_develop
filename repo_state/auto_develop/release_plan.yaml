@@ -1,18 +1,21 @@
-release_id: runtime-supervisor-repair-loop
-active_objective: Add a runtime supervisor that observes release events and evidence, diagnoses recoverable failures, applies bounded repair actions, and resumes execution without routine human intervention.
+release_id: governor-state-review
+active_objective: "Add the first missing governor layer: a pre-epic repository state-review pass that captures source, branch, docs, artifact, metric, review, and repo-state evidence before backlog prioritization."
 current_tasks:
-  - runtime-supervisor-events
-  - runtime-supervisor-policy-actions
-  - runtime-supervisor-repair-executors
-  - runtime-supervisor-resume-loop
-  - runtime-supervisor-docs-state
+  - governor-state-review-snapshot
+  - state-review-context-collector
+  - backlog-planner-state-context
+  - state-review-artifacts
+  - docs-and-state-update
 next_steps:
-  - Keep the structured release event stream, retry budgets, repair evidence, and stop reasons aligned with the shipped runtime-supervisor behavior.
-  - Preserve the implemented repair/resume seam while the broader N-epic governor loop remains planned until it is actually implemented.
+  - Keep the implemented runtime-supervisor, planner-normalization, and one-epic governor logging behavior aligned with docs.
+  - Implement governor-state-review first because backlog selection should be based on current source/branch/artifact/review state, not stale roadmap text.
+  - Follow with agentic-feature-review-loop so integrated feature branches receive independent semantic review and repair before PR, merge, or autonomous finalization.
+  - Follow with persistent-governor-memory so completed, skipped, blocked, active, reviewed, and candidate epics are durable across repeated cycles.
+  - Preserve the implemented repair/resume seam while the broader N-epic governor loop remains planned until state review and feature review exist.
   - Identify procedural heuristics that can be retired once supervisor actions and the broader governor loop exist: deterministic backlog scoring, contract wording checks, log-pattern failure classification, budget-tuning prose, exact-overlap rejection, hard rejection for small budget overages, environment-command assumptions, and cockpit-summary filtering.
   - Keep deterministic gates authoritative for hard invariants; let the supervisor or reviewer agent decide soft findings such as modest budget overage, source-file overlap, model escalation, retry strategy, and environment repair with auditable rationale.
   - Add shared verification-runtime policy so isolated worktrees can run tests without requiring a per-worktree .venv.
   - Add executor liveness classification from process, output, heartbeat, and file/diff activity before declaring workers stuck.
   - Add bounded planner-output normalization before generated-contract admission stops for repairable issues such as missing required evidence or worktree-local verification commands.
-  - Add a top-level governor log stream so one file can be watched while backlog planning, contract generation, release execution, repair, state refresh, and next-epic selection proceed.
-  - Document the shipped runtime supervisor behavior while keeping the multi-epic governor loop planned.
+  - Expand the top-level governor log stream so one file can be watched while state review, backlog planning, contract generation, release execution, feature review, repair, state refresh, and next-epic selection proceed.
+  - Document shipped behavior while keeping unimplemented state-review, feature-review, and multi-epic loops explicitly planned.
