@@ -71,6 +71,7 @@ def plan_release_contracts(
     config_dir: Path = Path("configs"),
     planner_backend: PlannerBackend | None = None,
     now: datetime | None = None,
+    state_review_snapshot_path: Path | None = None,
 ) -> ContractPlanResult:
     objective = load_yaml_model(objective_path, ReleaseObjective)
     existing_contracts = _contracts_for_release(objective.release_id, contracts_dir)
@@ -126,6 +127,7 @@ def plan_release_contracts(
                 update={
                     "budget_ledger_path": budget_ledger_path,
                     "planner_prompt_path": planner_prompt_path,
+                    "state_review_snapshot_path": state_review_snapshot_path,
                     **backend_paths,
                 }
             )
@@ -170,6 +172,7 @@ def plan_release_contracts(
             warnings=warnings,
             budget_ledger_path=budget_ledger_path,
             planner_prompt_path=planner_prompt_path,
+            state_review_snapshot_path=state_review_snapshot_path,
         )
 
     if config is not None:

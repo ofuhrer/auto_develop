@@ -52,6 +52,34 @@ def test_plan_release_contracts_writes_conservative_draft_when_no_contracts_exis
     assert plan["warnings"]
 
 
+def test_plan_release_contracts_records_state_review_snapshot_path(tmp_path) -> None:
+    objective_path = tmp_path / "objective.yaml"
+    _write_yaml(
+        objective_path,
+        {
+            "release_id": "v0.2.0",
+            "title": "Small release",
+            "objective": "Ship one bounded increment.",
+            "acceptance_criteria": ["Contract evidence exists."],
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    state_review_snapshot_path = tmp_path / "planning_artifacts" / "state_review_snapshot.json"
+    state_review_snapshot_path.parent.mkdir(parents=True)
+    state_review_snapshot_path.write_text("{}", encoding="utf-8")
+
+    result = plan_release_contracts(
+        objective_path=objective_path,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        state_review_snapshot_path=state_review_snapshot_path,
+    )
+
+    plan = json.loads(result.plan_path.read_text(encoding="utf-8"))
+    assert plan["state_review_snapshot_path"] == str(state_review_snapshot_path)
+
+
 def test_plan_release_contracts_writes_validated_proposed_contracts(tmp_path) -> None:
     objective_path = tmp_path / "objective.yaml"
     _write_yaml(
@@ -189,6 +217,22 @@ def test_parse_planner_output_accepts_fenced_json() -> None:
     )
 
     assert plan.release_id == "v0.3.1"
+
+
+def test_parse_planner_output_accepts_state_review_snapshot_path() -> None:
+    plan = parse_planner_output(
+        {
+            "release_id": "v0.3.1",
+            "planner": "strong-model",
+            "generated_contracts": [],
+            "warnings": [],
+            "state_review_snapshot_path": "runs/demo/state_review_snapshot.json",
+        },
+        release_id="v0.3.1",
+        planner="strong-model",
+    )
+
+    assert plan.state_review_snapshot_path == Path("runs/demo/state_review_snapshot.json")
 
 
 def test_parse_planner_output_rejects_invalid_schema() -> None:

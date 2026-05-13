@@ -160,6 +160,7 @@ class BacklogPlan(StrictModel):
     planner_stdout_path: Path | None = None
     planner_stderr_path: Path | None = None
     planner_metadata_path: Path | None = None
+    state_review_snapshot_path: Path | None = None
 
 
 class BacklogEvidenceManifest(StrictModel):
@@ -170,6 +171,7 @@ class BacklogEvidenceManifest(StrictModel):
     release_metrics_path: Path | None = None
     release_budget_path: Path | None = None
     release_tuning_path: Path | None = None
+    state_review_snapshot_path: Path | None = None
 
 
 class StateReviewSnapshot(StrictModel):
@@ -525,6 +527,7 @@ class ContractPlan(StrictModel):
     planner_stdout_path: Path | None = None
     planner_stderr_path: Path | None = None
     planner_metadata_path: Path | None = None
+    state_review_snapshot_path: Path | None = None
 
 
 class ContractNormalizationDecision(StrEnum):
