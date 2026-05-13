@@ -1447,6 +1447,76 @@ def _run_feature_review_and_repair_loop(
                 )
             return written
 
+        def write_non_blocking_finding_classifications(*, attempt: int) -> dict[str, Path]:
+            written: dict[str, Path] = {}
+            non_blocking_items = [
+                item for item in convergence.findings if item.finding_id not in convergence.blocking_finding_ids
+            ]
+            if not non_blocking_items:
+                return written
+            for item in non_blocking_items:
+                if item.selected_action == "accept":
+                    outcome = FeatureReviewFindingOutcome.CONTINUE
+                else:
+                    outcome = FeatureReviewFindingOutcome.STOP
+                evidence_paths: list[str] = []
+                if feature_review_path is not None:
+                    evidence_paths.append(str(feature_review_path.resolve()))
+                match_hint = item.matched_previous_finding_id or "none"
+                rationale = (
+                    "Classified non-blocking finding with convergence context; "
+                    f"classification={item.classification} action={item.selected_action} "
+                    f"matched_previous_finding_id={match_hint} "
+                    f"repeated_by_finding_id={str(item.repeated_by_finding_id).lower()} "
+                    f"adjacent_similarity={item.adjacent_similarity:.3f}."
+                )
+                fallback_plan = (
+                    "Rerun reviewer re-check and deterministic finalization gate if the same finding escalates or "
+                    "new blocking evidence appears."
+                )
+                stable_decision_id = f"{release_id}__feature_review_finding__{item.finding_id}"
+                attempt_decision_id = f"{stable_decision_id}__attempt_{attempt}"
+                decision_record = FeatureReviewFindingClassificationDecision.model_validate(
+                    {
+                        "decision_id": attempt_decision_id,
+                        "release_id": release_id,
+                        "decided_at": datetime.now(UTC),
+                        "decided_by": "run_release_feature_review_loop",
+                        "rationale": rationale,
+                        "evidence_paths": evidence_paths,
+                        "finding_id": item.finding_id,
+                        "classification": item.classification,
+                        "selected_action": item.selected_action,
+                        "outcome": outcome.value,
+                        "fallback_plan": fallback_plan,
+                        "validators_to_rerun": ["feature_review_recheck", "finalization_gate"],
+                    }
+                )
+                attempt_path = write_supervisor_decision_artifact(
+                    release_bundle_path=release_root, decision=decision_record
+                )
+                written[item.finding_id] = attempt_path
+                stable_record = decision_record.model_copy(update={"decision_id": stable_decision_id})
+                write_supervisor_decision_artifact(release_bundle_path=release_root, decision=stable_record)
+                _report(
+                    progress,
+                    "event=feature_review_non_blocking_finding_classified attempt="
+                    + str(attempt)
+                    + " finding_id="
+                    + item.finding_id
+                    + " classification="
+                    + item.classification
+                    + " action="
+                    + item.selected_action
+                    + " matched_previous_finding_id="
+                    + match_hint
+                    + " adjacent_similarity="
+                    + f"{item.adjacent_similarity:.3f}",
+                )
+            return written
+
+        write_non_blocking_finding_classifications(attempt=loop_index + 1)
+
         if decision.recommendation == FeatureReviewRecommendation.ESCALATE:
             gating_decision = Decision.ESCALATED
             unresolved_finding_ids = [finding.finding_id for finding in decision.findings]
