@@ -1,0 +1,28 @@
+release_id: integration-review-evidence-handoff
+title: Package final integration review evidence and continuation decisions
+objective: Make final integration review an autonomous continuation state by running
+  full configured verification on the exact integrated feature branch, packaging full
+  diff and file context for the reviewer, attaching verification evidence, capturing
+  reviewer limitations as typed findings, and recording blocker versus accepted-risk
+  versus backlog-follow-up decisions.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- After release-local task and repair branches merge into the integration feature
+  branch, the governor runs configured final verification against that exact branch
+  and records logs, command results, branch name, and commit SHA as review evidence.
+- The final reviewer input includes a bounded but complete integration diff summary,
+  changed-file inventory, relevant file context, release objective, accepted repair
+  history, verification logs, and prior review/recheck artifacts.
+- Reviewer output limitations such as truncated context, missing evidence, or uncertainty
+  are normalized into typed findings without causing a schema-only hard stop when
+  a bounded repair or accepted-risk decision is valid.
+- 'A typed continuation decision is persisted for each final-review outcome: blocker
+  requiring bounded repair, accepted risk with rationale and validators rerun, backlog
+  follow-up, or hard stop.'
+- The release summary and governor artifacts link final verification, review input,
+  reviewer output, normalized findings, continuation decisions, and any generated
+  repair/backlog follow-up records.
+- Tests cover green final-review handoff, blocker-to-repair continuation, accepted-risk
+  continuation after verification passes, backlog-follow-up deferral, and hard stop
+  when required verification evidence is missing or policy would be broadened.
