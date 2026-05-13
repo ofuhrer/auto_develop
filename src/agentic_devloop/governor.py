@@ -165,7 +165,7 @@ class GovernorLoop:
 
         cycles: list[BacklogRunResult] = []
         seen_epic_ids: set[str] = set()
-        stop_reason: GovernorStopReason | str = GovernorStopReason.REQUESTED_EPIC_COUNT_REACHED
+        stop_reason: GovernorStopReason = GovernorStopReason.REQUESTED_EPIC_COUNT_REACHED
         for cycle_index in range(1, epic_count + 1):
             if progress is not None:
                 progress(f"event=governor_cycle_started cycle={cycle_index} epic_count={epic_count}")
@@ -197,7 +197,7 @@ class GovernorLoop:
             )
             cycles.append(result)
             if result.release is None and result.release_id == "no_actionable_work":
-                stop_reason = "no_actionable_work"
+                stop_reason = GovernorStopReason.NO_ACTIONABLE_WORK
                 break
 
             if result.selected_epic_id in seen_epic_ids:
@@ -217,7 +217,7 @@ class GovernorLoop:
                 stop_reason = GovernorStopReason.PLANNING_ONLY_STRATEGY
                 break
             if result.blocked_finalization is not None:
-                stop_reason = "blocked_finalization"
+                stop_reason = GovernorStopReason.BLOCKED_FINALIZATION
                 break
             if not _release_was_accepted(result.release):
                 if stop_on_failure:

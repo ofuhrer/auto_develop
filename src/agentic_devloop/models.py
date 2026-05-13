@@ -207,6 +207,8 @@ class GovernorStopReason(StrEnum):
     REPEATED_EPIC_SELECTED = "repeated_epic_selected"
     PLANNING_ONLY_STRATEGY = "planning_only_strategy"
     RELEASE_NOT_ACCEPTED = "release_not_accepted"
+    NO_ACTIONABLE_WORK = "no_actionable_work"
+    BLOCKED_FINALIZATION = "blocked_finalization"
 
 
 class StateReviewSnapshot(StrictModel):

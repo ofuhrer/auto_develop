@@ -723,7 +723,7 @@ def test_run_governor_outputs_blocked_finalization_state(monkeypatch, capsys, tm
         requested_epic_count=2,
         attempted_epic_count=1,
         accepted_epic_count=1,
-        stop_reason="blocked_finalization",
+        stop_reason=GovernorStopReason.BLOCKED_FINALIZATION,
         cycles=[cycle],
     )
 

@@ -1190,7 +1190,7 @@ def test_governor_loop_stops_on_blocked_finalization_before_next_cycle(tmp_path)
 
     assert run_objective_calls == 1
     assert result.attempted_epic_count == 1
-    assert result.stop_reason == "blocked_finalization"
+    assert result.stop_reason == GovernorStopReason.BLOCKED_FINALIZATION
     assert result.cycles[0].blocked_finalization is not None
     assert result.cycles[0].blocked_finalization["type"] == "finalization_gate_blocked"
 
@@ -1585,7 +1585,7 @@ def test_governor_loop_stops_with_no_actionable_work_for_completed_epic_before_o
     )
 
     assert run_objective_calls == 0
-    assert result.stop_reason == "no_actionable_work"
+    assert result.stop_reason == GovernorStopReason.NO_ACTIONABLE_WORK
     assert result.attempted_epic_count == 1
     assert result.accepted_epic_count == 0
     assert len(result.cycles) == 1

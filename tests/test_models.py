@@ -353,6 +353,8 @@ def test_governor_stop_reason_values_are_machine_readable() -> None:
     assert GovernorStopReason.REPEATED_EPIC_SELECTED == "repeated_epic_selected"
     assert GovernorStopReason.PLANNING_ONLY_STRATEGY == "planning_only_strategy"
     assert GovernorStopReason.RELEASE_NOT_ACCEPTED == "release_not_accepted"
+    assert GovernorStopReason.NO_ACTIONABLE_WORK == "no_actionable_work"
+    assert GovernorStopReason.BLOCKED_FINALIZATION == "blocked_finalization"
 
 
 def test_feature_review_finding_drops_empty_evidence_path_items() -> None:

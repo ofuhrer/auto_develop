@@ -70,7 +70,7 @@ class BacklogMultiRunResult:
     attempted_epic_count: int
     accepted_epic_count: int
     cycles: list[BacklogRunResult]
-    stop_reason: GovernorStopReason | str
+    stop_reason: GovernorStopReason
 
 
 @dataclass(frozen=True)
