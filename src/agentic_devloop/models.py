@@ -174,17 +174,41 @@ class BacklogPlan(StrictModel):
     planner_stderr_path: Path | None = None
     planner_metadata_path: Path | None = None
     state_review_snapshot_path: Path | None = None
+    state_refresh_summary_path: Path | None = None
 
 
 class BacklogEvidenceManifest(StrictModel):
     backlog_plan_path: Path | None = None
     generated_objective_path: Path | None = None
     contract_plan_path: Path | None = None
+    execution_strategy_selection_path: Path | None = None
+    supervisor_decision_path: Path | None = None
+    one_shot_execution_input_path: Path | None = None
     release_summary_path: Path | None = None
+    release_log_path: Path | None = None
+    release_review_path: Path | None = None
     release_metrics_path: Path | None = None
     release_budget_path: Path | None = None
     release_tuning_path: Path | None = None
+    release_soft_gate_decision_path: Path | None = None
+    feature_review_path: Path | None = None
+    feature_review_recheck_path: Path | None = None
+    feature_review_proposal_paths: list[Path] = Field(default_factory=list)
+    finalization_summary_path: Path | None = None
+    cleanup_report_path: Path | None = None
+    repo_state_proposal_plan_path: Path | None = None
+    roadmap_proposal_plan_path: Path | None = None
     state_review_snapshot_path: Path | None = None
+    state_refresh_summary_path: Path | None = None
+
+
+class GovernorStopReason(StrEnum):
+    REQUESTED_EPIC_COUNT_REACHED = "requested_epic_count_reached"
+    REPEATED_EPIC_SELECTED = "repeated_epic_selected"
+    PLANNING_ONLY_STRATEGY = "planning_only_strategy"
+    RELEASE_NOT_ACCEPTED = "release_not_accepted"
+    NO_ACTIONABLE_WORK = "no_actionable_work"
+    BLOCKED_FINALIZATION = "blocked_finalization"
 
 
 class StateReviewSnapshot(StrictModel):
@@ -198,6 +222,18 @@ class StateReviewSnapshot(StrictModel):
     worktrees: list[dict[str, str]] = Field(default_factory=list)
     repo_state_files: dict[str, str | None] = Field(default_factory=dict)
     recent_release_runs: list[str] = Field(default_factory=list)
+
+
+class StateRefreshSummary(StrictModel):
+    captured_at: datetime
+    state_review_snapshot_path: Path
+    branch: str = Field(min_length=1)
+    head_commit: str = Field(min_length=1)
+    status_count: int = Field(ge=0)
+    local_branch_count: int = Field(ge=0)
+    worktree_count: int = Field(ge=0)
+    repo_state_file_count: int = Field(ge=0)
+    recent_release_run_count: int = Field(ge=0)
 
 
 class ReleasePlan(StrictModel):
@@ -644,6 +680,83 @@ class FeatureReviewRecheckRecord(StrictModel):
         if any(not value.strip() for value in values):
             raise ValueError("feature review finding IDs must not be empty")
         return values
+
+
+class FeatureReviewFollowUpProposal(StrictModel):
+    finding_id: str = Field(min_length=1)
+    classification: str = Field(min_length=1)
+    selected_action: str = Field(min_length=1)
+    decision_artifact_path: str = Field(min_length=1)
+    matched_previous_finding_id: str | None = None
+    attempt: int = Field(ge=1)
+
+
+class GovernorContinuationAction(StrEnum):
+    CONTINUE = "continue"
+    STOP = "stop"
+
+
+class GovernorContinuationStopReason(StrEnum):
+    RELEASE_NOT_ACCEPTED = "release_not_accepted"
+    BLOCKED_FINALIZATION = "blocked_finalization"
+    UNRESOLVED_REQUIRED_REVIEW_FINDINGS = "unresolved_required_review_findings"
+    EXHAUSTED_REPAIR_BUDGET = "exhausted_repair_budget"
+    BLOCKED_BY_HARD_GATE = "blocked_by_hard_gate"
+
+
+class GovernorFeatureReviewContinuation(StrictModel):
+    feature_review_path: Path | None = None
+    feature_review_recheck_path: Path | None = None
+    finalization_gate: dict[str, object] | None = None
+    recheck_stop_reason: FeatureReviewRecheckStopReason | None = None
+    unresolved_finding_ids: list[str] = Field(default_factory=list)
+    accepted_finding_ids: list[str] = Field(default_factory=list)
+    deferred_finding_ids: list[str] = Field(default_factory=list)
+    accepted_risks: list[str] = Field(default_factory=list)
+    backlog_follow_up_proposals: list[FeatureReviewFollowUpProposal] = Field(default_factory=list)
+
+    @field_validator(
+        "unresolved_finding_ids",
+        "accepted_finding_ids",
+        "deferred_finding_ids",
+        "accepted_risks",
+        mode="before",
+    )
+    @classmethod
+    def normalize_items(cls, values: object) -> object:
+        return _normalize_non_empty_string_list(values, error_message="feature review continuation items must not be empty")
+
+    @field_validator("unresolved_finding_ids", "accepted_finding_ids", "deferred_finding_ids", "accepted_risks")
+    @classmethod
+    def items_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("feature review continuation items must not be empty")
+        return values
+
+    @model_validator(mode="after")
+    def accepted_with_rationale_requires_evidence(self) -> "GovernorFeatureReviewContinuation":
+        if self.recheck_stop_reason == FeatureReviewRecheckStopReason.ACCEPTED_WITH_RATIONALE:
+            if not self.accepted_finding_ids:
+                raise ValueError("accepted_with_rationale requires accepted_finding_ids")
+            if not self.accepted_risks:
+                raise ValueError("accepted_with_rationale requires accepted_risks")
+            if self.feature_review_path is None or self.feature_review_recheck_path is None:
+                raise ValueError("accepted_with_rationale requires serialized feature review and recheck paths")
+        return self
+
+
+class GovernorCycleContinuation(StrictModel):
+    action: GovernorContinuationAction
+    stop_reason: GovernorContinuationStopReason | None = None
+    feature_review: GovernorFeatureReviewContinuation | None = None
+
+    @model_validator(mode="after")
+    def validate_stop_reason(self) -> "GovernorCycleContinuation":
+        if self.action == GovernorContinuationAction.STOP and self.stop_reason is None:
+            raise ValueError("stop continuation requires stop_reason")
+        if self.action == GovernorContinuationAction.CONTINUE and self.stop_reason is not None:
+            raise ValueError("continue continuation must not include stop_reason")
+        return self
 
 
 class GeneratedContract(StrictModel):

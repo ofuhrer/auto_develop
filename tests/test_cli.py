@@ -7,7 +7,13 @@ import pytest
 
 from agentic_devloop import cli as cli_module
 from agentic_devloop.cli import main
-from agentic_devloop.models import ContractPlan, GeneratedContract, TaskContract
+from agentic_devloop.models import (
+    BacklogEvidenceManifest,
+    ContractPlan,
+    GeneratedContract,
+    GovernorStopReason,
+    TaskContract,
+)
 from agentic_devloop.planning import ContractPlanResult
 
 
@@ -546,6 +552,24 @@ def test_run_backlog_writes_governor_lifecycle_events_with_artifacts(monkeypatch
 def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, capsys, tmp_path) -> None:
     run_id = "20260513T000000Z_demo_governor"
     seen_kwargs: dict[str, object] = {}
+    for name in (
+        "summary.json",
+        "release.log",
+        "review.md",
+        "metrics.json",
+        "budget.json",
+        "tuning.md",
+        "backlog_plan.json",
+        "contract_plan.json",
+        "execution_strategy_selection.json",
+        "supervisor_decision.json",
+    ):
+        path = tmp_path / "runs" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+    objective_path = tmp_path / "objectives" / "demo-epic-1.yaml"
+    objective_path.parent.mkdir(parents=True, exist_ok=True)
+    objective_path.write_text("release_id: demo-epic-1\n", encoding="utf-8")
     release_result = SimpleNamespace(
         release_id="demo-epic-1",
         run_id="run-1",
@@ -561,16 +585,31 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
     cycle = SimpleNamespace(
         selected_epic_id="epic-1",
         plan_path=tmp_path / "runs" / "backlog_plan.json",
-        objective_path=tmp_path / "objectives" / "demo-epic-1.yaml",
+        objective_path=objective_path,
         contract_plan_path=tmp_path / "runs" / "contract_plan.json",
         release=release_result,
+        evidence_manifest=BacklogEvidenceManifest(
+            backlog_plan_path=tmp_path / "runs" / "backlog_plan.json",
+            generated_objective_path=tmp_path / "objectives" / "demo-epic-1.yaml",
+            contract_plan_path=tmp_path / "runs" / "contract_plan.json",
+            execution_strategy_selection_path=tmp_path / "runs" / "execution_strategy_selection.json",
+            supervisor_decision_path=tmp_path / "runs" / "supervisor_decision.json",
+            release_summary_path=tmp_path / "runs" / "summary.json",
+            release_log_path=tmp_path / "runs" / "release.log",
+            release_review_path=tmp_path / "runs" / "review.md",
+            release_metrics_path=tmp_path / "runs" / "metrics.json",
+            release_budget_path=tmp_path / "runs" / "budget.json",
+            release_tuning_path=tmp_path / "runs" / "tuning.md",
+            finalization_summary_path=tmp_path / "runs" / "summary.json",
+            repo_state_proposal_plan_path=tmp_path / "runs" / "backlog_plan.json",
+        ),
     )
     result = SimpleNamespace(
         project_id="demo",
         requested_epic_count=2,
         attempted_epic_count=1,
         accepted_epic_count=1,
-        stop_reason="release_not_accepted",
+        stop_reason=GovernorStopReason.RELEASE_NOT_ACCEPTED,
         cycles=[cycle],
     )
 
@@ -579,9 +618,22 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
         kwargs["progress"]("event=governor_cycle_started cycle=1 epic_count=2")
         return result
 
+    cleanup_report = SimpleNamespace(
+        project_id="demo",
+        release_id="demo-epic-1",
+        dry_run=True,
+        worktree_paths=[],
+        task_branches=[],
+        integration_branch=None,
+        removed_worktrees=[],
+        deleted_branches=[],
+        errors=[],
+    )
+
     monkeypatch.setattr(cli_module, "_make_governor_run_id", lambda **_kwargs: run_id)
     monkeypatch.setattr(cli_module, "run_governor", fake_run_governor)
     monkeypatch.setattr(cli_module, "_codex_backlog_planner_backend", lambda **kwargs: object())
+    monkeypatch.setattr(cli_module, "cleanup_release_artifacts", lambda **_kwargs: cleanup_report)
 
     exit_code = main(
         [
@@ -609,13 +661,115 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
     assert '"attempted_epic_count": 1' in captured.out
     assert '"accepted_epic_count": 1' in captured.out
     assert '"stop_reason": "release_not_accepted"' in captured.out
+    assert '"cleanup_result": {' in captured.out
+    assert '"evidence_manifest": {' in captured.out
+    assert '"dry_run": true' in captured.out
     events_text = (tmp_path / "runs" / run_id / "events.jsonl").read_text(encoding="utf-8")
     assert '"event_type": "governor_started"' in events_text
     assert '"event_type": "epic_selected"' in events_text
     assert "event=governor_cycle_started" in events_text
     assert '"event_type": "release_completed"' in events_text
     assert '"event_type": "finalization_completed"' in events_text
+    assert "cleanup_handoff" in events_text
+    assert str(cycle.evidence_manifest.contract_plan_path) in events_text
+    assert str(cycle.evidence_manifest.generated_objective_path) in events_text
+    assert str(cycle.evidence_manifest.release_summary_path) in events_text
+    assert str(cycle.evidence_manifest.release_review_path) in events_text
+    assert str(cycle.evidence_manifest.supervisor_decision_path) in events_text
+    assert str(cycle.evidence_manifest.finalization_summary_path) in events_text
+    assert str(cycle.evidence_manifest.repo_state_proposal_plan_path) in events_text
     assert '"event_type": "governor_completed"' in events_text
+
+
+def test_run_governor_outputs_blocked_finalization_state(monkeypatch, capsys, tmp_path) -> None:
+    run_id = "20260513T000000Z_demo_governor"
+    release_result = SimpleNamespace(
+        release_id="demo-epic-1",
+        run_id="run-1",
+        summary_path=tmp_path / "runs" / "summary.json",
+        log_path=tmp_path / "runs" / "release.log",
+        review_path=tmp_path / "runs" / "review.md",
+        metrics_path=tmp_path / "runs" / "metrics.json",
+        budget_path=tmp_path / "runs" / "budget.json",
+        tuning_path=tmp_path / "runs" / "tuning.md",
+        decision="accepted",
+        task_results=[],
+    )
+    cycle = SimpleNamespace(
+        selected_epic_id="epic-1",
+        plan_path=tmp_path / "runs" / "backlog_plan.json",
+        objective_path=tmp_path / "objectives" / "demo-epic-1.yaml",
+        contract_plan_path=tmp_path / "runs" / "contract_plan.json",
+        release=release_result,
+        finalization_policy="push-feature",
+        finalization_result={
+            "gate": {
+                "allowed": False,
+                "reason": "unresolved_required_findings",
+                "unresolved_required_finding_ids": ["finding-required-1"],
+                "decision": "accepted",
+            }
+        },
+        blocked_finalization={
+            "type": "finalization_gate_blocked",
+            "policy": "push-feature",
+            "reason": "unresolved_required_findings",
+            "decision": "accepted",
+            "unresolved_required_finding_ids": ["finding-required-1"],
+        },
+    )
+    result = SimpleNamespace(
+        project_id="demo",
+        requested_epic_count=2,
+        attempted_epic_count=1,
+        accepted_epic_count=1,
+        stop_reason=GovernorStopReason.BLOCKED_FINALIZATION,
+        cycles=[cycle],
+    )
+
+    monkeypatch.setattr(cli_module, "_make_governor_run_id", lambda **_kwargs: run_id)
+    monkeypatch.setattr(cli_module, "run_governor", lambda **kwargs: result)
+    monkeypatch.setattr(cli_module, "_codex_backlog_planner_backend", lambda **kwargs: object())
+    monkeypatch.setattr(
+        cli_module,
+        "cleanup_release_artifacts",
+        lambda **_kwargs: SimpleNamespace(
+            project_id="demo",
+            release_id="demo-epic-1",
+            dry_run=True,
+            worktree_paths=[],
+            task_branches=[],
+            integration_branch=None,
+            removed_worktrees=[],
+            deleted_branches=[],
+            errors=[],
+        ),
+    )
+
+    exit_code = main(
+        [
+            "run-governor",
+            "--project",
+            "demo",
+            "--goal",
+            "Run repeated epics",
+            "--epic-count",
+            "2",
+            "--execute-planner",
+            "--runs-dir",
+            str(tmp_path / "runs"),
+            "--release-finalize",
+            "push-feature",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert '"stop_reason": "blocked_finalization"' in captured.out
+    assert '"blocked_finalization": {' in captured.out
+    assert '"type": "finalization_gate_blocked"' in captured.out
+    assert '"finalization_policy": "push-feature"' in captured.out
 
 
 def test_run_backlog_requires_execute_planner(capsys) -> None:

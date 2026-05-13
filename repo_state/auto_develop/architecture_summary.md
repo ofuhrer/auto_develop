@@ -1,6 +1,6 @@
 # Architecture Summary
 
-`agentic-devloop` is an autonomous-first local Python CLI that orchestrates agentic software development in Git worktrees. The durable architectural direction is now a deterministic kernel plus a high-level governor/supervisor agent. The deterministic kernel owns Git/worktree mechanics, hard safety gates, verification, evidence, metrics, typed artifact persistence, and finalization policy. The governor/supervisor owns judgment-heavy choices: epic selection, one-shot versus decomposed execution, scheduling, planner/reviewer/supervisor output normalization, finding adjudication, repair/retry/split decisions, and roadmap memory updates. Runtime-supervisor repair/resume seams, planner-output normalization, one-epic governor logging, an initial repeated-cycle `run-governor --epic-count N` shell, deterministic state-review snapshot capture, persistent governor memory seams, typed supervisor decision records, supervisor-owned release scheduling, supervisor-owned execution-strategy selection, one-shot execution input materialization, and the release-local feature-review/repair loop are implemented. The model-output-normalization release is now shipped with typed normalization artifacts, validator-rerun metadata, and refusal boundaries that stop scope-broadening repairs; the release-local convergence policy is documented for blocker continuation, evidence-backed soft-finding acceptance, and proposal-style scope follow-ups, while full agent-driven pre-epic state-review decisioning, autonomous final-review repair continuation, and policy-driven branch cleanup/finalization remain planned.
+`agentic-devloop` is an autonomous-first local Python CLI that orchestrates agentic software development in Git worktrees. The durable architectural direction is now a deterministic kernel plus a high-level governor/supervisor agent. The deterministic kernel owns Git/worktree mechanics, hard safety gates, verification, evidence, metrics, typed artifact persistence, and finalization policy. The governor/supervisor owns judgment-heavy choices: epic selection, one-shot versus decomposed execution, scheduling, planner/reviewer/supervisor output normalization, finding adjudication, repair/retry/split decisions, and roadmap memory updates. Runtime-supervisor repair/resume seams, planner-output normalization, one-epic governor logging, an initial repeated-cycle `run-governor --epic-count N` shell, deterministic state-review snapshot capture, persistent governor memory seams, typed supervisor decision records, supervisor-owned release scheduling, supervisor-owned execution-strategy selection, one-shot execution input materialization, and the release-local feature-review/repair loop are implemented. The `multi-epic-run-governor-hardening` cycle added per-cycle state-refresh summaries, typed governor stop reasons, no-actionable-work detection, finalization/cleanup handoff metadata, feature-review continuation metadata, parent artifact manifests, and state-refresh failure evidence. The remaining product gap is no longer basic repeated-cycle execution; it is final integration-review evidence handoff, autonomous finalization/cleanup, more general supervisor-owned output normalization, and full agent-driven pre-epic state-review decisioning.
 
 Current flow:
 
@@ -31,14 +31,14 @@ Target additions:
 
 Prioritized architectural gaps:
 
-1. Hardening the initial N-epic governor command with richer state refresh, final-review continuation, finalization cleanup, and precise stop taxonomy.
-2. One-shot worker execution from `one_shot_execution_input.json`.
-3. Typed blocked-decision persistence for `stop` execution-strategy outcomes.
-4. Full state-review governor decisioning before backlog selection.
-5. Governor cockpit expansion for full multi-epic visibility.
-6. Shared verification runtime and bounded environment repair.
-7. Executor liveness supervision.
-8. Target artifact ownership and onboarding bootstrap.
+1. Integration-review evidence handoff: final verification on the feature branch, complete diff/context packaging, reviewer limitation capture, and typed continuation decisions for blocker versus accepted risk versus backlog follow-up.
+2. Autonomous finalization and cleanup after accepted integration review: merge or PR, push, branch/worktree cleanup, and durable state-memory update.
+3. General supervisor-owned output normalization for planner/reviewer/supervisor schema drift before strict typed admission.
+4. One-shot worker execution from `one_shot_execution_input.json`.
+5. Typed blocked-decision persistence for `stop` execution-strategy outcomes.
+6. Full state-review governor decisioning before backlog selection.
+7. Governor cockpit expansion for full multi-epic visibility.
+8. Shared verification runtime, bounded environment repair, executor liveness supervision, target artifact ownership, and onboarding bootstrap.
 
 The orchestrator owns policy, state, budgets, verification, evidence, roadmap governance, and finalization. Worker agents own implementation inside narrow task contracts. Humans provide goals and hard safety boundaries rather than routine approvals.
 

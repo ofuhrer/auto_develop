@@ -212,3 +212,32 @@
 - This is not cosmetic refactoring. Without these seams, the high-level
   autonomous loop will continue to accumulate special cases in modules that
   already mix policy, IO, subprocesses, Git state, logs, and artifacts.
+
+## Dogfood learning: multi-epic governor hardening cycle
+
+- The `multi-epic-run-governor-hardening` cycle demonstrated a meaningful
+  closed loop: `auto_develop` selected/planned the epic, executed seven
+  contracts, ran a release-local semantic review, generated bounded repair
+  contracts, accepted two repair waves, and left a coherent feature branch.
+- The cycle also showed that "all tasks accepted" is not enough. Final
+  integration review still escalated because the reviewer lacked full diff
+  context and durable integration-branch verification evidence. A fully
+  autonomous governor needs a dedicated integration-review evidence handoff
+  that packages complete branch context, reruns final verification on the
+  feature branch, records reviewer limitations, and classifies remaining
+  findings as blockers, accepted risks, or backlog follow-ups.
+- Planner-output normalization remains too reactive. This cycle required
+  repair for implementation-requirement fields, wrapper-level dependencies,
+  JSON tail drift, and descriptive task-type aliases. These are bounded,
+  meaning-preserving repairs and should move behind a typed supervisor
+  normalization action rather than growing parser-specific special cases.
+- Repair waves are useful but need convergence economics. The first two waves
+  fixed real blocker findings; the third review escalated on evidence/context
+  limitations. The governor should limit repeated review churn by requiring
+  each wave to classify new findings as true blockers, duplicates, accepted
+  risks, scope expansions, or backlog follow-ups.
+- State-refresh collection is now part of governor execution and therefore
+  must be treated as a failure surface. Failures should write explicit
+  evidence artifacts with phase, paths, error type, message, and partial
+  artifacts before stopping; silent continuation or partial state is not
+  acceptable for unattended multi-epic operation.

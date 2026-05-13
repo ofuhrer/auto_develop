@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -11,11 +12,26 @@ from agentic_devloop.models import (
     BacklogEpic,
     BacklogEvidenceManifest,
     BacklogPlan,
+    FeatureReviewDecision,
+    FeatureReviewRecheckRecord,
+    FeatureReviewRecheckStopReason,
+    FeatureReviewFollowUpProposal,
+    GovernorContinuationAction,
+    GovernorContinuationStopReason,
+    GovernorCycleContinuation,
+    GovernorFeatureReviewContinuation,
+    GovernorStopReason,
     ReleaseObjective,
 )
 from agentic_devloop.orchestrator import ExecutorProtocol
 from agentic_devloop.planning import PlannerBackend
 from agentic_devloop.planner_backend import CodexPlannerBackend
+from agentic_devloop.state_review import (
+    build_state_refresh_summary,
+    collect_state_review_snapshot,
+    write_state_refresh_summary_artifact,
+    write_state_review_snapshot_artifact,
+)
 from agentic_devloop.state_store import StateStore
 from agentic_devloop.yaml_io import load_yaml_model, write_yaml_model
 
@@ -33,6 +49,9 @@ class PlanBacklogFn(Protocol):
         mode: str,
         planner_backend: object | None,
         now: datetime | None,
+        state_review_snapshot_path: Path | None,
+        state_refresh_summary_path: Path | None,
+        state_refresh_summary: dict[str, object] | None,
     ) -> BacklogPlanResult: ...
 
 
@@ -146,7 +165,7 @@ class GovernorLoop:
 
         cycles: list[BacklogRunResult] = []
         seen_epic_ids: set[str] = set()
-        stop_reason = "requested_epic_count_reached"
+        stop_reason: GovernorStopReason = GovernorStopReason.REQUESTED_EPIC_COUNT_REACHED
         for cycle_index in range(1, epic_count + 1):
             if progress is not None:
                 progress(f"event=governor_cycle_started cycle={cycle_index} epic_count={epic_count}")
@@ -177,9 +196,12 @@ class GovernorLoop:
                 now=now,
             )
             cycles.append(result)
+            if result.release is None and result.release_id == "no_actionable_work":
+                stop_reason = GovernorStopReason.NO_ACTIONABLE_WORK
+                break
 
             if result.selected_epic_id in seen_epic_ids:
-                stop_reason = "repeated_epic_selected"
+                stop_reason = GovernorStopReason.REPEATED_EPIC_SELECTED
                 if self._state_store is not None:
                     self._state_store.mark_skipped_epic(
                         result.selected_epic_id,
@@ -192,11 +214,18 @@ class GovernorLoop:
             seen_epic_ids.add(result.selected_epic_id)
 
             if result.release is None:
-                stop_reason = "planning_only_strategy"
+                stop_reason = GovernorStopReason.PLANNING_ONLY_STRATEGY
+                break
+            if result.blocked_finalization is not None:
+                if result.governor_cycle_continuation is None:
+                    raise ValueError(
+                        "blocked finalization cycle missing governor_cycle_continuation"
+                    )
+                stop_reason = GovernorStopReason.BLOCKED_FINALIZATION
                 break
             if not _release_was_accepted(result.release):
                 if stop_on_failure:
-                    stop_reason = "release_not_accepted"
+                    stop_reason = GovernorStopReason.RELEASE_NOT_ACCEPTED
                     break
             if self._state_store is not None and result.release_summary_path is not None:
                 self._state_store.record_recent_run_summary(
@@ -248,6 +277,26 @@ class GovernorLoop:
         progress: Callable[[str], None] | None,
         now: datetime | None,
     ) -> BacklogRunResult:
+        state_review_snapshot_path: Path | None = None
+        state_refresh_summary_path: Path | None = None
+        state_refresh_summary_payload: dict[str, object] | None = None
+        config = load_project_config(project_id, config_dir, validate_repo=True)
+        state_refresh_artifacts_dir = _state_refresh_artifacts_dir(
+            runs_dir=runs_dir,
+            now=now,
+        )
+        (
+            state_review_snapshot_path,
+            state_refresh_summary_path,
+            state_refresh_summary_payload,
+        ) = _collect_governor_state_refresh(
+            repo_path=config.repo_path,
+            repo_state_path=config.repo_state_path,
+            runs_dir=runs_dir,
+            artifacts_dir=state_refresh_artifacts_dir,
+            now=now,
+        )
+
         plan_result = self._plan_backlog(
             project_id=project_id,
             goal=goal,
@@ -258,10 +307,51 @@ class GovernorLoop:
             write_objective=False,
             mode=mode,
             planner_backend=planner_backend,
+            state_review_snapshot_path=state_review_snapshot_path,
+            state_refresh_summary_path=state_refresh_summary_path,
+            state_refresh_summary=state_refresh_summary_payload,
             now=now,
         )
-        plan = plan_result.plan
-        epic = select_epic(plan, selected_epic_id=selected_epic_id)
+        plan = plan_result.plan.model_copy(
+            update={
+                "state_review_snapshot_path": plan_result.plan.state_review_snapshot_path or state_review_snapshot_path,
+                "state_refresh_summary_path": plan_result.plan.state_refresh_summary_path or state_refresh_summary_path,
+            }
+        )
+        explicit_epic_id = selected_epic_id
+        epic_id = explicit_epic_id or plan.selected_epic_id
+        if epic_id is None:
+            return self._no_actionable_result(
+                plan=plan,
+                plan_path=plan_result.plan_path,
+                state_refresh_summary_path=state_refresh_summary_path,
+                state_review_snapshot_path=state_review_snapshot_path,
+                reason="no-actionable-work:backlog plan did not select an epic",
+            )
+        epic = next((item for item in plan.epics if item.epic_id == epic_id), None)
+        if epic is None:
+            if explicit_epic_id is not None:
+                raise ValueError(f"selected_epic_id not found in backlog plan: {epic_id}")
+            return self._no_actionable_result(
+                plan=plan,
+                plan_path=plan_result.plan_path,
+                state_refresh_summary_path=state_refresh_summary_path,
+                state_review_snapshot_path=state_review_snapshot_path,
+                reason=f"no-actionable-work:planner selected missing epic {epic_id}",
+            )
+        no_actionable_reason = self._no_actionable_reason_for_selected_epic(
+            epic_id=epic.epic_id,
+            selected_epic_id=selected_epic_id,
+        )
+        if no_actionable_reason is not None:
+            return self._no_actionable_result(
+                plan=plan,
+                plan_path=plan_result.plan_path,
+                state_refresh_summary_path=state_refresh_summary_path,
+                state_review_snapshot_path=state_review_snapshot_path,
+                reason=no_actionable_reason,
+                epic=epic,
+            )
         if self._state_store is not None:
             self._state_store.mark_active_epic(epic.epic_id)
         objective, objective_path, created_objective = ensure_objective_for_epic(
@@ -323,11 +413,46 @@ class GovernorLoop:
             backlog_plan_path=plan_result.plan_path,
             generated_objective_path=objective_path if created_objective else None,
             contract_plan_path=objective_run.planning.plan_path,
+            execution_strategy_selection_path=getattr(
+                objective_run.planning, "execution_strategy_selection_path", None
+            ),
+            supervisor_decision_path=getattr(objective_run.planning, "supervisor_decision_path", None),
+            one_shot_execution_input_path=getattr(
+                objective_run.planning, "one_shot_execution_input_path", None
+            ),
             release_summary_path=release.summary_path if release is not None else None,
+            release_log_path=getattr(release, "log_path", None) if release is not None else None,
+            release_review_path=getattr(release, "review_path", None) if release is not None else None,
             release_metrics_path=release.metrics_path if release is not None else None,
             release_budget_path=release.budget_path if release is not None else None,
             release_tuning_path=release.tuning_path if release is not None else None,
+            release_soft_gate_decision_path=(
+                _release_summary_artifact_paths(release).get("release_soft_gate_decision_path")
+                if release is not None
+                else None
+            ),
+            feature_review_path=(
+                _release_summary_artifact_paths(release).get("feature_review_path")
+                if release is not None
+                else None
+            ),
+            feature_review_recheck_path=(
+                _release_summary_artifact_paths(release).get("feature_review_recheck_path")
+                if release is not None
+                else None
+            ),
+            feature_review_proposal_paths=(
+                _release_summary_feature_review_proposal_paths(release) if release is not None else []
+            ),
+            finalization_summary_path=release.summary_path if release is not None else None,
+            repo_state_proposal_plan_path=plan_result.plan_path if plan.repo_state_updates else None,
+            roadmap_proposal_plan_path=plan_result.plan_path if plan.roadmap_updates else None,
             state_review_snapshot_path=plan.state_review_snapshot_path,
+            state_refresh_summary_path=plan.state_refresh_summary_path,
+        )
+        blocked_finalization = _blocked_finalization_result(
+            release=release,
+            finalization_policy=release_finalize,
         )
 
         return BacklogRunResult(
@@ -352,8 +477,155 @@ class GovernorLoop:
             release_metrics_path=release.metrics_path if release is not None else None,
             release_budget_path=release.budget_path if release is not None else None,
             release_tuning_path=release.tuning_path if release is not None else None,
+            finalization_policy=release_finalize if release is not None else None,
+            finalization_result=_release_finalization_result(release),
+            blocked_finalization=blocked_finalization,
+            governor_cycle_continuation=_governor_cycle_continuation(
+                release=release,
+                blocked_finalization=blocked_finalization,
+            ),
             evidence_manifest=evidence_manifest,
+            state_refresh_summary_path=plan.state_refresh_summary_path,
         )
+
+    def _no_actionable_reason_for_selected_epic(
+        self,
+        *,
+        epic_id: str,
+        selected_epic_id: str | None,
+    ) -> str | None:
+        if selected_epic_id is not None:
+            return None
+        state = self._state_store.load() if self._state_store is not None else None
+        if state is None:
+            return None
+        if any(record.epic_id == epic_id for record in state.skipped_epics):
+            return f"no-actionable-work:epic {epic_id} already skipped"
+        if epic_id in state.completed_epics:
+            return f"no-actionable-work:epic {epic_id} already completed"
+        if epic_id in state.blocked_epics:
+            return f"no-actionable-work:epic {epic_id} currently blocked"
+        if any(record.epic_id == epic_id for record in state.reviewed_epics):
+            return f"no-actionable-work:epic {epic_id} already reviewed in prior cycles"
+        if any(record.epic_id == epic_id for record in state.active_epics):
+            return f"no-actionable-work:epic {epic_id} already attempted in active memory"
+        return None
+
+    def _no_actionable_result(
+        self,
+        *,
+        plan: BacklogPlan,
+        plan_path: Path,
+        state_refresh_summary_path: Path | None,
+        state_review_snapshot_path: Path | None,
+        reason: str,
+        epic: BacklogEpic | None = None,
+    ) -> BacklogRunResult:
+        selected_epic_id = epic.epic_id if epic is not None else (plan.selected_epic_id or "no-actionable-work")
+        if self._state_store is not None and epic is not None:
+            self._state_store.mark_skipped_epic(
+                epic.epic_id,
+                status_reason=(
+                    f"{reason}; backlog_plan_path={plan_path}; "
+                    f"state_refresh_summary_path={state_refresh_summary_path}; "
+                    f"state_review_snapshot_path={state_review_snapshot_path}"
+                ),
+            )
+        placeholder_objective = ReleaseObjective(
+            release_id="no_actionable_work",
+            title="No actionable work",
+            objective="Governor stopped before objective handoff because no actionable epic was available.",
+            non_goals=[],
+            acceptance_criteria=["No release objective is handed off when no actionable epic is available."],
+        )
+        evidence_manifest = BacklogEvidenceManifest(
+            backlog_plan_path=plan_path,
+            state_review_snapshot_path=plan.state_review_snapshot_path,
+            state_refresh_summary_path=plan.state_refresh_summary_path,
+        )
+        return BacklogRunResult(
+            selected_epic_id=selected_epic_id,
+            plan_path=plan_path,
+            backlog_plan_path=plan_path,
+            plan=plan,
+            objective_path=Path("no_actionable_work.yaml"),
+            objective=placeholder_objective,
+            release_id="no_actionable_work",
+            release=None,
+            governor_cycle_continuation=GovernorCycleContinuation(action=GovernorContinuationAction.CONTINUE),
+            evidence_manifest=evidence_manifest,
+            state_refresh_summary_path=plan.state_refresh_summary_path,
+        )
+
+
+def _state_refresh_artifacts_dir(*, runs_dir: Path, now: datetime | None) -> Path:
+    timestamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%SZ")
+    return runs_dir / f"{timestamp}_governor_state_refresh"
+
+
+def _collect_governor_state_refresh(
+    *,
+    repo_path: Path,
+    repo_state_path: Path | None,
+    runs_dir: Path,
+    artifacts_dir: Path,
+    now: datetime | None,
+) -> tuple[Path, Path, dict[str, object]]:
+    phase = "collect_state_review_snapshot"
+    written_paths: list[Path] = []
+    try:
+        snapshot = collect_state_review_snapshot(
+            repo_path=repo_path,
+            repo_state_path=repo_state_path,
+            runs_dir=runs_dir,
+            now=now,
+        )
+        phase = "write_state_review_snapshot"
+        state_review_snapshot_path = write_state_review_snapshot_artifact(
+            snapshot=snapshot,
+            artifacts_dir=artifacts_dir,
+        )
+        written_paths.append(state_review_snapshot_path)
+        phase = "build_state_refresh_summary"
+        state_refresh_summary = build_state_refresh_summary(
+            snapshot=snapshot,
+            state_review_snapshot_path=state_review_snapshot_path,
+        )
+        phase = "write_state_refresh_summary"
+        state_refresh_summary_path = write_state_refresh_summary_artifact(
+            summary=state_refresh_summary,
+            artifacts_dir=artifacts_dir,
+        )
+        written_paths.append(state_refresh_summary_path)
+        return (
+            state_review_snapshot_path,
+            state_refresh_summary_path,
+            state_refresh_summary.model_dump(mode="json"),
+        )
+    except Exception as error:
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        error_path = artifacts_dir / "state_refresh_error.json"
+        error_path.write_text(
+            json.dumps(
+                {
+                    "phase": phase,
+                    "repo_path": str(repo_path),
+                    "repo_state_path": str(repo_state_path) if repo_state_path is not None else None,
+                    "runs_dir": str(runs_dir),
+                    "error_type": type(error).__name__,
+                    "error": str(error),
+                    "partial_artifact_paths": [str(path) for path in written_paths if path.exists()],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        raise RuntimeError(
+            "governor state refresh failed before epic selection; "
+            f"phase={phase}; error_artifact={error_path}"
+        ) from error
 
 
 def _build_execution_strategy_inputs(
@@ -409,3 +681,278 @@ def _release_decision_value(release: object) -> str | None:
 
 def _release_was_accepted(release: object) -> bool:
     return _release_decision_value(release) == "accepted"
+
+
+def _release_finalization_result(release: object | None) -> dict[str, object] | None:
+    if release is None:
+        return None
+    gate = getattr(release, "finalization_gate", None)
+    finalize = getattr(release, "finalization", None)
+    result: dict[str, object] = {}
+    if gate is not None:
+        result["gate"] = gate
+    if finalize is not None:
+        result["result"] = {
+            "merged": bool(getattr(finalize, "merged", False)),
+            "pushed": bool(getattr(finalize, "pushed", False)),
+            "failed_step": getattr(finalize, "failed_step", None),
+            "error": getattr(finalize, "error", None),
+        }
+    return result or None
+
+
+def _release_summary_artifact_paths(release: object) -> dict[str, Path]:
+    summary_path = getattr(release, "summary_path", None)
+    if summary_path is None:
+        return {}
+    path = Path(summary_path)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    paths: dict[str, Path] = {}
+    for key in (
+        "release_soft_gate_decision_path",
+        "feature_review_path",
+        "feature_review_recheck_path",
+    ):
+        raw_value = payload.get(key)
+        if isinstance(raw_value, str) and raw_value.strip():
+            paths[key] = Path(raw_value)
+    return paths
+
+
+def _release_summary_feature_review_proposal_paths(release: object) -> list[Path]:
+    summary_path = getattr(release, "summary_path", None)
+    if summary_path is None:
+        return []
+    path = Path(summary_path)
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    proposal_payload = payload.get("feature_review_proposals")
+    if not isinstance(proposal_payload, list):
+        return []
+
+    paths: list[Path] = []
+    for item in proposal_payload:
+        if not isinstance(item, dict):
+            continue
+        raw_path = item.get("decision_artifact_path")
+        if isinstance(raw_path, str) and raw_path.strip():
+            paths.append(Path(raw_path))
+    return paths
+
+
+def _blocked_finalization_result(
+    *,
+    release: object | None,
+    finalization_policy: str,
+) -> dict[str, object] | None:
+    if release is None or finalization_policy == "none" or _release_decision_value(release) != "accepted":
+        return None
+    gate = getattr(release, "finalization_gate", None)
+    if gate is not None and not bool(gate.get("allowed", False)):
+        return {
+            "type": "finalization_gate_blocked",
+            "policy": finalization_policy,
+            "reason": str(gate.get("reason", "unknown")),
+            "decision": str(gate.get("decision", "unknown")),
+            "unresolved_required_finding_ids": list(gate.get("unresolved_required_finding_ids", [])),
+        }
+    finalize = getattr(release, "finalization", None)
+    if finalize is None:
+        return {
+            "type": "finalization_result_missing",
+            "policy": finalization_policy,
+            "reason": "finalization result was not produced for accepted release",
+        }
+    error = getattr(finalize, "error", None)
+    if error:
+        return {
+            "type": "finalization_failed",
+            "policy": finalization_policy,
+            "reason": str(error),
+            "failed_step": getattr(finalize, "failed_step", None),
+        }
+    return None
+
+
+def _governor_cycle_continuation(
+    *,
+    release: object | None,
+    blocked_finalization: dict[str, object] | None,
+) -> GovernorCycleContinuation:
+    if release is None:
+        return GovernorCycleContinuation(action=GovernorContinuationAction.CONTINUE)
+    if _release_decision_value(release) != "accepted":
+        return GovernorCycleContinuation(
+            action=GovernorContinuationAction.STOP,
+            stop_reason=GovernorContinuationStopReason.RELEASE_NOT_ACCEPTED,
+        )
+
+    feature_review = _load_feature_review_continuation(release)
+    if blocked_finalization is not None:
+        stop_reason = GovernorContinuationStopReason.BLOCKED_FINALIZATION
+        if blocked_finalization.get("reason") == "unresolved_required_findings":
+            stop_reason = GovernorContinuationStopReason.UNRESOLVED_REQUIRED_REVIEW_FINDINGS
+        if (
+            feature_review is not None
+            and feature_review.recheck_stop_reason == FeatureReviewRecheckStopReason.BLOCKED_BY_RETRY_BUDGET
+        ):
+            stop_reason = GovernorContinuationStopReason.EXHAUSTED_REPAIR_BUDGET
+        elif (
+            feature_review is not None
+            and feature_review.recheck_stop_reason == FeatureReviewRecheckStopReason.BLOCKED_BY_HARD_GATE
+        ):
+            stop_reason = GovernorContinuationStopReason.BLOCKED_BY_HARD_GATE
+        return GovernorCycleContinuation(
+            action=GovernorContinuationAction.STOP,
+            stop_reason=stop_reason,
+            feature_review=feature_review,
+        )
+
+    return GovernorCycleContinuation(
+        action=GovernorContinuationAction.CONTINUE,
+        feature_review=feature_review,
+    )
+
+
+def _load_feature_review_continuation(release: object) -> GovernorFeatureReviewContinuation | None:
+    payload = _load_release_summary_payload(release)
+    summary_path = _release_summary_path(release)
+    release_dir = summary_path.parent if summary_path is not None else None
+    review_path = _release_artifact_path(
+        release=release,
+        attr_name="feature_review_path",
+        fallback_path=(release_dir / "feature_review.json") if release_dir is not None else None,
+        summary_key="feature_review_path",
+        summary_payload=payload,
+    )
+    recheck_path = _release_artifact_path(
+        release=release,
+        attr_name="feature_review_recheck_path",
+        fallback_path=(release_dir / "feature_review_recheck.json") if release_dir is not None else None,
+        summary_key="feature_review_recheck_path",
+        summary_payload=payload,
+    )
+
+    accepted_risks: list[str] = []
+    if review_path is not None and review_path.exists():
+        try:
+            review_payload = FeatureReviewDecision.model_validate_json(review_path.read_text(encoding="utf-8"))
+            accepted_risks = review_payload.accepted_risks
+        except Exception:  # noqa: BLE001
+            accepted_risks = []
+
+    recheck_payload: FeatureReviewRecheckRecord | None = None
+    if recheck_path is not None and recheck_path.exists():
+        try:
+            recheck_payload = FeatureReviewRecheckRecord.model_validate_json(recheck_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            recheck_payload = None
+
+    proposals = _load_backlog_follow_up_proposals(release=release, summary_payload=payload)
+    finalization_gate = _release_finalization_gate(release=release, summary_payload=payload)
+
+    if (
+        review_path is None
+        and recheck_path is None
+        and recheck_payload is None
+        and not proposals
+        and finalization_gate is None
+    ):
+        return None
+
+    return GovernorFeatureReviewContinuation(
+        feature_review_path=review_path,
+        feature_review_recheck_path=recheck_path,
+        finalization_gate=finalization_gate,
+        recheck_stop_reason=recheck_payload.stop_reason if recheck_payload is not None else None,
+        unresolved_finding_ids=recheck_payload.unresolved_finding_ids if recheck_payload is not None else [],
+        accepted_finding_ids=recheck_payload.accepted_finding_ids if recheck_payload is not None else [],
+        deferred_finding_ids=recheck_payload.deferred_finding_ids if recheck_payload is not None else [],
+        accepted_risks=accepted_risks,
+        backlog_follow_up_proposals=proposals,
+    )
+
+
+def _release_summary_path(release: object) -> Path | None:
+    summary_path = getattr(release, "summary_path", None)
+    if summary_path is None:
+        return None
+    path = Path(summary_path)
+    if not path.exists():
+        return None
+    return path
+
+
+def _load_release_summary_payload(release: object) -> dict[str, object]:
+    path = _release_summary_path(release)
+    if path is None:
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _release_artifact_path(
+    *,
+    release: object,
+    attr_name: str,
+    fallback_path: Path | None,
+    summary_key: str,
+    summary_payload: dict[str, object],
+) -> Path | None:
+    attr_raw = getattr(release, attr_name, None)
+    if isinstance(attr_raw, (str, Path)) and str(attr_raw).strip():
+        return Path(attr_raw)
+    if fallback_path is not None and fallback_path.exists():
+        return fallback_path
+    summary_raw = summary_payload.get(summary_key)
+    if isinstance(summary_raw, str) and summary_raw.strip():
+        return Path(summary_raw)
+    return None
+
+
+def _release_finalization_gate(*, release: object, summary_payload: dict[str, object]) -> dict[str, object] | None:
+    gate = getattr(release, "finalization_gate", None)
+    if isinstance(gate, dict):
+        return gate
+    fallback = summary_payload.get("finalization_gate")
+    return fallback if isinstance(fallback, dict) else None
+
+
+def _load_backlog_follow_up_proposals(
+    *,
+    release: object,
+    summary_payload: dict[str, object],
+) -> list[FeatureReviewFollowUpProposal]:
+    raw_proposals = getattr(release, "feature_review_proposals", None)
+    if not isinstance(raw_proposals, list):
+        raw_proposals = summary_payload.get("feature_review_proposals", [])
+    if not isinstance(raw_proposals, list):
+        return []
+
+    proposals: list[FeatureReviewFollowUpProposal] = []
+    for item in raw_proposals:
+        if hasattr(item, "model_dump"):
+            try:
+                item = item.model_dump(mode="json")
+            except Exception:  # noqa: BLE001
+                continue
+        try:
+            proposal = FeatureReviewFollowUpProposal.model_validate(item)
+        except Exception:  # noqa: BLE001
+            continue
+        if proposal.classification == "backlog_follow_up":
+            proposals.append(proposal)
+    return proposals

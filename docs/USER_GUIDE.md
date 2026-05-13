@@ -831,7 +831,7 @@ Relationship to nearby commands:
 
 ### `agent-loop run-governor`
 
-Runs repeated backlog-to-release cycles using the current one-epic governor machinery.
+Runs repeated backlog-to-release cycles using the shipped one-epic governor machinery.
 
 ```bash
 agent-loop run-governor \
@@ -856,7 +856,13 @@ Current boundary:
 - The command composes repeated one-epic cycles and writes a parent `governor.log`, `governor.raw.log`, and `events.jsonl`.
 - It marks completed epics and recent release summaries in repo state when a `StateStore` is configured.
 - It stops by default when a cycle produces no executable release or a release is not accepted.
-- It does not yet implement autonomous final-review repair continuation, policy-driven branch deletion, or full pre-epic state-review decisioning.
+- Autonomous final-review repair continuation, policy-driven branch deletion, and full pre-epic state-review decisioning remain planned.
+
+JSON output contract for stop metadata:
+
+- `run-governor` always emits a top-level `stop_reason` from the fixed governor taxonomy.
+- When top-level `stop_reason` is `blocked_finalization`, `cycles[-1].blocked_finalization` and `cycles[-1].governor_cycle_continuation` are required.
+- For other stop reasons, `blocked_finalization` and `governor_cycle_continuation` are cycle-scoped optional fields and may be omitted when not applicable.
 
 `run-release` writes a deterministic `release_review.md` evidence summary. If the project config also defines `model_roles.reviewer`, it invokes a separate reviewer agent over `base..feature`, writes `feature_review.json`, generates bounded repair contracts for required findings, reruns verification using validated reviewer-requested commands or the default verification profile, writes `feature_review_recheck.json`, and blocks PR/merge/push finalization while unresolved required findings remain.
 
@@ -1127,7 +1133,7 @@ Then decide whether to repair manually, narrow the contract, or rerun from a cle
 
 ## Current Limits
 
-`auto_develop` is useful for bounded autonomous development today. The current implementation includes one-epic planning, shipped supervisor-owned execution-strategy selection for one-epic releases, runtime-supervisor repair/resume, deterministic state-review snapshot capture, persistent governor memory seams, typed supervisor decision records for auditable soft and repair decisions, supervisor-owned release scheduling for normal source overlap, and an independent feature-review pass when `model_roles.reviewer` is configured. One-epic planning writes `execution_strategy_selection.json`, `supervisor_decisions/execution_strategy__<decision-id>.json`, and `one_shot_execution_input.json` when the chosen action is `one_shot`; that one-shot input carries the bounded objective scope, evidence requirements, stop conditions, and selector inputs instead of contract decomposition. The one-shot path is not an executing release runner yet: `run-objective` may return `release: null` after writing the input artifact, and `run-backlog` currently forces executable decomposition as its default so a selected epic still runs through worker, verification, review, and finalization. A `stop` strategy is currently represented in `execution_strategy_selection.json` only; typed blocked-decision persistence for `stop` remains planned. The active direction is a complete autonomous project governor with runtime supervision: it should review current repository state, choose epics from docs/roadmap/state/artifacts, choose whether the epic should be implemented one-shot or decomposed into sub-agents, run the selected strategy, verify, run release-local feature review, normalize useful reviewer output before strict validation, repair reviewer findings and contract-contained failures, update memory, and continue until configured stopping criteria are reached.
+`auto_develop` is useful for bounded autonomous development today. The current implementation includes one-epic planning, a shipped repeated-cycle governor shell, parent governor log/events artifacts, completed-epic tracking, recent release-summary recording, shipped supervisor-owned execution-strategy selection for one-epic releases, runtime-supervisor repair/resume, deterministic state-review snapshot capture, persistent governor memory seams, typed supervisor decision records for auditable soft and repair decisions, supervisor-owned release scheduling for normal source overlap, and an independent feature-review pass when `model_roles.reviewer` is configured. One-epic planning writes `execution_strategy_selection.json`, `supervisor_decisions/execution_strategy__<decision-id>.json`, and `one_shot_execution_input.json` when the chosen action is `one_shot`; that one-shot input carries the bounded objective scope, evidence requirements, stop conditions, and selector inputs instead of contract decomposition. The one-shot path is not an executing release runner yet: `run-objective` may return `release: null` after writing the input artifact, and `run-backlog` currently forces executable decomposition as its default so a selected epic still runs through worker, verification, review, and finalization. A `stop` strategy is currently represented in `execution_strategy_selection.json` only; typed blocked-decision persistence for `stop` remains planned. The active direction is a complete autonomous project governor with runtime supervision: it should review current repository state, choose epics from docs/roadmap/state/artifacts, choose whether the epic should be implemented one-shot or decomposed into sub-agents, run the selected strategy, verify, run release-local feature review, normalize useful reviewer output before strict validation, repair reviewer findings and contract-contained failures, update memory, and continue until configured stopping criteria are reached.
 
 Current important limits:
 
@@ -1135,7 +1141,7 @@ Current important limits:
 - Cohesive medium epics still benefit from normalization and review convergence before the broader governor is reliable.
 - Raw planner/reviewer output normalization is implemented for repairable schema drift; strict schema gates still block only the cases where the candidate would broaden scope, change intent, or omit hard evidence.
 - Fully dynamic model-driven orchestration is still evolving.
-- The broader multi-epic governor loop remains planned.
+- The broader multi-epic governor loop remains planned beyond the shipped repeated-cycle shell.
 - Full agent-driven pre-epic state-review decisioning before backlog selection remains planned.
 - One-shot worker execution is planned; the current `one_shot` result is a bounded execution-input artifact and deliberate stop before contract generation.
 - Multi-epic orchestration of reviewer-agent findings and repair-agent loops remains planned; the currently shipped reviewer/repair loop runs only when `model_roles.reviewer` is configured and is release-local to one `run-release` execution.
