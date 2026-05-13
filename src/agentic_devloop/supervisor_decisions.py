@@ -295,6 +295,11 @@ class FeatureReviewFindingClassificationDecision(SupervisorDecisionBase):
         ):
             raise ValueError("blocker classification must not use accept action")
         if (
+            self.classification == FeatureReviewFindingClassification.DUPLICATE
+            and self.selected_action == FeatureReviewFindingAction.ACCEPT
+        ):
+            raise ValueError("duplicate classification must not use accept action")
+        if (
             self.classification != FeatureReviewFindingClassification.BLOCKER
             and self.selected_action == FeatureReviewFindingAction.ACCEPT
             and not self.evidence_paths

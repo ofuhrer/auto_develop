@@ -120,14 +120,14 @@ def _feature_review_finding_classification_decision(
             "release_id": "review-loop-convergence-policy",
             "decided_at": datetime(2026, 5, 13, 8, 0, 0),
             "decided_by": "supervisor-agent",
-            "rationale": "Finding is duplicate and accepted with bounded follow-up checks.",
+            "rationale": "Finding is a soft issue and accepted with bounded follow-up checks.",
             "evidence_paths": evidence_paths,
             "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
             "finding_id": "fr-321",
-            "classification": FeatureReviewFindingClassification.DUPLICATE,
+            "classification": FeatureReviewFindingClassification.SOFT_FINDING,
             "selected_action": FeatureReviewFindingAction.ACCEPT,
             "outcome": FeatureReviewFindingOutcome.CONTINUE,
-            "fallback_plan": "Re-open as repair if duplicate trace cannot be verified on recheck.",
+            "fallback_plan": "Re-open as repair if related verification regresses.",
             "validators_to_rerun": ["review_findings_schema", "release_review_gate"],
         }
     )

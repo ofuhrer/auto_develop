@@ -34,6 +34,7 @@ from agentic_devloop.supervisor_decisions import (
     SoftBudgetAcceptanceDecision,
     SupervisorDecisionType,
     LEGACY_VALIDATORS_UNSPECIFIED,
+    effective_validators_to_rerun,
     parse_supervisor_decision,
 )
 
@@ -334,12 +335,27 @@ def test_feature_review_finding_classification_non_blocking_accept_requires_evid
                 **BASE,
                 "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
                 "finding_id": "fr-321",
+                "classification": FeatureReviewFindingClassification.SOFT_FINDING,
+                "selected_action": FeatureReviewFindingAction.ACCEPT,
+                "outcome": FeatureReviewFindingOutcome.CONTINUE,
+                "fallback_plan": "Re-open if related verification regresses.",
+                "validators_to_rerun": ["review_findings_schema", "release_review_gate"],
+                "evidence_paths": [],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="duplicate classification must not use accept action"):
+        FeatureReviewFindingClassificationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+                "finding_id": "fr-321",
                 "classification": FeatureReviewFindingClassification.DUPLICATE,
                 "selected_action": FeatureReviewFindingAction.ACCEPT,
                 "outcome": FeatureReviewFindingOutcome.CONTINUE,
                 "fallback_plan": "Re-open if duplicate linkage cannot be verified.",
                 "validators_to_rerun": ["review_findings_schema", "release_review_gate"],
-                "evidence_paths": [],
+                "evidence_paths": ["runs/release/feature_review.json"],
             }
         )
 
@@ -559,6 +575,11 @@ def test_parse_supervisor_decision_rejects_unsupported_type() -> None:
 
     with pytest.raises(ValidationError):
         parse_supervisor_decision(payload)
+
+
+def test_effective_validators_to_rerun_filters_legacy_sentinel() -> None:
+    assert effective_validators_to_rerun([LEGACY_VALIDATORS_UNSPECIFIED]) == []
+    assert effective_validators_to_rerun(["verification"]) == ["verification"]
 
 
 def test_invalid_schema_version_is_rejected() -> None:
