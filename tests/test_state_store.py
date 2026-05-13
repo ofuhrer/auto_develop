@@ -128,6 +128,91 @@ completed_epic_records:
     assert state.completed_epic_records[1].status_reason == "reviewed"
 
 
+def test_mixed_legacy_and_typed_records_remain_consistent_across_lifecycle(tmp_path: Path) -> None:
+    state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        """
+active_epic: epic-target
+active_epics:
+  - epic-target
+completed_epics:
+  - epic-target
+blocked_epics:
+  - epic-target
+completed_epic_records:
+  - epic_id: epic-target
+    status_reason: prior-completion
+blocked_epic_records:
+  - epic-target
+skipped_epics:
+  - epic-target
+reviewed_epics:
+  - epic_id: epic-target
+    status_reason: prior-review
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    store = StateStore(state_path)
+
+    active = store.mark_active_epic("epic-target")
+    assert active.active_epic == "epic-target"
+    assert active.completed_epics == []
+    assert active.blocked_epics == []
+    assert [record.epic_id for record in active.active_epics] == ["epic-target"]
+    assert active.completed_epic_records == []
+    assert active.blocked_epic_records == []
+    assert active.skipped_epics == []
+    assert [record.epic_id for record in active.reviewed_epics] == ["epic-target"]
+    assert active.reviewed_epics[0].status_reason == "prior-review"
+
+    completed = store.mark_completed_epic("epic-target")
+    assert completed.active_epic is None
+    assert completed.completed_epics == ["epic-target"]
+    assert completed.blocked_epics == []
+    assert completed.active_epics == []
+    assert [record.epic_id for record in completed.completed_epic_records] == ["epic-target"]
+    assert completed.blocked_epic_records == []
+    assert completed.skipped_epics == []
+    assert [record.epic_id for record in completed.reviewed_epics] == ["epic-target"]
+    assert completed.reviewed_epics[0].status_reason == "prior-review"
+
+    blocked = store.mark_blocked_epic("epic-target", blocked_reason="needs-dependency")
+    assert blocked.active_epic is None
+    assert blocked.completed_epics == []
+    assert blocked.blocked_epics == ["epic-target"]
+    assert blocked.active_epics == []
+    assert blocked.completed_epic_records == []
+    assert [record.epic_id for record in blocked.blocked_epic_records] == ["epic-target"]
+    assert blocked.blocked_epic_records[0].blocked_reason == "needs-dependency"
+    assert blocked.skipped_epics == []
+    assert blocked.reviewed_epics == []
+
+    skipped = store.mark_skipped_epic("epic-target", status_reason="deferred")
+    assert skipped.active_epic is None
+    assert skipped.completed_epics == []
+    assert skipped.blocked_epics == []
+    assert skipped.active_epics == []
+    assert skipped.completed_epic_records == []
+    assert skipped.blocked_epic_records == []
+    assert [record.epic_id for record in skipped.skipped_epics] == ["epic-target"]
+    assert skipped.skipped_epics[0].status_reason == "deferred"
+    assert skipped.reviewed_epics == []
+
+    reviewed = store.mark_reviewed_epic("epic-target", status_reason="manual-review-complete")
+    assert reviewed.active_epic is None
+    assert reviewed.completed_epics == []
+    assert reviewed.blocked_epics == []
+    assert reviewed.active_epics == []
+    assert reviewed.completed_epic_records == []
+    assert reviewed.blocked_epic_records == []
+    assert reviewed.skipped_epics == []
+    assert [record.epic_id for record in reviewed.reviewed_epics] == ["epic-target"]
+    assert reviewed.reviewed_epics[0].status_reason == "manual-review-complete"
+
+
 def test_epic_memory_references_and_counters(tmp_path: Path) -> None:
     state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
     store = StateStore(state_path)
