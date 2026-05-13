@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Protocol
 
-from agentic_devloop.backlog import BacklogPlanResult, BacklogRunResult
+from agentic_devloop.backlog import BacklogMultiRunResult, BacklogPlanResult, BacklogRunResult
 from agentic_devloop.config import load_project_config
 from agentic_devloop.execution_strategy import ExecutionStrategySelectorInput
 from agentic_devloop.models import (
@@ -111,6 +111,114 @@ class GovernorLoop:
         self._plan_backlog = plan_backlog
         self._run_objective = run_objective
         self._state_store = state_store
+
+    def run_epics(
+        self,
+        *,
+        project_id: str,
+        goal: str,
+        roadmap_path: Path,
+        selected_epic_id: str | None,
+        epic_count: int,
+        config_dir: Path,
+        contracts_dir: Path,
+        runs_dir: Path,
+        objectives_dir: Path,
+        mode: str,
+        planner_backend: object | None,
+        objective_planner_backend: PlannerBackend | None,
+        executor: ExecutorProtocol | None,
+        verification_timeout_seconds: int,
+        allow_dirty: bool,
+        commit_on_accept: bool,
+        merge_on_accept: bool,
+        push_on_accept: bool,
+        release_finalize: str,
+        integration_branch: str | None,
+        stop_on_failure: bool,
+        execution_mode: str,
+        debug_keep_artifacts: bool,
+        progress: Callable[[str], None] | None,
+        now: datetime | None,
+    ) -> BacklogMultiRunResult:
+        if epic_count <= 0:
+            raise ValueError("epic_count must be greater than 0")
+
+        cycles: list[BacklogRunResult] = []
+        seen_epic_ids: set[str] = set()
+        stop_reason = "requested_epic_count_reached"
+        for cycle_index in range(1, epic_count + 1):
+            if progress is not None:
+                progress(f"event=governor_cycle_started cycle={cycle_index} epic_count={epic_count}")
+            result = self.run_one_epic(
+                project_id=project_id,
+                goal=goal,
+                roadmap_path=roadmap_path,
+                selected_epic_id=selected_epic_id if cycle_index == 1 else None,
+                config_dir=config_dir,
+                contracts_dir=contracts_dir,
+                runs_dir=runs_dir,
+                objectives_dir=objectives_dir,
+                mode=mode,
+                planner_backend=planner_backend,
+                objective_planner_backend=objective_planner_backend,
+                executor=executor,
+                verification_timeout_seconds=verification_timeout_seconds,
+                allow_dirty=allow_dirty,
+                commit_on_accept=commit_on_accept,
+                merge_on_accept=merge_on_accept,
+                push_on_accept=push_on_accept,
+                release_finalize=release_finalize,
+                integration_branch=integration_branch,
+                stop_on_failure=stop_on_failure,
+                execution_mode=execution_mode,
+                debug_keep_artifacts=debug_keep_artifacts,
+                progress=progress,
+                now=now,
+            )
+            cycles.append(result)
+
+            if result.selected_epic_id in seen_epic_ids:
+                stop_reason = "repeated_epic_selected"
+                if self._state_store is not None:
+                    self._state_store.mark_skipped_epic(
+                        result.selected_epic_id,
+                        status_reason=(
+                            "governor stopped after backlog planner repeated an already-run epic; "
+                            "selection should become pre-execution in a later hardening pass"
+                        ),
+                    )
+                break
+            seen_epic_ids.add(result.selected_epic_id)
+
+            if result.release is None:
+                stop_reason = "planning_only_strategy"
+                break
+            if not _release_was_accepted(result.release):
+                if stop_on_failure:
+                    stop_reason = "release_not_accepted"
+                    break
+            if self._state_store is not None and result.release_summary_path is not None:
+                self._state_store.record_recent_run_summary(
+                    result.release_summary_path,
+                    release_id=result.release_id,
+                    outcome=_release_decision_value(result.release),
+                    recorded_at=now,
+                )
+            if progress is not None:
+                progress(
+                    "event=governor_cycle_completed "
+                    f"cycle={cycle_index} epic={result.selected_epic_id} release={result.release_id}"
+                )
+
+        return BacklogMultiRunResult(
+            project_id=project_id,
+            requested_epic_count=epic_count,
+            attempted_epic_count=len(cycles),
+            accepted_epic_count=sum(1 for cycle in cycles if cycle.release is not None and _release_was_accepted(cycle.release)),
+            cycles=cycles,
+            stop_reason=stop_reason,
+        )
 
     def run_one_epic(
         self,
@@ -287,3 +395,17 @@ def _latest_release_run_dir(*, runs_dir: Path, release_id: str) -> Path | None:
     if not candidates:
         return None
     return max(candidates, key=lambda path: path.name)
+
+
+def _release_decision_value(release: object) -> str | None:
+    decision = getattr(release, "decision", None)
+    if decision is None:
+        return None
+    value = getattr(decision, "value", None)
+    if value is not None:
+        return str(value)
+    return str(decision)
+
+
+def _release_was_accepted(release: object) -> bool:
+    return _release_decision_value(release) == "accepted"

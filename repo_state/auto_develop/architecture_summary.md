@@ -1,22 +1,22 @@
 # Architecture Summary
 
-`agentic-devloop` is an autonomous-first local Python CLI that orchestrates agentic software development in Git worktrees. The durable architectural direction is now a deterministic kernel plus a high-level governor/supervisor agent. The deterministic kernel owns Git/worktree mechanics, hard safety gates, verification, evidence, metrics, typed artifact persistence, and finalization policy. The governor/supervisor owns judgment-heavy choices: epic selection, one-shot versus decomposed execution, scheduling, planner/reviewer/supervisor output normalization, finding adjudication, repair/retry/split decisions, and roadmap memory updates. Runtime-supervisor repair/resume seams, planner-output normalization, one-epic governor logging, deterministic state-review snapshot capture, persistent governor memory seams, typed supervisor decision records, supervisor-owned release scheduling, supervisor-owned execution-strategy selection, one-shot execution input materialization, and the release-local feature-review/repair loop are implemented. The model-output-normalization release is now shipped with typed normalization artifacts, validator-rerun metadata, and refusal boundaries that stop scope-broadening repairs; the release-local convergence policy is documented for blocker continuation, evidence-backed soft-finding acceptance, and proposal-style scope follow-ups, while the broader N-epic governor loop and full agent-driven pre-epic state-review decisioning remain planned.
+`agentic-devloop` is an autonomous-first local Python CLI that orchestrates agentic software development in Git worktrees. The durable architectural direction is now a deterministic kernel plus a high-level governor/supervisor agent. The deterministic kernel owns Git/worktree mechanics, hard safety gates, verification, evidence, metrics, typed artifact persistence, and finalization policy. The governor/supervisor owns judgment-heavy choices: epic selection, one-shot versus decomposed execution, scheduling, planner/reviewer/supervisor output normalization, finding adjudication, repair/retry/split decisions, and roadmap memory updates. Runtime-supervisor repair/resume seams, planner-output normalization, one-epic governor logging, an initial repeated-cycle `run-governor --epic-count N` shell, deterministic state-review snapshot capture, persistent governor memory seams, typed supervisor decision records, supervisor-owned release scheduling, supervisor-owned execution-strategy selection, one-shot execution input materialization, and the release-local feature-review/repair loop are implemented. The model-output-normalization release is now shipped with typed normalization artifacts, validator-rerun metadata, and refusal boundaries that stop scope-broadening repairs; the release-local convergence policy is documented for blocker continuation, evidence-backed soft-finding acceptance, and proposal-style scope follow-ups, while full agent-driven pre-epic state-review decisioning, autonomous final-review repair continuation, and policy-driven branch cleanup/finalization remain planned.
 
 Current flow:
 
 1. The roadmap governor reads repository documentation, roadmap, repo-state memory, run artifacts, metrics, and the configured repository goal.
 2. The governor selects the next highest-reward epic and emits a validated `BacklogPlan`.
 3. `run-backlog` can select one epic, write or reuse its release objective, plan contracts, and execute the resulting release.
-4. The shipped one-epic execution-strategy seam lets the supervisor choose execution strategy before contract generation: one-shot input materialization, sequential contracts, parallel contracts, stacked branches, patch handoff, replanning, or stop. `stop` currently persists selection JSON only; typed blocked-decision persistence remains planned.
-5. If decomposition is selected, the planner decomposes the objective into bounded task contracts; if `one_shot` is selected today, planning writes `one_shot_execution_input.json` and stops before worker execution.
-6. Release execution creates isolated task worktrees and branches.
-7. Worker agents implement inside the selected strategy and task boundaries.
-8. Deterministic verification gates hard invariants and emits structured findings.
-9. Accepted work is finalized according to configured autonomous finalization policy.
-10. A runtime supervisor diagnoses recoverable failures from structured events, evidence, raw logs, budgets, tuning signals, and backlog-state references.
-11. The supervisor applies bounded repair actions such as environment repair, planner/reviewer/supervisor output normalization, task splitting or scope narrowing, release resume, long-running worker inspection, model escalation, and repo-state update proposals.
-12. A reviewer/supervisor agent should decide soft findings such as modest budget overage, normal source-file overlap, retry strategy, environment repair, model escalation, and task splitting; deterministic code remains authoritative for hard invariants.
-13. The release path records structured stop evidence and the broader governor/backlog refresh loop remains planned until the N-epic flow is implemented.
+4. `run-governor --epic-count N` composes repeated `run-backlog`-style one-epic cycles, writes parent governor logs/events, updates completed-epic state, records recent release summaries, and stops on planning-only or non-accepted cycles by default.
+5. The shipped one-epic execution-strategy seam lets the supervisor choose execution strategy before contract generation: one-shot input materialization, sequential contracts, parallel contracts, stacked branches, patch handoff, replanning, or stop. `stop` currently persists selection JSON only; typed blocked-decision persistence remains planned.
+6. If decomposition is selected, the planner decomposes the objective into bounded task contracts; if `one_shot` is selected today, planning writes `one_shot_execution_input.json` and stops before worker execution.
+7. Release execution creates isolated task worktrees and branches.
+8. Worker agents implement inside the selected strategy and task boundaries.
+9. Deterministic verification gates hard invariants and emits structured findings.
+10. Accepted work is finalized according to configured autonomous finalization policy.
+11. A runtime supervisor diagnoses recoverable failures from structured events, evidence, raw logs, budgets, tuning signals, and backlog-state references.
+12. The supervisor applies bounded repair actions such as environment repair, planner/reviewer/supervisor output normalization, task splitting or scope narrowing, release resume, long-running worker inspection, model escalation, and repo-state update proposals.
+13. A reviewer/supervisor agent should decide soft findings such as modest budget overage, normal source-file overlap, retry strategy, environment repair, model escalation, and task splitting; deterministic code remains authoritative for hard invariants.
 14. Release planning can persist a deterministic `state_review_snapshot.json` artifact and pass its path via `state_review_snapshot_path` in contract-plan payloads.
 
 Target additions:
@@ -31,22 +31,20 @@ Target additions:
 
 Prioritized architectural gaps:
 
-1. One-shot worker execution from `one_shot_execution_input.json`.
-2. Typed blocked-decision persistence for `stop` execution-strategy outcomes.
-3. Model-output normalization before strict validation for planner, reviewer, and supervisor artifacts.
-4. State-review governor before backlog selection.
-5. Review-loop convergence policy for repeated reviewer/repair cycles.
-6. N-epic governor command once selection, review, memory, scheduling, strategy, and normalization are reliable.
-7. Governor cockpit expansion for full multi-epic visibility.
-8. Shared verification runtime and bounded environment repair.
-9. Executor liveness supervision.
-10. Target artifact ownership and onboarding bootstrap.
+1. Hardening the initial N-epic governor command with richer state refresh, final-review continuation, finalization cleanup, and precise stop taxonomy.
+2. One-shot worker execution from `one_shot_execution_input.json`.
+3. Typed blocked-decision persistence for `stop` execution-strategy outcomes.
+4. Full state-review governor decisioning before backlog selection.
+5. Governor cockpit expansion for full multi-epic visibility.
+6. Shared verification runtime and bounded environment repair.
+7. Executor liveness supervision.
+8. Target artifact ownership and onboarding bootstrap.
 
 The orchestrator owns policy, state, budgets, verification, evidence, roadmap governance, and finalization. Worker agents own implementation inside narrow task contracts. Humans provide goals and hard safety boundaries rather than routine approvals.
 
 Implemented seams:
 
-1. `GovernorLoop` now coordinates one selected epic at a time.
+1. `GovernorLoop` now coordinates one selected epic at a time and has an initial repeated-cycle method for multiple one-epic cycles.
 2. `StateStore` persists active, completed, and blocked epic state, plus recent run summaries.
 3. `RepairPolicy` classifies retryable versus stop conditions for contract-contained failures, verification drift, missing credentials, and unsafe policy expansion.
 4. `ExecutionStrategy` now selects the one-epic execution mode before contract generation and writes typed selection evidence plus one-shot execution input when applicable.

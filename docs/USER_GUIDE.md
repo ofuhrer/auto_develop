@@ -829,7 +829,34 @@ Relationship to nearby commands:
 - `run-objective` skips backlog selection and starts from an existing objective file.
 - `run-backlog` forwards the usual release execution and finalization flags, so `--commit-on-accept`, `--merge-on-accept`, `--push-on-accept`, and `--release-finalize` still control task commits and release finalization.
 
-`run-backlog` is intentionally one epic per invocation. A multi-epic governor command is still planned and is not yet the documented user workflow.
+### `agent-loop run-governor`
+
+Runs repeated backlog-to-release cycles using the current one-epic governor machinery.
+
+```bash
+agent-loop run-governor \
+  --project my_project \
+  --goal "Move toward fully autonomous roadmap-driven development" \
+  --epic-count 3 \
+  --mode strong-model \
+  --execute-planner \
+  --merge-on-accept \
+  --release-finalize push-feature
+```
+
+Key options:
+
+- `--epic-count`: number of epic cycles to attempt.
+- `--epic-id`: optional first epic to run; later cycles use planner selection.
+- `--goal`, `--roadmap`, `--mode strong-model`, and `--execute-planner`: same backlog-planning controls as `run-backlog`.
+- All relevant `run-release` execution and finalization options.
+
+Current boundary:
+
+- The command composes repeated one-epic cycles and writes a parent `governor.log`, `governor.raw.log`, and `events.jsonl`.
+- It marks completed epics and recent release summaries in repo state when a `StateStore` is configured.
+- It stops by default when a cycle produces no executable release or a release is not accepted.
+- It does not yet implement autonomous final-review repair continuation, policy-driven branch deletion, or full pre-epic state-review decisioning.
 
 `run-release` writes a deterministic `release_review.md` evidence summary. If the project config also defines `model_roles.reviewer`, it invokes a separate reviewer agent over `base..feature`, writes `feature_review.json`, generates bounded repair contracts for required findings, reruns verification using validated reviewer-requested commands or the default verification profile, writes `feature_review_recheck.json`, and blocks PR/merge/push finalization while unresolved required findings remain.
 

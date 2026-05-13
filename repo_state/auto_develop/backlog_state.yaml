@@ -1,6 +1,6 @@
 active_goal: Enable a freshly onboarded auto_develop checkout and target repository to run a high-level autonomous development loop for the next N highest-value epics, with a governor/supervisor agent that chooses the execution strategy, uses one-shot implementation or decomposed sub-agents as appropriate, diagnoses and repairs contract-contained subsystem failures, normalizes useful model output before strict validation, and stops only for major hard-policy problems.
 governor_mode: autonomous_first
-current_focus: multi-epic-run-governor
+current_focus: multi-epic-run-governor-hardening
 active_epic: null
 completed_epics:
   - release-governor-1
@@ -18,13 +18,14 @@ completed_epics:
   - supervisor-execution-strategy
   - model-output-normalization
   - review-loop-convergence-policy
+  - multi-epic-run-governor-initial-loop
 blocked_epics: []
 candidate_epics:
-  - id: multi-epic-run-governor
+  - id: multi-epic-run-governor-hardening
     priority: 1
-    title: Close the autonomous loop for repeated epic cycles.
-    rationale: "Convert one-epic run-backlog into the intended high-level development loop: refresh repo state, choose the next highest-value epic, select one-shot or decomposed execution, run/review/repair/finalize it, compact learnings into durable memory, clean branches/worktrees, and continue until the requested epic count, budget, no-actionable-work state, or major hard-policy stop."
-    next_release_id: multi-epic-run-governor
+    title: Harden the initial repeated-epic governor loop.
+    rationale: "The initial run-governor command can run repeated one-epic cycles and record parent governor events. Remaining work is richer state refresh, no-actionable-work detection, final-review repair continuation, autonomous finalization/cleanup, and stronger stop taxonomy before unattended N-epic operation is credible."
+    next_release_id: multi-epic-run-governor-hardening
   - id: review-repair-continuation
     priority: 2
     title: Treat final feature-review findings as autonomous continuation inputs.
@@ -110,3 +111,4 @@ notes:
   - The last two cycles exposed the remaining autonomy gap: final review findings, merge/push/branch cleanup, and roadmap/backlog update decisions still required human interpretation even when code and tests were green.
   - Review repair should become a continuation state in the governor loop. Useful reviewer findings should produce bounded repair tasks or one-shot repair prompts, rerun verification/review, and only stop after repair budget, hard gates, unsafe policy expansion, missing credentials, or no actionable repair.
   - Autonomous finalization needs explicit policy and state: accepted feature branches should be merged or turned into PR candidates, pushed, cleaned locally/remotely, and summarized into durable memory before the next epic starts.
+  - The initial multi-epic-run-governor slice is implemented: `agent-loop run-governor --epic-count N` composes repeated one-epic cycles, writes parent governor logs/events, records completed epics, records recent release summaries, and stops on planning-only or non-accepted cycles by default.

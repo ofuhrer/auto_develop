@@ -10,7 +10,7 @@ This directory contains user, maintainer, and design documentation for `agentic-
 
 ## Project Summary
 
-`agentic-devloop` is an autonomous-first orchestration layer around coding agents. The current governor path is split into a one-epic `GovernorLoop` service, a typed `StateStore` persistence seam, a `RepairPolicy` decision seam, typed supervisor decision records for repair/scheduling/execution-strategy/finding adjudication, a release-local feature-review/repair loop, and implemented runtime-supervisor repair/resume seams for structured release failures. Those seams support roadmap/backlog analysis for the current epic, state persistence, bounded repair decisions, model-output normalization, governor-level logging, semantic review of one integrated feature branch, deterministic state-review snapshot capture (`state_review_snapshot.json`) with contract-plan plumbing through `state_review_snapshot_path`, supervisor-owned execution-strategy selection before contract generation, one-shot execution input materialization, and supervisor-owned release scheduling from overlap-risk reports. The target architecture is now explicitly a deterministic kernel plus a high-level governor/supervisor agent: deterministic code owns hard gates, Git/worktrees, verification, evidence, metrics, typed persistence, and finalization mechanics; the supervisor owns judgment-heavy choices such as one-shot versus decomposed execution, reviewer-output normalization, finding adjudication, retry/split/replan decisions, and roadmap updates. The one-epic execution-strategy seam is shipped; the broader N-epic governor loop, full pre-epic state-review decisioning from live repository evidence, and repeated-cycle state refresh remain planned.
+`agentic-devloop` is an autonomous-first orchestration layer around coding agents. The current governor path is split into a one-epic `GovernorLoop` service, an initial repeated-cycle `run-governor --epic-count N` command, a typed `StateStore` persistence seam, a `RepairPolicy` decision seam, typed supervisor decision records for repair/scheduling/execution-strategy/finding adjudication, a release-local feature-review/repair loop, and implemented runtime-supervisor repair/resume seams for structured release failures. Those seams support roadmap/backlog analysis, state persistence, bounded repair decisions, model-output normalization, governor-level logging, semantic review of one integrated feature branch, deterministic state-review snapshot capture (`state_review_snapshot.json`) with contract-plan plumbing through `state_review_snapshot_path`, supervisor-owned execution-strategy selection before contract generation, one-shot execution input materialization, and supervisor-owned release scheduling from overlap-risk reports. The target architecture is now explicitly a deterministic kernel plus a high-level governor/supervisor agent: deterministic code owns hard gates, Git/worktrees, verification, evidence, metrics, typed persistence, and finalization mechanics; the supervisor owns judgment-heavy choices such as one-shot versus decomposed execution, reviewer-output normalization, finding adjudication, retry/split/replan decisions, and roadmap updates. The repeated-cycle shell is shipped; autonomous final-review repair continuation, one-shot worker execution, full pre-epic state-review decisioning from live repository evidence, and policy-driven branch cleanup/finalization remain planned.
 
 The project prioritizes:
 
@@ -43,7 +43,7 @@ Implemented capabilities include:
 - repeated-failure diagnosis evidence (`executor_attempts.json` and `failure_diagnosis.yaml`) with deterministic classification by default and a replaceable backend seam for stronger review;
 - role-based model routing;
 - repo-state context injection;
-- `run-task`, `run-release`, `plan-backlog`, `plan-release`, `run-objective`, `status`, and `cleanup` commands;
+- `run-task`, `run-release`, `plan-backlog`, `plan-release`, `run-objective`, `run-governor`, `status`, and `cleanup` commands;
 - `run-backlog` for chaining backlog planning into objective and release execution;
 - supervisor-owned execution-strategy selection for one-epic releases, including `one_shot`, `sequential_contracts`, `parallel_contracts`, `stacked_branches`, `patch_handoff`, `replan`, and `stop` outcomes;
 - one-shot planning/input materialization: `one_shot` currently writes a bounded `one_shot_execution_input.json` and returns `release: null`; the one-shot worker execution path is still planned, so `run-backlog` keeps executable decomposition as its default until that runner exists;
@@ -62,17 +62,17 @@ Implemented capabilities include:
 
 Important remaining gaps:
 
-- multi-epic governor looping beyond the current one-epic service boundary;
+- hardening the initial repeated-cycle governor loop for unattended multi-epic operation;
 - the shipped one-epic execution-strategy seam, with the remaining gaps being one-shot worker execution and a broader N-epic governor that can consume it across repeated cycles;
 - full pre-epic repository state-review decision pass over source state, branches, docs, repo-state memory, recent runs, metrics, and artifacts before selecting the next epic;
 - multi-epic orchestration of the implemented release-local feature-review/repair loop;
-- top-level governor log stream for monitoring an N-epic run across backlog planning, contract generation, release execution, repair, review, finalization, and state refresh;
+- richer top-level governor cockpit for monitoring repair, final-review continuation, finalization cleanup, and state refresh across repeated cycles;
 - always-on state refresh across repeated epic cycles;
 - reduction of deterministic heuristic code once supervisor-backed decisions are available; candidate areas include backlog scoring, contract-normalization heuristics, failure classification, budget-tuning prose, exact-overlap rejection, hard rejection for small budget overages, brittle verification-command assumptions, and cockpit-summary filtering;
 - shared verification-runtime policy so isolated worktrees can run tests without per-worktree virtual environments;
 - executor liveness classification from process, output, heartbeat, and file/diff activity rather than elapsed time alone;
 - target-artifact ownership: external targets should keep durable `.auto_develop/repo_state`, objectives, contracts, and compact outcome history in the target repo or a dedicated control repo, not in the `auto_develop` source checkout;
-- broader multi-epic governor automation remains planned;
+- autonomous final-review repair continuation and policy-driven final branch cleanup remain planned;
 - supervisor-owned scheduling decisions are implemented for normal source overlap, but stacked branch re-slicing and a broader N-epic governor loop remain planned;
 - stronger model-based repeated-failure diagnosis backend;
 - richer semantic merge-conflict repair and broader repair strategies;

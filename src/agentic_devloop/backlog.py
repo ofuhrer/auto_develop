@@ -51,6 +51,16 @@ class BacklogRunResult:
 
 
 @dataclass(frozen=True)
+class BacklogMultiRunResult:
+    project_id: str
+    requested_epic_count: int
+    attempted_epic_count: int
+    accepted_epic_count: int
+    cycles: list[BacklogRunResult]
+    stop_reason: str
+
+
+@dataclass(frozen=True)
 class BacklogPlannerBackendResult:
     raw_output: str | dict[str, Any] | BacklogPlan
     stdout_path: Path
@@ -287,6 +297,73 @@ def run_backlog(
         goal=goal,
         roadmap_path=roadmap_path,
         selected_epic_id=selected_epic_id,
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=runs_dir,
+        objectives_dir=objectives_dir,
+        mode=mode,
+        planner_backend=planner_backend,
+        objective_planner_backend=objective_planner_backend,
+        executor=executor,
+        verification_timeout_seconds=verification_timeout_seconds,
+        allow_dirty=allow_dirty,
+        commit_on_accept=commit_on_accept,
+        merge_on_accept=merge_on_accept,
+        push_on_accept=push_on_accept,
+        release_finalize=release_finalize,
+        integration_branch=integration_branch,
+        stop_on_failure=stop_on_failure,
+        execution_mode=execution_mode,
+        debug_keep_artifacts=debug_keep_artifacts,
+        progress=progress,
+        now=now,
+    )
+
+
+def run_governor(
+    *,
+    project_id: str,
+    goal: str,
+    epic_count: int,
+    roadmap_path: Path = Path("docs/design/ROADMAP_AND_BACKLOG.md"),
+    selected_epic_id: str | None = None,
+    config_dir: Path = Path("configs"),
+    contracts_dir: Path = Path("contracts"),
+    runs_dir: Path = Path("runs"),
+    objectives_dir: Path = Path("objectives"),
+    mode: str = "strong-model",
+    planner_backend: BacklogPlannerBackend | None = None,
+    objective_planner_backend: PlannerBackend | None = None,
+    executor: ExecutorProtocol | None = None,
+    verification_timeout_seconds: int = 600,
+    allow_dirty: bool = False,
+    commit_on_accept: bool = False,
+    merge_on_accept: bool = False,
+    push_on_accept: bool = False,
+    release_finalize: str = "none",
+    integration_branch: str | None = None,
+    stop_on_failure: bool = True,
+    execution_mode: str = "sequential",
+    debug_keep_artifacts: bool = False,
+    progress: Callable[[str], None] | None = None,
+    now: datetime | None = None,
+) -> BacklogMultiRunResult:
+    from agentic_devloop.governor import GovernorLoop
+    from agentic_devloop.state_store import StateStore
+
+    config = load_project_config(project_id, config_dir, validate_repo=False)
+    repo_state_root = config.repo_state_path or Path("repo_state") / project_id
+    state_store = StateStore(repo_state_root / "backlog_state.yaml")
+    return GovernorLoop(
+        plan_backlog=plan_backlog,
+        run_objective=run_objective,
+        state_store=state_store,
+    ).run_epics(
+        project_id=project_id,
+        goal=goal,
+        roadmap_path=roadmap_path,
+        selected_epic_id=selected_epic_id,
+        epic_count=epic_count,
         config_dir=config_dir,
         contracts_dir=contracts_dir,
         runs_dir=runs_dir,

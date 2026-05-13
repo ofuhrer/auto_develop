@@ -306,6 +306,19 @@ def test_run_backlog_command_is_registered(capsys) -> None:
     assert "--release-finalize" in captured.out
 
 
+def test_run_governor_command_is_registered(capsys) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["run-governor", "--help"])
+
+    captured = capsys.readouterr()
+
+    assert error.value.code == 0
+    assert "--epic-count" in captured.out
+    assert "--goal" in captured.out
+    assert "--execute-planner" in captured.out
+    assert "--release-finalize" in captured.out
+
+
 def test_plan_backlog_command_outputs_selected_epic(monkeypatch, capsys, tmp_path) -> None:
     from agentic_devloop.models import BacklogEpic, BacklogPlan
 
@@ -528,6 +541,81 @@ def test_run_backlog_writes_governor_lifecycle_events_with_artifacts(monkeypatch
     assert str(result.plan_path) in events_text
     assert str(result.contract_plan_path) in events_text
     assert str(release_result.summary_path) in events_text
+
+
+def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, capsys, tmp_path) -> None:
+    run_id = "20260513T000000Z_demo_governor"
+    seen_kwargs: dict[str, object] = {}
+    release_result = SimpleNamespace(
+        release_id="demo-epic-1",
+        run_id="run-1",
+        summary_path=tmp_path / "runs" / "summary.json",
+        log_path=tmp_path / "runs" / "release.log",
+        review_path=tmp_path / "runs" / "review.md",
+        metrics_path=tmp_path / "runs" / "metrics.json",
+        budget_path=tmp_path / "runs" / "budget.json",
+        tuning_path=tmp_path / "runs" / "tuning.md",
+        decision="accepted",
+        task_results=[],
+    )
+    cycle = SimpleNamespace(
+        selected_epic_id="epic-1",
+        plan_path=tmp_path / "runs" / "backlog_plan.json",
+        objective_path=tmp_path / "objectives" / "demo-epic-1.yaml",
+        contract_plan_path=tmp_path / "runs" / "contract_plan.json",
+        release=release_result,
+    )
+    result = SimpleNamespace(
+        project_id="demo",
+        requested_epic_count=2,
+        attempted_epic_count=1,
+        accepted_epic_count=1,
+        stop_reason="release_not_accepted",
+        cycles=[cycle],
+    )
+
+    def fake_run_governor(**kwargs):
+        seen_kwargs.update(kwargs)
+        kwargs["progress"]("event=governor_cycle_started cycle=1 epic_count=2")
+        return result
+
+    monkeypatch.setattr(cli_module, "_make_governor_run_id", lambda **_kwargs: run_id)
+    monkeypatch.setattr(cli_module, "run_governor", fake_run_governor)
+    monkeypatch.setattr(cli_module, "_codex_backlog_planner_backend", lambda **kwargs: object())
+
+    exit_code = main(
+        [
+            "run-governor",
+            "--project",
+            "demo",
+            "--goal",
+            "Run repeated epics",
+            "--epic-count",
+            "2",
+            "--execute-planner",
+            "--runs-dir",
+            str(tmp_path / "runs"),
+            "--release-finalize",
+            "push-feature",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert seen_kwargs["epic_count"] == 2
+    assert seen_kwargs["release_finalize"] == "push-feature"
+    assert '"requested_epic_count": 2' in captured.out
+    assert '"attempted_epic_count": 1' in captured.out
+    assert '"accepted_epic_count": 1' in captured.out
+    assert '"stop_reason": "release_not_accepted"' in captured.out
+    events_text = (tmp_path / "runs" / run_id / "events.jsonl").read_text(encoding="utf-8")
+    assert '"event_type": "governor_started"' in events_text
+    assert '"event_type": "epic_selected"' in events_text
+    assert "event=governor_cycle_started" in events_text
+    assert '"event_type": "release_completed"' in events_text
+    assert '"event_type": "finalization_completed"' in events_text
+    assert '"event_type": "governor_completed"' in events_text
 
 
 def test_run_backlog_requires_execute_planner(capsys) -> None:

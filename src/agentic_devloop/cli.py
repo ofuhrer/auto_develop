@@ -20,10 +20,13 @@ from agentic_devloop.release import run_release
 from agentic_devloop.status import load_run_summaries
 
 try:
-    from agentic_devloop.backlog import run_backlog
+    from agentic_devloop.backlog import run_backlog, run_governor
 except ImportError:
     def run_backlog(**_kwargs):
         raise NotImplementedError("run-backlog orchestrator is not available in this build")
+
+    def run_governor(**_kwargs):
+        raise NotImplementedError("run-governor orchestrator is not available in this build")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -171,6 +174,41 @@ def build_parser() -> argparse.ArgumentParser:
     _add_execute_planner_argument(run_backlog_parser, help_text="Execute the configured planner backend.")
     _add_release_execution_arguments(run_backlog_parser)
     run_backlog_parser.add_argument(
+        "--objectives-dir",
+        default="objectives",
+        help="Directory where selected objective YAML should be written.",
+    )
+
+    run_governor_parser = subparsers.add_parser(
+        "run-governor",
+        help="Run the autonomous governor for the next N backlog epics.",
+    )
+    run_governor_parser.add_argument("--project", required=True, help="Project identifier.")
+    run_governor_parser.add_argument(
+        "--epic-count",
+        type=int,
+        required=True,
+        help="Maximum number of epic cycles to attempt before stopping.",
+    )
+    run_governor_parser.add_argument(
+        "--epic-id",
+        help="Optional first epic identifier to execute. Later cycles use planner selection.",
+    )
+    run_governor_parser.add_argument("--goal", required=True, help="Repository goal used to prioritize epics.")
+    run_governor_parser.add_argument(
+        "--roadmap",
+        default="docs/design/ROADMAP_AND_BACKLOG.md",
+        help="Roadmap Markdown file to analyze.",
+    )
+    run_governor_parser.add_argument(
+        "--mode",
+        choices=["strong-model"],
+        default="strong-model",
+        help="Governor execution mode. Only strong-model execution is supported.",
+    )
+    _add_execute_planner_argument(run_governor_parser, help_text="Execute the configured planner backend.")
+    _add_release_execution_arguments(run_governor_parser)
+    run_governor_parser.add_argument(
         "--objectives-dir",
         default="objectives",
         help="Directory where selected objective YAML should be written.",
@@ -649,6 +687,132 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(_backlog_run_result(result), indent=2))
         return 0
 
+    if args.command == "run-governor":
+        governor_run_id = _make_governor_run_id(project_id=args.project)
+        governor_writer = build_governor_event_log_writer(
+            runs_dir=Path(args.runs_dir),
+            run_id=governor_run_id,
+        )
+        live_cycle_events: set[str] = set()
+
+        def governor_progress(message: str) -> None:
+            _print_progress(message)
+            if "event=governor_cycle_started" in message:
+                governor_writer.write(
+                    event_type=GovernorEventType.EPIC_SELECTED,
+                    message=message,
+                )
+            elif "event=release_started" in message:
+                governor_writer.write(
+                    event_type=GovernorEventType.RELEASE_STARTED,
+                    message=message,
+                )
+            elif (
+                "event=repair_" in message
+                or "event=task_resumed" in message
+                or "event=conflict_repair_started" in message
+            ):
+                event_key = f"repair:{message}"
+                if event_key not in live_cycle_events:
+                    live_cycle_events.add(event_key)
+                    governor_writer.write(
+                        event_type=GovernorEventType.REPAIR_DECISION,
+                        message=message,
+                    )
+            elif "event=governor_cycle_completed" in message:
+                governor_writer.write(
+                    event_type=GovernorEventType.RELEASE_COMPLETED,
+                    message=message,
+                )
+
+        governor_writer.write(
+            event_type=GovernorEventType.GOVERNOR_STARTED,
+            message=(
+                f"project={args.project} run-governor started "
+                f"epic_count={args.epic_count} goal={json.dumps(args.goal)}"
+            ),
+        )
+        try:
+            if not args.execute_planner:
+                raise ValueError("run-governor requires --execute-planner")
+            planner_backend = _codex_backlog_planner_backend(
+                project_id=args.project,
+                config_dir=Path(args.config_dir),
+            )
+            result = run_governor(
+                project_id=args.project,
+                goal=args.goal,
+                epic_count=args.epic_count,
+                roadmap_path=Path(args.roadmap),
+                selected_epic_id=args.epic_id,
+                config_dir=Path(args.config_dir),
+                contracts_dir=Path(args.contracts_dir),
+                runs_dir=Path(args.runs_dir),
+                objectives_dir=Path(args.objectives_dir),
+                mode=args.mode,
+                planner_backend=planner_backend,
+                verification_timeout_seconds=args.verification_timeout_seconds,
+                allow_dirty=args.allow_dirty,
+                commit_on_accept=args.commit_on_accept,
+                merge_on_accept=args.merge_on_accept,
+                push_on_accept=args.push_on_accept,
+                release_finalize=args.release_finalize,
+                integration_branch=args.integration_branch,
+                stop_on_failure=not args.continue_on_failure,
+                execution_mode=args.execution_mode,
+                debug_keep_artifacts=args.debug_keep_artifacts,
+                progress=governor_progress,
+            )
+        except KeyboardInterrupt:
+            parser.exit(130, "\ninterrupted: run-governor stopped before completion\n")
+        except Exception as error:
+            parser.exit(2, f"error: {error}\n")
+
+        for index, cycle in enumerate(result.cycles, start=1):
+            governor_writer.write(
+                event_type=GovernorEventType.EPIC_SELECTED,
+                message=f"cycle={index} selected_epic_id={cycle.selected_epic_id}",
+                artifacts=[cycle.plan_path],
+            )
+            governor_writer.write(
+                event_type=GovernorEventType.OBJECTIVE_READY,
+                message=f"cycle={index} objective_path={cycle.objective_path}",
+                artifacts=[cycle.objective_path],
+            )
+            if cycle.contract_plan_path is not None:
+                governor_writer.write(
+                    event_type=GovernorEventType.CONTRACT_PLAN_COMPLETED,
+                    message=f"cycle={index} contract_plan_path={cycle.contract_plan_path}",
+                    artifacts=[cycle.contract_plan_path],
+                )
+            if cycle.release is not None:
+                governor_writer.write(
+                    event_type=GovernorEventType.RELEASE_COMPLETED,
+                    message=f"cycle={index} release_id={cycle.release.release_id} decision={cycle.release.decision}",
+                    artifacts=_release_artifact_links(cycle.release),
+                )
+                if args.release_finalize != "none":
+                    governor_writer.write(
+                        event_type=GovernorEventType.FINALIZATION_COMPLETED,
+                        message=f"cycle={index} release_id={cycle.release.release_id} mode={args.release_finalize}",
+                        artifacts=[cycle.release.summary_path],
+                    )
+        governor_writer.write(
+            event_type=GovernorEventType.GOVERNOR_COMPLETED,
+            message=(
+                f"attempted_epic_count={result.attempted_epic_count} "
+                f"accepted_epic_count={result.accepted_epic_count} "
+                f"requested_epic_count={result.requested_epic_count} stop_reason={result.stop_reason}"
+            ),
+            artifacts=[cycle.plan_path for cycle in result.cycles],
+        )
+
+        output = _backlog_multi_run_result(result)
+        output["governor_log_path"] = str(governor_writer.paths.log_path)
+        output["governor_events_path"] = str(governor_writer.paths.events_path)
+        print(json.dumps(output, indent=2))
+        return 0
+
     if args.command == "status":
         summaries = load_run_summaries(Path(args.runs_dir), limit=args.limit)
         if not summaries:
@@ -824,6 +988,17 @@ def _backlog_run_result(result) -> dict[str, object]:
     if getattr(result, "release", None) is not None:
         output["release"] = _release_run_result(result.release)
     return output
+
+
+def _backlog_multi_run_result(result) -> dict[str, object]:
+    return {
+        "project_id": result.project_id,
+        "requested_epic_count": result.requested_epic_count,
+        "attempted_epic_count": result.attempted_epic_count,
+        "accepted_epic_count": result.accepted_epic_count,
+        "stop_reason": result.stop_reason,
+        "cycles": [_backlog_run_result(cycle) for cycle in result.cycles],
+    }
 
 
 def _codex_planner_backend(*, project_id: str | None, config_dir: Path, runs_dir: Path) -> CodexPlannerBackend:
