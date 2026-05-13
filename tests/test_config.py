@@ -11,11 +11,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_load_project_config() -> None:
-    config = load_project_config("rust_rockfall", ROOT / "configs")
+    config = load_project_config("auto_develop", ROOT / "configs")
 
-    assert config.project_id == "rust_rockfall"
+    assert config.project_id == "auto_develop"
     assert config.default_base_branch == "main"
-    assert config.repo_state_path == ROOT / "repo_state" / "rust_rockfall"
+    assert config.repo_state_path == ROOT / "repo_state" / "auto_develop"
 
 
 def test_load_project_config_resolves_repo_state_from_target_repo_when_controller_state_is_absent(

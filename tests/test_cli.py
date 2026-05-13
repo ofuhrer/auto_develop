@@ -21,22 +21,22 @@ def test_cli_help_exits_successfully(capsys) -> None:
 
 
 def test_init_prints_project_and_repo(capsys) -> None:
-    exit_code = main(["init", "--project", "rust_rockfall", "--repo", "/tmp/rust_rockfall"])
+    exit_code = main(["init", "--project", "demo", "--repo", "/tmp/demo"])
 
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "project=rust_rockfall" in captured.out
-    assert "repo=/tmp/rust_rockfall" in captured.out
+    assert "project=demo" in captured.out
+    assert "repo=/tmp/demo" in captured.out
 
 
 def test_config_prints_project_config(capsys) -> None:
-    exit_code = main(["config", "--project", "rust_rockfall"])
+    exit_code = main(["config", "--project", "auto_develop"])
 
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert '"project_id": "rust_rockfall"' in captured.out
+    assert '"project_id": "auto_develop"' in captured.out
 
 
 def test_doctor_command_is_registered(capsys) -> None:

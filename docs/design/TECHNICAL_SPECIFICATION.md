@@ -45,10 +45,10 @@ SQLite is acceptable later if filesystem search becomes a bottleneck.
 Defines how the orchestrator interacts with a target repository.
 
 ```yaml
-project_id: rust_rockfall
-repo_path: /path/to/rust_rockfall
+project_id: my_project
+repo_path: /path/to/my_project
 default_base_branch: main
-worktree_root: /path/to/worktrees/rust_rockfall
+worktree_root: /path/to/worktrees/my_project
 
 executor:
   type: codex_cli
@@ -137,7 +137,7 @@ budget:
   max_diff_lines_per_task: 600
   max_context_chars_per_task: 30000
 
-repo_state_path: repo_state/rust_rockfall
+repo_state_path: .auto_develop/repo_state/my_project
 ```
 
 `model_catalog` is advisory policy, not an execution backend. It lets `doctor` report whether configured roles point at supported, unsupported, or unproven models. `model_roles` remains the execution source of truth. If a primary model is unavailable, bounded executor attempts can fall back through `fallback_models`; conflict repair uses the `repair` role when configured.
@@ -150,7 +150,7 @@ A release-sized goal that must be decomposed before execution.
 release_id: v0.8.0
 title: Major feature release
 objective: >
-  Implement a release-sized feature increment for rust_rockfall.
+  Implement a release-sized feature increment for my_project.
 non_goals:
   - Do not rewrite core architecture without explicit approval.
   - Do not weaken validation gates.
@@ -272,22 +272,22 @@ follow_up_tasks:
 Current CLI shape:
 
 ```bash
-agent-loop init --project rust_rockfall --repo ~/dev/rust_rockfall
+agent-loop init --project my_project --repo ~/dev/my_project
 
 agent-loop config \
-  --project rust_rockfall
+  --project auto_develop
 
 agent-loop config \
-  --project rust_rockfall \
+  --project auto_develop \
   --validate-repo
 
 agent-loop run-task \
-  --project rust_rockfall \
-  --contract contracts/rr-0001.yaml
+  --project auto_develop \
+  --contract contracts/<task-id>.yaml
 
 agent-loop run-task \
   --project auto_develop \
-  --contract contracts/ad-0001.yaml \
+  --contract contracts/<task-id>.yaml \
   --push-on-accept
 
 agent-loop run-release \
@@ -781,9 +781,9 @@ Worktree naming:
 
 ```text
 agent-worktrees/
-  rust_rockfall/
-    rr-0001/
-    rr-0002/
+  my_project/
+    my-feature-0001/
+    my-feature-0002/
 ```
 
 Branch naming:

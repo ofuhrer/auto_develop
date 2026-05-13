@@ -20,7 +20,7 @@ Keep changes aligned with that purpose. Prefer pragmatic, testable orchestration
 - `src/agentic_devloop/`: Python package and CLI implementation.
 - `tests/`: pytest suite.
 - `configs/`: local project configs used for smoke tests and examples.
-- `contracts/`: task contract examples and local test contracts.
+- `contracts/`: generated/current task contracts when needed; historical contracts are not kept after their releases land.
 - `objectives/`: release objective examples.
 - `repo_state/`: durable state for `auto_develop` self-development and examples. External target projects should keep their durable state in the target repo or a dedicated control repo.
 - `docs/README.md`: documentation index and current implementation summary.

@@ -42,11 +42,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_sample_yaml_files_validate() -> None:
-    project = load_yaml_model(ROOT / "configs" / "rust_rockfall.yaml", ProjectConfig)
+    project = load_yaml_model(ROOT / "configs" / "auto_develop.yaml", ProjectConfig)
     objective = ReleaseObjective(
-        release_id="v0.8.0",
+        release_id="demo-release",
         title="Major feature release",
-        objective="Implement a release-sized feature increment for rust_rockfall.",
+        objective="Implement a release-sized feature increment for auto_develop.",
         non_goals=["Do not weaken validation gates."],
         acceptance_criteria=["All default verification checks pass."],
     )
@@ -65,10 +65,10 @@ def test_sample_yaml_files_validate() -> None:
         scientific_assumptions=["No scientific behavior changes are expected."],
     )
 
-    assert project.project_id == "rust_rockfall"
+    assert project.project_id == "auto_develop"
     assert project.model_catalog["coding_worker"].model == "gpt-5.3-codex"
     assert project.model_catalog["micro_repair"].availability == ModelAvailability.UNKNOWN
-    assert objective.release_id == "v0.8.0"
+    assert objective.release_id == "demo-release"
     assert contract.task_id == "rr-0001"
 
 
@@ -115,8 +115,8 @@ def test_missing_required_field_fails_clearly() -> None:
     with pytest.raises(ValidationError) as error:
         ProjectConfig.model_validate(
             {
-                "project_id": "rust_rockfall",
-                "repo_path": "/tmp/rust_rockfall",
+                "project_id": "demo",
+                "repo_path": "/tmp/demo",
                 "default_base_branch": "main",
                 "worktree_root": "/tmp/worktrees",
                 "verification_profiles": {"default": {"commands": ["cargo test"]}},

@@ -112,7 +112,7 @@ the kernel.
 ## Pragmatic Simplifications for v1
 
 - Support one executor backend first: Codex CLI.
-- Support one target repository first: `rust_rockfall`.
+- Support one external target repository first, with target-local `.auto_develop/` artifacts rather than target-specific controller-repo state.
 - Use Python dataclasses or Pydantic models, but avoid building a plugin framework until a second adapter exists.
 - Store state in predictable directories and plain files.
 - Implement deterministic review before model review.

@@ -69,20 +69,22 @@ PYTHONPATH=src .venv/bin/python -m agentic_devloop cleanup --help
 
 ## Release-Orchestration Smoke Test
 
-Before running against this repository, make sure the main checkout is clean:
+The repository no longer tracks historical smoke-test contracts. Before running
+against this repository, create or generate a small contract for the current
+epic and make sure the main checkout is clean:
 
 ```bash
 git status --short --branch
 agent-loop cleanup --project auto_develop --release smoke-test
 ```
 
-Then run a bounded contract:
+Then run the bounded contract you created:
 
 ```bash
 agent-loop run-release \
   --project auto_develop \
   --release smoke-test \
-  --contract contracts/ad-0001.yaml
+  --contract contracts/<task-id>.yaml
 ```
 
 For merge/finalization testing, use an explicit feature-branch flow:
@@ -91,7 +93,7 @@ For merge/finalization testing, use an explicit feature-branch flow:
 agent-loop run-release \
   --project auto_develop \
   --release smoke-test \
-  --contract contracts/ad-0001.yaml \
+  --contract contracts/<task-id>.yaml \
   --merge-on-accept \
   --release-finalize push-feature
 ```
