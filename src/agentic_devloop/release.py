@@ -278,6 +278,36 @@ def _parse_scope_risk_budget_from_finding(*, finding_id: str, risk: str) -> tupl
     return (budget_name, configured, actual)
 
 
+def _scope_risk_metrics_from_task_bundle(bundle_path: Path) -> tuple[int, int] | None:
+    run_state_path = bundle_path / "run_state.json"
+    if not run_state_path.exists():
+        return None
+    payload = json.loads(run_state_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return None
+    changed_files = payload.get("changed_files")
+    diff_lines = payload.get("diff_lines")
+    if not isinstance(changed_files, list) or not all(isinstance(item, str) for item in changed_files):
+        return None
+    if not isinstance(diff_lines, int) or diff_lines < 0:
+        return None
+    changed_files_count = len([item for item in changed_files if str(item).strip()])
+    return (changed_files_count, diff_lines)
+
+
+def _scope_risk_evidence_paths_for_task_result(result: TaskRunResult) -> list[Path]:
+    candidates = [
+        result.bundle_path / "changed_files.txt",
+        result.bundle_path / "git_diff.patch",
+        result.bundle_path / "run_state.json",
+        result.bundle_path / "verification.log",
+        result.bundle_path / "soft_gate_decision.json",
+        result.bundle_path / "contract.yaml",
+    ]
+    selected = [path for path in candidates if path.exists()]
+    return selected or [result.bundle_path]
+
+
 def _ensure_scope_risk_budget_policy_decisions(
     *,
     release_root: Path,
@@ -305,6 +335,10 @@ def _ensure_scope_risk_budget_policy_decisions(
         if result is None:
             continue
         findings = getattr(result.decision, "soft_gate_findings", []) or []
+        has_diff_budget_finding = any(
+            str(getattr(finding, "finding_id", "") or "").endswith(":diff_lines_budget")
+            for finding in findings
+        )
         parsed_findings = [
             parsed
             for finding in findings
@@ -313,15 +347,42 @@ def _ensure_scope_risk_budget_policy_decisions(
         ]
         changed_values = [(configured, actual) for budget_name, configured, actual in parsed_findings if budget_name == "changed_files"]
         diff_values = [(configured, actual) for budget_name, configured, actual in parsed_findings if budget_name == "diff_lines"]
-        configured_changed_files_limit = (
-            max(value[0] for value in changed_values) if changed_values else default_changed_files_limit
+        configured_changed_files_limit = max(
+            (value[0] for value in changed_values),
+            default=default_changed_files_limit,
         )
-        actual_changed_files = max(value[1] for value in changed_values) if changed_values else configured_changed_files_limit + 1
-        configured_diff_size_limit = max(value[0] for value in diff_values) if diff_values else default_diff_size_limit
-        actual_diff_size = max(value[1] for value in diff_values) if diff_values else configured_diff_size_limit + 1
+        configured_diff_size_limit = max(
+            (value[0] for value in diff_values),
+            default=default_diff_size_limit,
+        )
+
+        derived_metrics = _scope_risk_metrics_from_task_bundle(result.bundle_path)
+        derived_changed_files = derived_metrics[0] if derived_metrics is not None else None
+        derived_diff_lines = derived_metrics[1] if derived_metrics is not None else None
+
+        if changed_values:
+            actual_changed_files = max(value[1] for value in changed_values)
+        elif derived_changed_files is not None:
+            actual_changed_files = derived_changed_files
+        else:
+            raise RuntimeError(
+                "unable to derive changed-files budget actual from task bundle; "
+                f"missing or invalid run_state.json at {result.bundle_path / 'run_state.json'}"
+            )
+
+        if diff_values:
+            actual_diff_size = max(value[1] for value in diff_values)
+        elif derived_diff_lines is not None:
+            actual_diff_size = derived_diff_lines
+        else:
+            raise RuntimeError(
+                "unable to derive diff-lines budget actual from task bundle; "
+                f"missing or invalid run_state.json at {result.bundle_path / 'run_state.json'}"
+            )
+
         classification = (
             ScopeRiskClassification.COHESIVE
-            if diff_values
+            if has_diff_budget_finding
             else ScopeRiskClassification.MECHANICAL
         )
         decision = ScopeRiskBudgetPolicyDecision.model_validate(
@@ -335,7 +396,7 @@ def _ensure_scope_risk_budget_policy_decisions(
                     "Generated deterministic scope-risk decision because no supervisor decision artifact "
                     "was present for a task-level changed-files or diff-size soft overage."
                 ),
-                "evidence_paths": [Path("release_overlap_report.json")],
+                "evidence_paths": _scope_risk_evidence_paths_for_task_result(result),
                 "classification": classification,
                 "selected_action": ScopeRiskAction.REPLAN,
                 "outcome": ScopeRiskOutcome.REPLAN_AND_RETRY,
