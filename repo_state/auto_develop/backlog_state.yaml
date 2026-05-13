@@ -129,9 +129,13 @@ completed_epic_records:
     source_path: runs/20260513T212009Z_planner-admission-repair_release/feature_review_recheck.json
   state_review_snapshot_references: []
   metrics_snapshot_references:
-  - runs/20260513T212009Z_planner-admission-repair_release/release_metrics.json
+  - metrics_path: runs/20260513T212009Z_planner-admission-repair_release/release_metrics.json
+    recorded_at: '2026-05-13T21:55:00Z'
+    release_id: planner-admission-repair
   tuning_report_references:
-  - runs/20260513T212009Z_planner-admission-repair_release/release_tuning.md
+  - tuning_report_path: runs/20260513T212009Z_planner-admission-repair_release/release_tuning.md
+    recorded_at: '2026-05-13T21:55:00Z'
+    release_id: planner-admission-repair
   updated_at: '2026-05-13T21:55:00Z'
 - epic_id: governor-state-refresh
   status_reason: completed via feature/governor-state-refresh and manually recovered
