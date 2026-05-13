@@ -295,7 +295,12 @@ def _scope_risk_metrics_from_task_bundle(bundle_path: Path) -> tuple[int, int] |
     return (changed_files_count, diff_lines)
 
 
-def _scope_risk_evidence_paths_for_task_result(result: TaskRunResult) -> list[Path]:
+def _scope_risk_evidence_paths_for_task_result(
+    *,
+    result: TaskRunResult,
+    release_root: Path,
+    task_id: str,
+) -> list[Path]:
     candidates = [
         result.bundle_path / "changed_files.txt",
         result.bundle_path / "git_diff.patch",
@@ -304,8 +309,33 @@ def _scope_risk_evidence_paths_for_task_result(result: TaskRunResult) -> list[Pa
         result.bundle_path / "soft_gate_decision.json",
         result.bundle_path / "contract.yaml",
     ]
-    selected = [path for path in candidates if path.exists()]
-    return selected or [result.bundle_path]
+    evidence_dir = release_root / "scope_risk_evidence" / task_id
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    selected: list[Path] = []
+    for path in candidates:
+        if not path.exists():
+            continue
+        target = evidence_dir / path.name
+        target.write_bytes(path.read_bytes())
+        selected.append(target.relative_to(release_root))
+    if selected:
+        return selected
+
+    fallback = evidence_dir / "evidence_manifest.json"
+    fallback.write_text(
+        json.dumps(
+            {
+                "task_id": task_id,
+                "bundle_path": str(result.bundle_path),
+                "note": "No standard task evidence files were present when the scope-risk decision was generated.",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return [fallback.relative_to(release_root)]
 
 
 def _ensure_scope_risk_budget_policy_decisions(
@@ -335,6 +365,10 @@ def _ensure_scope_risk_budget_policy_decisions(
         if result is None:
             continue
         findings = getattr(result.decision, "soft_gate_findings", []) or []
+        has_changed_files_budget_finding = any(
+            str(getattr(finding, "finding_id", "") or "").endswith(":changed_files_budget")
+            for finding in findings
+        )
         has_diff_budget_finding = any(
             str(getattr(finding, "finding_id", "") or "").endswith(":diff_lines_budget")
             for finding in findings
@@ -347,44 +381,41 @@ def _ensure_scope_risk_budget_policy_decisions(
         ]
         changed_values = [(configured, actual) for budget_name, configured, actual in parsed_findings if budget_name == "changed_files"]
         diff_values = [(configured, actual) for budget_name, configured, actual in parsed_findings if budget_name == "diff_lines"]
-        configured_changed_files_limit = max(
-            (value[0] for value in changed_values),
-            default=default_changed_files_limit,
-        )
-        configured_diff_size_limit = max(
-            (value[0] for value in diff_values),
-            default=default_diff_size_limit,
-        )
+        # Prefer configured policy inputs and structured run_state metrics. The
+        # risk-string parser remains a compatibility fallback for legacy bundles.
+        configured_changed_files_limit = default_changed_files_limit
+        configured_diff_size_limit = default_diff_size_limit
 
         derived_metrics = _scope_risk_metrics_from_task_bundle(result.bundle_path)
         derived_changed_files = derived_metrics[0] if derived_metrics is not None else None
         derived_diff_lines = derived_metrics[1] if derived_metrics is not None else None
 
-        if changed_values:
-            actual_changed_files = max(value[1] for value in changed_values)
-        elif derived_changed_files is not None:
+        if derived_changed_files is not None:
             actual_changed_files = derived_changed_files
+        elif changed_values:
+            actual_changed_files = max(value[1] for value in changed_values)
         else:
             raise RuntimeError(
                 "unable to derive changed-files budget actual from task bundle; "
                 f"missing or invalid run_state.json at {result.bundle_path / 'run_state.json'}"
             )
 
-        if diff_values:
-            actual_diff_size = max(value[1] for value in diff_values)
-        elif derived_diff_lines is not None:
+        if derived_diff_lines is not None:
             actual_diff_size = derived_diff_lines
+        elif diff_values:
+            actual_diff_size = max(value[1] for value in diff_values)
         else:
             raise RuntimeError(
                 "unable to derive diff-lines budget actual from task bundle; "
                 f"missing or invalid run_state.json at {result.bundle_path / 'run_state.json'}"
             )
 
-        classification = (
-            ScopeRiskClassification.COHESIVE
-            if has_diff_budget_finding
-            else ScopeRiskClassification.MECHANICAL
-        )
+        classification = ScopeRiskClassification.MECHANICAL
+        overage_kinds = []
+        if has_changed_files_budget_finding:
+            overage_kinds.append("changed-files")
+        if has_diff_budget_finding:
+            overage_kinds.append("diff-size")
         decision = ScopeRiskBudgetPolicyDecision.model_validate(
             {
                 "decision_type": SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY,
@@ -394,9 +425,16 @@ def _ensure_scope_risk_budget_policy_decisions(
                 "decided_by": "deterministic_scope_risk_budget_policy",
                 "rationale": (
                     "Generated deterministic scope-risk decision because no supervisor decision artifact "
-                    "was present for a task-level changed-files or diff-size soft overage."
+                    "was present for a task-level "
+                    + (", ".join(overage_kinds) or "scope-risk")
+                    + " soft overage. This placeholder stays mechanically classified and blocks finalization "
+                    "until an explicit supervisor decision accepts, splits, narrows, replans, or stops."
                 ),
-                "evidence_paths": _scope_risk_evidence_paths_for_task_result(result),
+                "evidence_paths": _scope_risk_evidence_paths_for_task_result(
+                    result=result,
+                    release_root=release_root,
+                    task_id=task_id,
+                ),
                 "classification": classification,
                 "selected_action": ScopeRiskAction.REPLAN,
                 "outcome": ScopeRiskOutcome.REPLAN_AND_RETRY,

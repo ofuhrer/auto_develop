@@ -831,6 +831,29 @@ def test_scope_risk_budget_policy_requires_non_empty_required_fields() -> None:
         )
 
 
+@pytest.mark.parametrize("evidence_path", ["/tmp/changed_files.txt", "../changed_files.txt"])
+def test_scope_risk_budget_policy_requires_release_relative_evidence_paths(evidence_path: str) -> None:
+    with pytest.raises(ValidationError, match="scope-risk evidence_paths"):
+        ScopeRiskBudgetPolicyDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY,
+                "classification": ScopeRiskClassification.MECHANICAL,
+                "selected_action": ScopeRiskAction.REPLAN,
+                "outcome": ScopeRiskOutcome.REPLAN_AND_RETRY,
+                "fallback_plan": "Split if verification regresses.",
+                "validators_to_rerun": ["verification"],
+                "configured_changed_files_limit": 8,
+                "actual_changed_files": 12,
+                "configured_diff_size_limit": 500,
+                "actual_diff_size": 740,
+                "affected_scope": ScopeRiskAffectedScope.TASK,
+                "affected_task_id": "soft-scope-budget-policy-0001",
+                "evidence_paths": [evidence_path],
+            }
+        )
+
+
 def test_scope_risk_budget_policy_blocks_soft_acceptance_for_hard_safety_findings() -> None:
     with pytest.raises(ValidationError, match="must not include hard_safety_findings"):
         ScopeRiskBudgetPolicyDecision.model_validate(

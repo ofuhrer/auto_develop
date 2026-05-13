@@ -1456,13 +1456,45 @@ def test_run_release_generates_scope_risk_decision_and_blocks_without_explicit_a
     assert isinstance(decision, ScopeRiskBudgetPolicyDecision)
     assert decision.selected_action == ScopeRiskAction.REPLAN
     assert decision.outcome == ScopeRiskOutcome.REPLAN_AND_RETRY
-    assert decision.classification in {
-        ScopeRiskClassification.MECHANICAL,
-        ScopeRiskClassification.COHESIVE,
-    }
+    assert decision.classification == ScopeRiskClassification.MECHANICAL
     assert decision.evidence_paths
+    assert all(not path.is_absolute() and ".." not in path.parts for path in decision.evidence_paths)
+    assert any("changed_files.txt" in str(path) for path in decision.evidence_paths)
     assert decision.fallback_plan
     assert decision.validators_to_rerun
+
+
+def test_run_release_scope_risk_decision_uses_structured_metrics_when_risk_parse_fails(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, max_strong_model_calls_per_release=10)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/*"]).model_dump(mode="json"),
+    )
+
+    with patch("agentic_devloop.release._parse_scope_risk_budget_from_finding", return_value=None):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=ManyFilesExecutor(files_per_task=9),
+            merge_on_accept=True,
+            release_finalize="merge-main",
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    decision = load_supervisor_decision_artifact(Path(summary["scope_risk_budget_policy_decision_paths"][0]))
+
+    assert isinstance(decision, ScopeRiskBudgetPolicyDecision)
+    assert decision.classification == ScopeRiskClassification.MECHANICAL
+    assert decision.configured_changed_files_limit == 8
+    assert decision.configured_diff_size_limit == 600
+    assert decision.actual_changed_files > decision.configured_changed_files_limit
+    assert decision.actual_diff_size >= 0
 
 
 def test_run_release_allows_soft_scope_overage_with_accepted_scope_risk_decision(tmp_path) -> None:

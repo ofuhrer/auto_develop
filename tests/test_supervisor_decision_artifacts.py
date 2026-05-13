@@ -527,7 +527,9 @@ def test_scope_risk_budget_policy_artifact_serialization_and_round_trip(tmp_path
     changed_files.write_text("src/agentic_devloop/supervisor_decisions.py\n", encoding="utf-8")
     git_diff = tmp_path / "git_diff.patch"
     git_diff.write_text("diff --git a/x b/x\n", encoding="utf-8")
-    decision = _scope_risk_budget_policy_decision(evidence_paths=[changed_files, git_diff])
+    decision = _scope_risk_budget_policy_decision(
+        evidence_paths=[Path("changed_files.txt"), Path("git_diff.patch")]
+    )
 
     artifact_path = write_supervisor_decision_artifact(
         release_bundle_path=tmp_path,

@@ -602,9 +602,14 @@ class ScopeRiskBudgetPolicyDecision(SupervisorDecisionBase):
 
     @field_validator("evidence_paths")
     @classmethod
-    def evidence_paths_must_not_be_empty(cls, values: list[Path]) -> list[Path]:
+    def evidence_paths_must_be_confined_release_relative(cls, values: list[Path]) -> list[Path]:
         if not values:
             raise ValueError("evidence_paths must not be empty")
+        for value in values:
+            if value.is_absolute():
+                raise ValueError("scope-risk evidence_paths must be release-relative")
+            if ".." in value.parts:
+                raise ValueError("scope-risk evidence_paths must not include parent traversal")
         return values
 
     @field_validator("validators_to_rerun")
