@@ -4,6 +4,7 @@ import json
 import re
 import shlex
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,9 @@ from agentic_devloop.models import (
     FeatureReviewFinding,
     FeatureReviewRecommendation,
     FeatureReviewSeverity,
+    GeneratedContract,
     Reviewer,
+    TaskContract,
 )
 from agentic_devloop.process import run_process
 
@@ -56,6 +59,17 @@ class FeatureReviewBackendResult:
     stderr_path: Path
     metadata_path: Path
     raw_output: str
+
+
+UNSAFE_REPAIR_PATH_MARKERS: tuple[str, ...] = (
+    "poetry.lock",
+    "uv.lock",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "migrations/",
+    "generated/",
+)
 
 
 def determine_feature_review_branches(
@@ -321,6 +335,46 @@ def invoke_feature_reviewer(
     )
 
 
+def generate_repair_contracts_for_required_findings(
+    *,
+    decision: FeatureReviewDecision,
+    source_contracts: list[TaskContract],
+    include_optional_findings: bool = False,
+) -> list[GeneratedContract]:
+    selected_findings = [
+        finding
+        for finding in decision.findings
+        if finding.required_repairs or (include_optional_findings and finding.optional_follow_ups)
+    ]
+    if not selected_findings:
+        return []
+
+    unsafe_path_to_finding: dict[str, str] = {}
+    generated: list[GeneratedContract] = []
+    for index, finding in enumerate(selected_findings, start=1):
+        mapped_contracts = _contracts_for_finding(finding, source_contracts=source_contracts)
+        _record_unsafe_overlap(
+            finding,
+            unsafe_path_to_finding=unsafe_path_to_finding,
+        )
+        repair_contract = _build_repair_contract(
+            decision=decision,
+            finding=finding,
+            mapped_contracts=mapped_contracts,
+            index=index,
+        )
+        generated.append(
+            GeneratedContract(
+                task_id=repair_contract.task_id,
+                title=repair_contract.title,
+                objective=repair_contract.objective,
+                rationale=f"Required feature-review finding {finding.finding_id} must be repaired before finalization.",
+                suggested_contract=repair_contract,
+            )
+        )
+    return generated
+
+
 def _ensure_git_ref(repo_path: Path, ref: str) -> None:
     try:
         _git_rev(repo_path, ref)
@@ -449,3 +503,127 @@ def _blocked_feature_review_decision(
         accepted_risks=[],
         rerun_verification_commands=[],
     )
+
+
+def _contracts_for_finding(
+    finding: FeatureReviewFinding,
+    *,
+    source_contracts: list[TaskContract],
+) -> list[TaskContract]:
+    if not finding.affected_files:
+        raise FeatureReviewContextError(
+            f"finding {finding.finding_id} has no affected_files; cannot derive bounded repair scope"
+        )
+    matched: list[TaskContract] = []
+    for contract in source_contracts:
+        if any(
+            any(_path_matches_allowed_pattern(path, pattern) for pattern in contract.allowed_files)
+            for path in finding.affected_files
+        ):
+            matched.append(contract)
+    unmapped = [
+        path
+        for path in finding.affected_files
+        if not any(any(_path_matches_allowed_pattern(path, p) for p in c.allowed_files) for c in matched)
+    ]
+    if unmapped:
+        raise FeatureReviewContextError(
+            f"finding {finding.finding_id} references files outside source contract scope: {', '.join(unmapped)}"
+        )
+    return matched
+
+
+def _path_matches_allowed_pattern(path: str, pattern: str) -> bool:
+    normalized_path = path.strip().lstrip("./")
+    normalized_pattern = pattern.strip().lstrip("./")
+    if not normalized_path or not normalized_pattern:
+        return False
+    return fnmatchcase(normalized_path, normalized_pattern)
+
+
+def _record_unsafe_overlap(
+    finding: FeatureReviewFinding,
+    *,
+    unsafe_path_to_finding: dict[str, str],
+) -> None:
+    for path in finding.affected_files:
+        normalized = path.strip().lstrip("./")
+        if not any(marker in normalized for marker in UNSAFE_REPAIR_PATH_MARKERS):
+            continue
+        previous_finding = unsafe_path_to_finding.get(normalized)
+        if previous_finding is not None and previous_finding != finding.finding_id:
+            raise FeatureReviewContextError(
+                f"unsafe path overlap across findings requires stop: {normalized} "
+                f"({previous_finding}, {finding.finding_id})"
+            )
+        unsafe_path_to_finding[normalized] = finding.finding_id
+
+
+def _build_repair_contract(
+    *,
+    decision: FeatureReviewDecision,
+    finding: FeatureReviewFinding,
+    mapped_contracts: list[TaskContract],
+    index: int,
+) -> TaskContract:
+    allowed_files = _unique_strings(finding.affected_files)
+    forbidden_changes = _unique_strings(
+        item for contract in mapped_contracts for item in contract.forbidden_changes
+    )
+    required_evidence = _unique_strings(
+        [
+            "git diff",
+            "changed-files list",
+            *(
+                item
+                for contract in mapped_contracts
+                for item in contract.required_evidence
+            ),
+        ]
+    )
+    verification_commands = _unique_strings(
+        command
+        for contract in mapped_contracts
+        for command in contract.verification.commands
+    )
+    stop_conditions = _unique_strings(
+        [
+            *(
+                condition
+                for contract in mapped_contracts
+                for condition in contract.stop_conditions
+            ),
+            "Stop if repair requires files outside mapped source contract scope.",
+        ]
+    )
+    required_repairs = finding.required_repairs or [
+        "Implement bounded repair for this required finding and rerun verification."
+    ]
+    return TaskContract.model_validate(
+        {
+            "task_id": f"{decision.release_id}-repair-{index:04d}",
+            "release_id": decision.release_id,
+            "title": f"Repair finding: {finding.summary[:80]}",
+            "task_type": "code_only",
+            "budget_class": mapped_contracts[0].budget_class,
+            "objective": "; ".join(required_repairs),
+            "allowed_files": allowed_files,
+            "forbidden_changes": forbidden_changes,
+            "required_evidence": required_evidence,
+            "verification": {"commands": verification_commands},
+            "stop_conditions": stop_conditions,
+            "depends_on": [contract.task_id for contract in mapped_contracts],
+        }
+    )
+
+
+def _unique_strings(values: Any) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values:
+        item = str(value).strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        ordered.append(item)
+    return ordered

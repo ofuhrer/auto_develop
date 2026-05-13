@@ -8,11 +8,20 @@ import pytest
 
 from agentic_devloop.feature_review import (
     assemble_feature_review_context,
+    generate_repair_contracts_for_required_findings,
     invoke_feature_reviewer,
     load_feature_review_branches,
     render_feature_review_prompt,
 )
-from agentic_devloop.models import ExecutorConfig, FeatureReviewRecommendation, Reviewer
+from agentic_devloop.models import (
+    ExecutorConfig,
+    FeatureReviewDecision,
+    FeatureReviewFinding,
+    FeatureReviewRecommendation,
+    FeatureReviewSeverity,
+    Reviewer,
+    TaskContract,
+)
 from agentic_devloop.process import ProcessOutput
 
 
@@ -233,4 +242,103 @@ def test_assemble_feature_review_context_raises_when_refs_missing(tmp_path: Path
             release_id="rel-5",
             base_branch="main",
             integration_branch="feature/rel-5",
+        )
+
+
+def test_generate_repair_contracts_for_required_findings_preserves_scope_and_forbidden_changes() -> None:
+    source_contract = TaskContract.model_validate(
+        {
+            "task_id": "rel-6-0001",
+            "release_id": "rel-6",
+            "title": "Main task",
+            "budget_class": "M",
+            "objective": "Implement feature.",
+            "allowed_files": ["src/foo.py", "src/bar.py"],
+            "forbidden_changes": ["Do not weaken validation guards."],
+            "required_evidence": ["pytest output"],
+            "verification": {"commands": ["pytest tests/test_feature_review.py"]},
+            "stop_conditions": ["Stop on scope drift."],
+        }
+    )
+    decision = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-6",
+            "reviewer": "strong_model",
+            "summary": "Needs one required fix and one optional follow-up.",
+            "recommendation": "require_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "finding-required",
+                    "severity": "high",
+                    "summary": "Guard path is missing.",
+                    "affected_files": ["src/foo.py"],
+                    "required_repairs": ["Restore guard behavior."],
+                    "optional_follow_ups": [],
+                },
+                {
+                    "finding_id": "finding-optional",
+                    "severity": "low",
+                    "summary": "Optional cleanup.",
+                    "affected_files": ["src/bar.py"],
+                    "required_repairs": [],
+                    "optional_follow_ups": ["Refactor naming."],
+                },
+            ],
+        }
+    )
+
+    generated = generate_repair_contracts_for_required_findings(
+        decision=decision,
+        source_contracts=[source_contract],
+    )
+
+    assert len(generated) == 1
+    repair = generated[0].suggested_contract
+    assert repair.allowed_files == ["src/foo.py"]
+    assert repair.forbidden_changes == ["Do not weaken validation guards."]
+    assert repair.required_evidence == ["git diff", "changed-files list", "pytest output"]
+    assert repair.verification.commands == ["pytest tests/test_feature_review.py"]
+    assert repair.depends_on == ["rel-6-0001"]
+
+
+def test_generate_repair_contracts_for_required_findings_stops_on_unmapped_file() -> None:
+    source_contract = TaskContract.model_validate(
+        {
+            "task_id": "rel-7-0001",
+            "release_id": "rel-7",
+            "title": "Main task",
+            "budget_class": "S",
+            "objective": "Implement feature.",
+            "allowed_files": ["src/foo.py"],
+            "required_evidence": ["pytest output"],
+            "verification": {"commands": ["pytest -q"]},
+            "stop_conditions": ["Stop on scope drift."],
+        }
+    )
+    decision = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-7",
+            "reviewer": "deterministic",
+            "summary": "Repair needed.",
+            "recommendation": "require_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                FeatureReviewFinding(
+                    finding_id="finding-required",
+                    severity=FeatureReviewSeverity.HIGH,
+                    summary="Touches file outside contract.",
+                    affected_files=["src/other.py"],
+                    required_repairs=["Fix behavior."],
+                )
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="outside source contract scope"):
+        generate_repair_contracts_for_required_findings(
+            decision=decision,
+            source_contracts=[source_contract],
         )
