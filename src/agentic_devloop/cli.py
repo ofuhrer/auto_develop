@@ -1220,6 +1220,10 @@ def _release_run_result(result) -> dict[str, object]:
         "feature_review_proposals": [
             proposal.model_dump(mode="json") for proposal in getattr(result, "feature_review_proposals", [])
         ],
+        "scope_risk_budget_policy_decision_paths": [
+            str(path) for path in getattr(result, "scope_risk_budget_policy_decision_paths", [])
+        ],
+        "scope_risk_budget_policy_gate": getattr(result, "scope_risk_budget_policy_gate", None),
         "decision": result.decision,
         "tasks": [_task_run_result(task_result) for task_result in result.task_results],
     }

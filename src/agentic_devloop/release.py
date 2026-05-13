@@ -99,6 +99,9 @@ from agentic_devloop.supervisor_decisions import (
     ReleaseSchedulingDecision,
     ReleaseSchedulingStalenessInputs,
     SchedulingOutcome,
+    ScopeRiskAffectedScope,
+    ScopeRiskBudgetPolicyDecision,
+    ScopeRiskOutcome,
     SupervisorDecisionType,
     load_supervisor_decision_artifact,
     supervisor_decision_artifact_path,
@@ -138,6 +141,8 @@ class ReleaseRunResult:
     feature_review_output_normalization_decision_path: Path | None = None
     feature_review_normalized_artifact_path: Path | None = None
     feature_review_proposals: list["FeatureReviewProposalRecord"] = field(default_factory=list)
+    scope_risk_budget_policy_decision_paths: list[Path] = field(default_factory=list)
+    scope_risk_budget_policy_gate: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -233,6 +238,93 @@ def make_release_run_id(release_id: str, now: datetime | None = None) -> str:
 
 def feature_branch_name(release_id: str) -> str:
     return f"feature/{release_id}"
+
+
+def _scope_risk_task_ids_from_soft_gate_findings(task_results: list[TaskRunResult]) -> list[str]:
+    task_ids: set[str] = set()
+    for result in task_results:
+        decision = result.decision
+        for finding in getattr(decision, "soft_gate_findings", []) or []:
+            finding_id = str(getattr(finding, "finding_id", "") or "")
+            if not finding_id:
+                continue
+            if finding_id.endswith(":changed_files_budget") or finding_id.endswith(":diff_lines_budget"):
+                task_ids.add(decision.task_id)
+                break
+    return sorted(task_ids)
+
+
+def _load_scope_risk_budget_policy_decisions(
+    *,
+    release_root: Path,
+) -> list[tuple[Path, ScopeRiskBudgetPolicyDecision]]:
+    supervisor_dir = release_root / "supervisor_decisions"
+    if not supervisor_dir.exists():
+        return []
+    loaded: list[tuple[Path, ScopeRiskBudgetPolicyDecision]] = []
+    pattern = f"{SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY.value}__*.json"
+    for candidate in sorted(supervisor_dir.glob(pattern)):
+        decision = load_supervisor_decision_artifact(candidate)
+        if not isinstance(decision, ScopeRiskBudgetPolicyDecision):
+            raise ValueError(
+                f"scope risk budget policy decision artifact has unsupported type: {decision.decision_type}"
+            )
+        loaded.append((candidate, decision))
+    return loaded
+
+
+def _scope_risk_budget_policy_gate(
+    *,
+    required_task_ids: list[str],
+    loaded_decisions: list[tuple[Path, ScopeRiskBudgetPolicyDecision]],
+) -> dict[str, object]:
+    selected_paths: list[Path] = []
+    blocking_paths: list[Path] = []
+    blocking_reasons: list[str] = []
+
+    release_scope: list[tuple[Path, ScopeRiskBudgetPolicyDecision]] = [
+        item for item in loaded_decisions if item[1].affected_scope == ScopeRiskAffectedScope.RELEASE
+    ]
+    task_scope: dict[str, list[tuple[Path, ScopeRiskBudgetPolicyDecision]]] = {}
+    for path, decision in loaded_decisions:
+        if decision.affected_scope != ScopeRiskAffectedScope.TASK:
+            continue
+        assert decision.affected_task_id is not None
+        task_scope.setdefault(decision.affected_task_id, []).append((path, decision))
+
+    def _select_most_recent(
+        candidates: list[tuple[Path, ScopeRiskBudgetPolicyDecision]],
+    ) -> tuple[Path, ScopeRiskBudgetPolicyDecision]:
+        return max(candidates, key=lambda item: (item[1].decided_at, str(item[0])))
+
+    for task_id in required_task_ids:
+        decision_pair: tuple[Path, ScopeRiskBudgetPolicyDecision] | None = None
+        if task_id in task_scope:
+            decision_pair = _select_most_recent(task_scope[task_id])
+        elif release_scope:
+            decision_pair = _select_most_recent(release_scope)
+
+        if decision_pair is None:
+            blocking_reasons.append(f"missing scope-risk budget policy decision for task {task_id}")
+            continue
+
+        path, decision = decision_pair
+        selected_paths.append(path)
+        if decision.outcome != ScopeRiskOutcome.ACCEPTED_WITH_GUARDS:
+            blocking_paths.append(path)
+            blocking_reasons.append(
+                f"scope-risk budget policy decision for task {task_id} requires {decision.outcome.value}"
+            )
+
+    gate_allowed = not blocking_reasons
+    return {
+        "allowed": gate_allowed,
+        "reason": "allowed" if gate_allowed else "scope_risk_budget_policy_blocked",
+        "required_task_ids": list(required_task_ids),
+        "selected_decision_paths": sorted({str(path) for path in selected_paths}),
+        "blocking_decision_paths": sorted({str(path) for path in blocking_paths}),
+        "blocking_reasons": blocking_reasons,
+    }
 
 
 def _release_scheduling_decision_path(release_root: Path, release_id: str) -> Path:
@@ -567,12 +659,41 @@ def run_release(
     feature_review_metadata_path: Path | None = None
     feature_review_output_normalization_decision_path: Path | None = None
     feature_review_normalized_artifact_path: Path | None = None
+    scope_risk_budget_policy_decision_paths: list[Path] = []
+    scope_risk_budget_policy_gate: dict[str, object] | None = None
 
     task_decision = (
         Decision.ACCEPTED
         if not task_results and skipped_completed_task_ids
         else _release_decision([result.decision for result in task_results])
     )
+    scope_risk_required_task_ids = _scope_risk_task_ids_from_soft_gate_findings(task_results)
+    if scope_risk_required_task_ids:
+        try:
+            scope_risk_loaded = _load_scope_risk_budget_policy_decisions(release_root=release_root)
+            scope_risk_budget_policy_decision_paths = [path for path, _ in scope_risk_loaded]
+            scope_risk_budget_policy_gate = _scope_risk_budget_policy_gate(
+                required_task_ids=scope_risk_required_task_ids,
+                loaded_decisions=scope_risk_loaded,
+            )
+        except Exception as error:  # noqa: BLE001 - invalid artifacts must remain blocking.
+            scope_risk_budget_policy_gate = {
+                "allowed": False,
+                "reason": "scope_risk_budget_policy_invalid",
+                "required_task_ids": scope_risk_required_task_ids,
+                "selected_decision_paths": [],
+                "blocking_decision_paths": [],
+                "blocking_reasons": [f"invalid scope-risk budget policy decision artifacts: {type(error).__name__}: {error}"],
+            }
+        _report(
+            progress,
+            "event=scope_risk_budget_policy_gate "
+            f"allowed={bool(scope_risk_budget_policy_gate.get('allowed'))} "
+            f"reason={scope_risk_budget_policy_gate.get('reason')} "
+            "blocking_reasons=" + json.dumps(scope_risk_budget_policy_gate.get("blocking_reasons", []), sort_keys=True),
+        )
+        if not bool(scope_risk_budget_policy_gate.get("allowed")) and task_decision == Decision.ACCEPTED:
+            task_decision = Decision.NEEDS_REVISION
     if task_decision == Decision.ACCEPTED and "reviewer" in config.model_roles:
         feature_review_loop = _run_feature_review_and_repair_loop(
             project_id=project_id,
@@ -781,6 +902,8 @@ def run_release(
         finalization_decision_path=finalization_decision_path,
         final_integration_verification_path=final_integration_verification_path,
         final_integration_verification=final_integration_verification_summary,
+        scope_risk_budget_policy_decision_paths=scope_risk_budget_policy_decision_paths,
+        scope_risk_budget_policy_gate=scope_risk_budget_policy_gate,
     )
     review_path = _write_release_review(
         runs_dir=runs_dir,
@@ -809,6 +932,8 @@ def run_release(
         final_review_continuation_decision_path=final_review_continuation_decision_path,
         finalization_gate=finalization_gate,
         final_integration_verification_path=final_integration_verification_path,
+        scope_risk_budget_policy_decision_paths=scope_risk_budget_policy_decision_paths,
+        scope_risk_budget_policy_gate=scope_risk_budget_policy_gate,
     )
     _report(progress, f"event=release_decision decision={decision}")
     _report(progress, f"event=release_review path={review_path}")
@@ -853,6 +978,8 @@ def run_release(
         feature_review_output_normalization_decision_path=feature_review_output_normalization_decision_path,
         feature_review_normalized_artifact_path=feature_review_normalized_artifact_path,
         feature_review_proposals=feature_review_proposals,
+        scope_risk_budget_policy_decision_paths=scope_risk_budget_policy_decision_paths,
+        scope_risk_budget_policy_gate=scope_risk_budget_policy_gate,
     )
 
 
@@ -3376,6 +3503,8 @@ def _write_release_summary(
     finalization_decision_path: Path | None,
     final_integration_verification_path: Path | None,
     final_integration_verification: dict[str, object] | None,
+    scope_risk_budget_policy_decision_paths: list[Path],
+    scope_risk_budget_policy_gate: dict[str, object] | None,
 ) -> Path:
     summary_dir = runs_dir / run_id
     summary_dir.mkdir(parents=True, exist_ok=True)
@@ -3416,6 +3545,10 @@ def _write_release_summary(
             str(final_integration_verification_path) if final_integration_verification_path else None
         ),
         "final_integration_verification": final_integration_verification,
+        "scope_risk_budget_policy_decision_paths": [
+            str(path) for path in scope_risk_budget_policy_decision_paths
+        ],
+        "scope_risk_budget_policy_gate": scope_risk_budget_policy_gate,
         "finalization": {
             "merged": finalization.merged,
             "pushed": finalization.pushed,
@@ -3481,6 +3614,8 @@ def _write_release_review(
     final_review_continuation_decision_path: Path,
     finalization_gate: dict[str, object],
     final_integration_verification_path: Path | None,
+    scope_risk_budget_policy_decision_paths: list[Path],
+    scope_risk_budget_policy_gate: dict[str, object] | None,
 ) -> Path:
     review_path = runs_dir / run_id / "release_review.md"
     lines = [
@@ -3506,6 +3641,27 @@ def _write_release_review(
         lines.extend(f"- Soft finding: {finding}" for finding in soft_budget_findings)
     if release_soft_gate_decision_path is not None:
         lines.append(f"- Soft decision artifact: `{release_soft_gate_decision_path}`")
+    if scope_risk_budget_policy_gate is not None:
+        lines.extend(
+            [
+                "",
+                "## Scope Risk",
+                "",
+                f"- Allowed: `{scope_risk_budget_policy_gate.get('allowed')}`",
+                f"- Gate reason: `{scope_risk_budget_policy_gate.get('reason')}`",
+                f"- Required task ids: `{len(scope_risk_budget_policy_gate.get('required_task_ids', []))}`",
+                f"- Decision artifacts: `{len(scope_risk_budget_policy_decision_paths)}`",
+            ]
+        )
+        if scope_risk_budget_policy_gate.get("blocking_reasons"):
+            lines.append("- Blocking reasons:")
+            for reason in scope_risk_budget_policy_gate.get("blocking_reasons", []):
+                cleaned = str(reason).strip()
+                if cleaned:
+                    lines.append(f"- {cleaned}")
+        if scope_risk_budget_policy_decision_paths:
+            lines.append("- Scope-risk decision artifacts:")
+            lines.extend(f"- `{path}`" for path in scope_risk_budget_policy_decision_paths)
     if feature_review_path is not None:
         lines.extend(
             [
