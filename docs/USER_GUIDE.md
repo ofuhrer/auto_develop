@@ -834,7 +834,7 @@ Relationship to nearby commands:
 `run-release` writes a deterministic `release_review.md` evidence summary. If the project config also defines `model_roles.reviewer`, it invokes a separate reviewer agent over `base..feature`, writes `feature_review.json`, generates bounded repair contracts for required findings, reruns verification using validated reviewer-requested commands or the default verification profile, writes `feature_review_recheck.json`, and blocks PR/merge/push finalization when required findings remain unresolved or only accepted with rationale.
 
 Reviewer backend assumptions (implemented today):
-- Feature review currently runs via the Codex CLI backend (`executor.type: codex_cli`) and requires `codex` to be installed and available on `PATH`.
+- Feature review currently runs via the Codex CLI backend (`executor.type: codex_cli`). `run-release` preflights the reviewer backend and blocks review immediately when `codex` is missing from `PATH` or the configured reviewer executor type is unsupported.
 - When the reviewer backend is unsupported, missing, or returns invalid output, the review is treated as blocked and `feature_review.json` records an `escalate` recommendation with a critical finding whose summary includes stable remediation hints (install/configure `codex`, verify `model_roles.reviewer`, or disable semantic review and use deterministic/human review).
 
 Implemented `feature_review_recheck.json` stop reasons:

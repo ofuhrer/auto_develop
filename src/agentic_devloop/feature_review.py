@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import shutil
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
@@ -286,13 +287,10 @@ def invoke_feature_reviewer(
 
     prompt_path.write_text(prompt, encoding="utf-8")
 
-    if config.type != "codex_cli":
-        error_message = (
-            f"Unsupported feature review executor backend: {config.type}. "
-            "Only codex_cli is supported for feature review."
-        )
+    preflight_error = _feature_review_backend_preflight_error(config=config)
+    if preflight_error is not None:
         stdout_path.write_text("", encoding="utf-8")
-        stderr_path.write_text(error_message + "\n", encoding="utf-8")
+        stderr_path.write_text(preflight_error + "\n", encoding="utf-8")
         metadata_path.write_text(
             json.dumps(
                 {
@@ -305,8 +303,8 @@ def invoke_feature_reviewer(
                     "timed_out": False,
                     "prompt_chars": len(prompt),
                     "stdout_chars": 0,
-                    "stderr_chars": len(error_message) + 1,
-                    "error": error_message,
+                    "stderr_chars": len(preflight_error) + 1,
+                    "error": preflight_error,
                 },
                 indent=2,
             )
@@ -315,7 +313,7 @@ def invoke_feature_reviewer(
         )
         decision = _blocked_feature_review_decision(
             release_id=release_id,
-            reason=error_message,
+            reason=preflight_error,
             evidence_paths=[prompt_path, stdout_path, stderr_path, metadata_path],
         )
         return FeatureReviewBackendResult(
@@ -397,6 +395,21 @@ def invoke_feature_reviewer(
         metadata_path=metadata_path,
         raw_output=result.stdout,
     )
+
+
+def _feature_review_backend_preflight_error(*, config: ExecutorConfig) -> str | None:
+    if config.type != "codex_cli":
+        return (
+            f"Unsupported feature review executor backend: {config.type}. "
+            "Only codex_cli is supported for feature review."
+        )
+    if shutil.which("codex") is None:
+        return (
+            "Feature review backend is unavailable: `codex` was not found on PATH. "
+            "Install the Codex CLI and ensure `codex --version` succeeds, or unset "
+            "`model_roles.reviewer` to disable semantic feature review."
+        )
+    return None
 
 
 def generate_repair_contracts_for_required_findings(
