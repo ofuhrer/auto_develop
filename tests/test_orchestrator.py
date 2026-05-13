@@ -20,6 +20,11 @@ from agentic_devloop.models import (
 from agentic_devloop import orchestrator as orchestrator_module
 from agentic_devloop.orchestrator import run_task
 from agentic_devloop.state_review import collect_state_review_snapshot, write_state_review_snapshot_artifact
+from agentic_devloop.supervisor_decisions import (
+    BudgetAcceptanceOutcome,
+    SoftBudgetAcceptanceDecision,
+    load_supervisor_decision_artifact,
+)
 
 
 class FakeExecutor:
@@ -151,6 +156,33 @@ class DisallowedFileExecutor:
         )
 
 
+class MultiDocsExecutor:
+    def __init__(self, *, file_count: int) -> None:
+        self.file_count = file_count
+
+    def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        docs_dir = worktree_path / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        for index in range(self.file_count):
+            (docs_dir / f"result-{index}.md").write_text(f"# Result {index}\n", encoding="utf-8")
+
+        stdout_path = output_dir / "executor_stdout.log"
+        stderr_path = output_dir / "executor_stderr.log"
+        stdout_path.write_text(f"used prompt {prompt_path}\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+
+        return ExecutorResult(
+            command=["fake-executor"],
+            exit_code=0,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            duration_seconds=0.01,
+            backend="fake",
+            model=None,
+        )
+
+
 class RecordingDiagnosisBackend:
     def __init__(self, category: str) -> None:
         self.category = category
@@ -258,6 +290,79 @@ def test_run_task_wires_executor_verification_evidence_and_review(tmp_path) -> N
     assert "+Implemented by fake executor." in (result.bundle_path / "git_diff.patch").read_text(
         encoding="utf-8"
     )
+
+
+def test_run_task_writes_typed_soft_budget_acceptance_decision(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "verification_profiles": {"default": {"commands": ["test -f docs/result-0.md"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 1,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 10,
+                "max_diff_lines_per_task": 10_000,
+            },
+        },
+    )
+
+    contract_path = tmp_path / "contract.yaml"
+    _write_yaml(
+        contract_path,
+        {
+            "task_id": "demo-0002",
+            "release_id": "v0.1.0",
+            "title": "Create many docs outputs",
+            "budget_class": "S",
+            "objective": "Create multiple result documents.",
+            "allowed_files": ["docs/**"],
+            "forbidden_changes": ["Do not edit source code."],
+            "required_evidence": ["git diff", "test output"],
+            "verification": {"commands": ["test -f docs/result-0.md"]},
+            "stop_conditions": ["Verification fails twice."],
+        },
+    )
+
+    result = run_task(
+        project_id="demo",
+        contract_path=contract_path,
+        config_dir=config_dir,
+        runs_dir=tmp_path / "runs",
+        executor=MultiDocsExecutor(file_count=11),
+        now=datetime(2026, 5, 12, 12, 0, tzinfo=UTC),
+    )
+
+    assert result.decision.decision == "accepted"
+    decision_dir = result.bundle_path / "supervisor_decisions"
+    artifacts = sorted(decision_dir.glob("soft_budget_acceptance__*.json"))
+    assert len(artifacts) == 1
+
+    loaded = load_supervisor_decision_artifact(artifacts[0])
+    assert isinstance(loaded, SoftBudgetAcceptanceDecision)
+    assert loaded.outcome == BudgetAcceptanceOutcome.ACCEPT_OVERAGE
+    assert loaded.budget_name == "max_changed_files_per_task"
+    assert loaded.configured_limit == 10.0
+    assert loaded.actual == 11.0
 
 
 def test_executor_attempts_stream_codex_output_to_progress(tmp_path, monkeypatch) -> None:
