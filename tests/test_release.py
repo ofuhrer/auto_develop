@@ -932,6 +932,53 @@ def test_run_release_supervisor_repairs_verification_and_resumes(tmp_path) -> No
     assert result.task_results[0].run_id == repair["final_result"]["run_id"]
 
 
+def test_run_release_persists_planner_admission_repairs_and_logs_attempts(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+    warning_payload = {
+        "planner_admission_repair_action": {
+            "admission_failure_inputs": [{"task_id": "demo-0001"}],
+            "selected_action": "accept_broad_but_mechanical",
+            "outcome": "accept_with_mechanical_guards",
+            "validators_to_rerun": ["ContractPlan", "TaskContract"],
+        },
+        "planner_admission_repair_applied": True,
+        "validator_rerun_succeeded": True,
+    }
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FakeExecutor(),
+        merge_on_accept=True,
+        planning_warnings=[f"planner_contract_normalization={json.dumps(warning_payload, sort_keys=True)}"],
+    )
+
+    assert result.decision == Decision.ACCEPTED
+    artifact_path = tmp_path / "runs" / result.run_id / "runtime_supervisor" / "planner_admission_repairs.json"
+    assert artifact_path.exists()
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert artifact["release_id"] == "v0.1.0"
+    assert len(artifact["records"]) == 1
+    record = artifact["records"][0]
+    assert record["task_id"] == "demo-0001"
+    assert record["selected_action"] == "accept_broad_but_mechanical"
+    assert record["outcome"] == "accept_with_mechanical_guards"
+    assert record["validator_rerun_succeeded"] is True
+    assert "Admission repair attempt 1: task=demo-0001 action=accept_broad_but_mechanical outcome=accept_with_mechanical_guards" in (
+        result.log_path.read_text(encoding="utf-8")
+    )
+
+
 def test_run_release_continues_with_completed_dependencies_during_repair_resume(tmp_path) -> None:
     repo = _repo_with_initial_commit(tmp_path / "repo")
     config_dir = _write_demo_config(tmp_path, repo)

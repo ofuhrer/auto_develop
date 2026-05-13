@@ -75,5 +75,6 @@ def run_objective(
         execution_mode=execution_mode,
         debug_keep_artifacts=debug_keep_artifacts,
         progress=progress,
+        planning_warnings=planning.plan.warnings,
     )
     return ObjectiveRunResult(release_id=planning.release_id, planning=planning, release=release)
