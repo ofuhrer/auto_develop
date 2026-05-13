@@ -117,6 +117,20 @@ def test_contract_normalization_refusal_reason_is_typed() -> None:
     assert decision.refusal_reasons == [ContractNormalizationRefusalReason.UNSAFE_NORMALIZATION]
 
 
+def test_contract_normalization_refusal_reason_supports_missing_required_evidence() -> None:
+    decision = ContractNormalizationDecision.model_validate(
+        {
+            **BASE,
+            "decision_type": SupervisorDecisionType.CONTRACT_NORMALIZATION,
+            "outcome": ContractNormalizationOutcome.REFUSE_AND_STOP,
+            "changed_fields": [],
+            "refusal_reasons": [ContractNormalizationRefusalReason.MISSING_REQUIRED_EVIDENCE],
+        }
+    )
+
+    assert decision.refusal_reasons == [ContractNormalizationRefusalReason.MISSING_REQUIRED_EVIDENCE]
+
+
 def test_parse_review_finding_adjudication_decision() -> None:
     payload = {
         **BASE,
