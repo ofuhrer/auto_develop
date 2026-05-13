@@ -1551,6 +1551,139 @@ def test_run_release_rejects_stale_or_invalid_release_scheduling_decisions(
         )
 
 
+def test_run_release_normalizes_repairable_release_scheduling_wrapper_and_persists_decision(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, verification_command="true")
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    contract_paths = [
+        contracts_dir / "demo-0001.yaml",
+        contracts_dir / "demo-0002.yaml",
+    ]
+    _write_yaml(
+        contract_paths[0],
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"], verification_commands=["true"]).model_dump(mode="json"),
+    )
+    _write_yaml(
+        contract_paths[1],
+        _task_contract("demo-0002", allowed_files=["docs/demo-0002.md"], verification_commands=["true"]).model_dump(mode="json"),
+    )
+
+    run_id = "20260513T080000Z_v0.1.0_release"
+    release_root = tmp_path / "runs" / run_id
+    decision_path = supervisor_decision_artifact_path(
+        release_bundle_path=release_root,
+        decision_type=SupervisorDecisionType.RELEASE_SCHEDULING,
+        decision_id="v0.1.0__scheduling",
+    )
+    decision_path.parent.mkdir(parents=True, exist_ok=True)
+    decision_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "decision_type": "release_scheduling",
+                "decision": {
+                    "release_id": "v0.1.0",
+                    "selected_action": "parallel",
+                    "outcome": "proceed_parallel",
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FakeExecutor(),
+        execution_mode="parallel",
+        now=datetime(2026, 5, 13, 8, 0, 0),
+    )
+
+    assert result.decision == Decision.ACCEPTED
+    normalized = load_supervisor_decision_artifact(decision_path)
+    assert normalized.selected_action == ReleaseSchedulingAction.PARALLEL
+    normalization_decision_path = supervisor_decision_artifact_path(
+        release_bundle_path=release_root,
+        decision_type=SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+        decision_id="v0.1.0__release_scheduling_output",
+    )
+    normalization_decision = load_supervisor_decision_artifact(normalization_decision_path)
+    assert normalization_decision.selected_action.value == "apply_normalization"
+    assert normalization_decision.normalized_artifact_path == decision_path.resolve()
+    assert "ReleaseSchedulingDecision" in normalization_decision.validators_to_rerun
+
+
+def test_run_release_scheduling_normalization_refuses_changed_selected_action_semantics(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, verification_command="true")
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    contract_paths = [
+        contracts_dir / "demo-0001.yaml",
+        contracts_dir / "demo-0002.yaml",
+    ]
+    _write_yaml(
+        contract_paths[0],
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"], verification_commands=["true"]).model_dump(mode="json"),
+    )
+    _write_yaml(
+        contract_paths[1],
+        _task_contract("demo-0002", allowed_files=["docs/demo-0002.md"], verification_commands=["true"]).model_dump(mode="json"),
+    )
+
+    run_id = "20260513T080000Z_v0.1.0_release"
+    release_root = tmp_path / "runs" / run_id
+    decision_path = supervisor_decision_artifact_path(
+        release_bundle_path=release_root,
+        decision_type=SupervisorDecisionType.RELEASE_SCHEDULING,
+        decision_id="v0.1.0__scheduling",
+    )
+    decision_path.parent.mkdir(parents=True, exist_ok=True)
+    decision_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "decision_type": "release_scheduling",
+                "selected_action": "parallel",
+                "decision": {
+                    "release_id": "v0.1.0",
+                    "selected_action": "sequential",
+                    "outcome": "proceed_sequential",
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError):
+        run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=FakeExecutor(),
+            execution_mode="parallel",
+            now=datetime(2026, 5, 13, 8, 0, 0),
+        )
+    normalization_decision_path = supervisor_decision_artifact_path(
+        release_bundle_path=release_root,
+        decision_type=SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+        decision_id="v0.1.0__release_scheduling_output",
+    )
+    normalization_decision = load_supervisor_decision_artifact(normalization_decision_path)
+    assert normalization_decision.selected_action.value == "refuse"
+    assert "disagree on selected action semantics" in (normalization_decision.refusal_reason or "")
+
+
 def test_analyze_contract_overlaps_blocks_lockfiles_and_migrations_and_out_of_scope() -> None:
     lockfile_report = analyze_contract_overlaps(
         [

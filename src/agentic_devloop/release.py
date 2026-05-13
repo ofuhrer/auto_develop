@@ -2944,7 +2944,18 @@ def _load_or_build_release_scheduling_decision(
         overlap_report=overlap_report,
     )
     if decision_path.exists():
-        loaded = load_supervisor_decision_artifact(decision_path)
+        try:
+            loaded = load_supervisor_decision_artifact(decision_path)
+        except Exception as error:  # noqa: BLE001 - bounded normalization handles typed reload safety.
+            loaded = _normalize_release_scheduling_model_output_if_needed(
+                release_id=release_id,
+                release_root=release_root,
+                decision_path=decision_path,
+                current_staleness_inputs=current_staleness_inputs,
+                load_error=error,
+            )
+            if loaded is None:
+                raise
         if not isinstance(loaded, ReleaseSchedulingDecision):
             raise ValueError(
                 f"release scheduling decision artifact has unsupported type: {loaded.decision_type}"
@@ -2953,6 +2964,8 @@ def _load_or_build_release_scheduling_decision(
             raise ValueError(
                 f"release scheduling decision artifact is stale for release {release_id}: {decision_path}"
             )
+        if loaded.selected_action not in {ReleaseSchedulingAction.SEQUENTIAL, ReleaseSchedulingAction.PARALLEL}:
+            raise ValueError(f"unsupported release scheduling action: {loaded.selected_action.value}")
         return loaded
 
     decision = _build_release_scheduling_decision(
@@ -2983,7 +2996,239 @@ def _load_or_build_release_scheduling_decision(
         raise ValueError(
             f"release scheduling decision artifact is stale for release {release_id}: {decision_path}"
         )
+    if loaded.selected_action not in {ReleaseSchedulingAction.SEQUENTIAL, ReleaseSchedulingAction.PARALLEL}:
+        raise ValueError(f"unsupported release scheduling action: {loaded.selected_action.value}")
     return loaded
+
+
+def _normalize_release_scheduling_model_output_if_needed(
+    *,
+    release_id: str,
+    release_root: Path,
+    decision_path: Path,
+    current_staleness_inputs: ReleaseSchedulingStalenessInputs,
+    load_error: Exception,
+) -> ReleaseSchedulingDecision | None:
+    raw_text = decision_path.read_text(encoding="utf-8")
+    raw_payload = _extract_json_object_from_text(raw_text)
+    raw_paths = [decision_path]
+    if raw_payload is None:
+        _write_release_scheduling_output_normalization_decision(
+            release_id=release_id,
+            release_root=release_root,
+            raw_paths=raw_paths,
+            validation_errors=_model_output_validation_errors_from_exception(load_error),
+            selected_action=ModelOutputNormalizationAction.REFUSE,
+            outcome=ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+            normalized_artifact_path=None,
+            refusal_reason="Release scheduling decision artifact was not parseable JSON.",
+        )
+        return None
+
+    validation_errors = _release_scheduling_validation_errors(raw_payload)
+    normalized_payload, refusal_reason = _bounded_normalize_release_scheduling_payload(
+        raw_payload=raw_payload,
+        release_id=release_id,
+        current_staleness_inputs=current_staleness_inputs,
+    )
+    if normalized_payload is None:
+        _write_release_scheduling_output_normalization_decision(
+            release_id=release_id,
+            release_root=release_root,
+            raw_paths=raw_paths,
+            validation_errors=validation_errors,
+            selected_action=ModelOutputNormalizationAction.REFUSE,
+            outcome=ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+            normalized_artifact_path=None,
+            refusal_reason=refusal_reason or "Release scheduling normalization refused by bounded policy.",
+        )
+        return None
+
+    try:
+        normalized_decision = ReleaseSchedulingDecision.model_validate(normalized_payload)
+        if normalized_decision.staleness_inputs != current_staleness_inputs:
+            raise ValueError("normalized release scheduling decision artifact remained stale")
+    except Exception as error:  # noqa: BLE001 - refusal evidence is persisted.
+        _write_release_scheduling_output_normalization_decision(
+            release_id=release_id,
+            release_root=release_root,
+            raw_paths=raw_paths,
+            validation_errors=validation_errors,
+            selected_action=ModelOutputNormalizationAction.REFUSE,
+            outcome=ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+            normalized_artifact_path=None,
+            refusal_reason=f"Normalized release scheduling output remained invalid: {error}",
+        )
+        return None
+
+    decision_path.write_text(
+        json.dumps(normalized_decision.model_dump(mode="json"), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    loaded = load_supervisor_decision_artifact(decision_path)
+    if not isinstance(loaded, ReleaseSchedulingDecision):
+        _write_release_scheduling_output_normalization_decision(
+            release_id=release_id,
+            release_root=release_root,
+            raw_paths=raw_paths,
+            validation_errors=validation_errors,
+            selected_action=ModelOutputNormalizationAction.REFUSE,
+            outcome=ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+            normalized_artifact_path=decision_path,
+            refusal_reason="Normalized release scheduling artifact reloaded to an unsupported decision type.",
+        )
+        return None
+
+    _write_release_scheduling_output_normalization_decision(
+        release_id=release_id,
+        release_root=release_root,
+        raw_paths=raw_paths,
+        validation_errors=validation_errors,
+        selected_action=ModelOutputNormalizationAction.APPLY_NORMALIZATION,
+        outcome=ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
+        normalized_artifact_path=decision_path,
+        refusal_reason=None,
+    )
+    return loaded
+
+
+def _release_scheduling_validation_errors(candidate: object) -> list[dict[str, str]]:
+    try:
+        ReleaseSchedulingDecision.model_validate(candidate)
+        return []
+    except Exception as error:  # noqa: BLE001 - validation errors are best-effort evidence.
+        return _model_output_validation_errors_from_exception(error)
+
+
+def _model_output_validation_errors_from_exception(error: Exception) -> list[dict[str, str]]:
+    errors_fn = getattr(error, "errors", None)
+    if not callable(errors_fn):
+        return []
+    payload: list[dict[str, str]] = []
+    for item in errors_fn():
+        loc = item.get("loc", ())
+        payload.append(
+            {
+                "field": ".".join(str(token) for token in loc) if loc else "<root>",
+                "message": str(item.get("msg", "validation failed")),
+                "error_type": str(item.get("type", "value_error")),
+            }
+        )
+    return payload
+
+
+def _bounded_normalize_release_scheduling_payload(
+    *,
+    raw_payload: dict[str, object],
+    release_id: str,
+    current_staleness_inputs: ReleaseSchedulingStalenessInputs,
+) -> tuple[dict[str, object] | None, str | None]:
+    candidate = dict(raw_payload)
+    nested_candidate = None
+    for key in ("decision", "scheduling_decision", "release_scheduling", "result", "output"):
+        value = raw_payload.get(key)
+        if isinstance(value, dict):
+            nested_candidate = value
+            break
+    if nested_candidate is not None:
+        if _payload_looks_like_release_scheduling(candidate) and _payload_looks_like_release_scheduling(nested_candidate):
+            if _release_scheduling_semantics_fingerprint(candidate) != _release_scheduling_semantics_fingerprint(
+                nested_candidate
+            ):
+                return None, "Supervisor wrapper and nested release scheduling decision disagree on selected action semantics."
+        candidate = dict(nested_candidate)
+
+    if not _payload_looks_like_release_scheduling(candidate):
+        return None, "Supervisor output did not include a recognizable release scheduling decision payload."
+
+    normalized = dict(candidate)
+    if "selected_action" not in normalized and "action" in normalized:
+        normalized["selected_action"] = normalized["action"]
+    if "decision_type" not in normalized:
+        normalized["decision_type"] = SupervisorDecisionType.RELEASE_SCHEDULING.value
+    if "release_id" not in normalized:
+        normalized["release_id"] = release_id
+    if "decision_id" not in normalized:
+        normalized["decision_id"] = f"{release_id}__scheduling"
+    if "decided_by" not in normalized:
+        normalized["decided_by"] = "run_release_scheduling_normalizer"
+    if "decided_at" not in normalized:
+        normalized["decided_at"] = datetime.now(UTC).isoformat()
+    if "rationale" not in normalized:
+        normalized["rationale"] = "Bounded normalization repaired wrapper/schema drift for release scheduling output."
+    if "overlap_findings" not in normalized:
+        normalized["overlap_findings"] = []
+    if "risk_level" not in normalized:
+        normalized["risk_level"] = DecisionRiskLevel.MODERATE.value
+    if "evidence_paths" not in normalized or not isinstance(normalized.get("evidence_paths"), list):
+        normalized["evidence_paths"] = []
+
+    selected_action = normalized.get("selected_action")
+    if not isinstance(selected_action, str):
+        return None, "Release scheduling selected_action was missing or invalid."
+    if selected_action not in {ReleaseSchedulingAction.SEQUENTIAL.value, ReleaseSchedulingAction.PARALLEL.value}:
+        return None, f"Unsupported release scheduling action for bounded normalization: {selected_action}"
+
+    action_enum = ReleaseSchedulingAction(selected_action)
+    normalized["outcome"] = _release_scheduling_outcome_for_action(action_enum).value
+    normalized["fallback_plan"] = _release_scheduling_fallback_plan(action_enum)
+    normalized["validators_to_rerun"] = _release_scheduling_validators_to_rerun(action_enum)
+    normalized["staleness_inputs"] = current_staleness_inputs.model_dump(mode="json")
+    return normalized, None
+
+
+def _payload_looks_like_release_scheduling(payload: dict[str, object]) -> bool:
+    return "selected_action" in payload or "action" in payload
+
+
+def _release_scheduling_semantics_fingerprint(payload: dict[str, object]) -> dict[str, object]:
+    return {
+        "release_id": payload.get("release_id"),
+        "selected_action": payload.get("selected_action", payload.get("action")),
+        "outcome": payload.get("outcome"),
+        "overlap_findings": payload.get("overlap_findings"),
+    }
+
+
+def _write_release_scheduling_output_normalization_decision(
+    *,
+    release_id: str,
+    release_root: Path,
+    raw_paths: list[Path],
+    validation_errors: list[dict[str, str]],
+    selected_action: ModelOutputNormalizationAction,
+    outcome: ModelOutputNormalizationOutcome,
+    normalized_artifact_path: Path | None,
+    refusal_reason: str | None,
+) -> Path:
+    decision = ModelOutputNormalizationDecision.model_validate(
+        {
+            "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+            "decision_id": f"{release_id}__release_scheduling_output",
+            "release_id": release_id,
+            "decided_at": datetime.now(UTC),
+            "decided_by": "run_release_scheduling_loader",
+            "rationale": (
+                "Applied bounded normalization to release scheduling output and reran strict supervisor decision validators."
+                if outcome == ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY
+                else "Refused release scheduling output normalization because bounded policy could not guarantee safe semantics."
+            ),
+            "evidence_paths": [str(path.resolve()) for path in raw_paths if path.exists()],
+            "risk_level": DecisionRiskLevel.MODERATE,
+            "raw_artifact_paths": [str(path.resolve()) for path in raw_paths if path.exists()],
+            "validation_errors": [
+                ModelOutputValidationError.model_validate(item).model_dump(mode="json")
+                for item in validation_errors
+            ],
+            "selected_action": selected_action.value,
+            "outcome": outcome.value,
+            "fallback_plan": "Keep deterministic scheduling selection behavior and require bounded rerun for invalid supervisor artifacts.",
+            "validators_to_rerun": ["ReleaseSchedulingDecision", "staleness_inputs", "selected_action"],
+            "normalized_artifact_path": str(normalized_artifact_path.resolve()) if normalized_artifact_path else None,
+            "refusal_reason": refusal_reason,
+        }
+    )
+    return write_supervisor_decision_artifact(release_bundle_path=release_root, decision=decision)
 
 
 def _completed_release_task_ids(
