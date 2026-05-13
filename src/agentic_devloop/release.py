@@ -124,6 +124,7 @@ class FeatureReviewLoopResult:
     feature_review_recheck_path: Path | None
     feature_review_decision: FeatureReviewDecision | None
     feature_review_recheck: FeatureReviewRecheckRecord | None
+    feature_review_proposals: list[dict[str, object]]
     gating_decision: Decision
 
 
@@ -387,6 +388,7 @@ def run_release(
     feature_review_recheck_path: Path | None = None
     feature_review_decision: FeatureReviewDecision | None = None
     feature_review_recheck: FeatureReviewRecheckRecord | None = None
+    feature_review_proposals: list[dict[str, object]] = []
 
     task_decision = (
         Decision.ACCEPTED
@@ -419,6 +421,7 @@ def run_release(
         feature_review_recheck_path = feature_review_loop.feature_review_recheck_path
         feature_review_decision = feature_review_loop.feature_review_decision
         feature_review_recheck = feature_review_loop.feature_review_recheck
+        feature_review_proposals = feature_review_loop.feature_review_proposals
         task_decision = _release_decision([result.decision for result in task_results])
         if feature_review_loop.gating_decision != Decision.ACCEPTED:
             task_decision = feature_review_loop.gating_decision
@@ -506,6 +509,7 @@ def run_release(
         release_soft_gate_decision_path=release_soft_gate_decision_path,
         feature_review_path=feature_review_path,
         feature_review_recheck_path=feature_review_recheck_path,
+        feature_review_proposals=feature_review_proposals,
         finalization_gate=finalization_gate,
     )
     review_path = _write_release_review(
@@ -1248,6 +1252,7 @@ def _run_feature_review_and_repair_loop(
     previous_review_decisions: list[FeatureReviewDecision] = []
     last_verification_ok = False
     last_verification_log_path: Path | None = None
+    proposal_by_finding_id: dict[str, dict[str, object]] = {}
 
     def allowed_verification_commands() -> list[str]:
         commands: list[str] = []
@@ -1274,6 +1279,12 @@ def _run_feature_review_and_repair_loop(
             seen.add(normalized)
             ordered.append(normalized)
         return ordered
+
+    def current_proposals() -> list[dict[str, object]]:
+        return sorted(
+            proposal_by_finding_id.values(),
+            key=lambda record: str(record.get("finding_id", "")),
+        )
 
     def run_review(attempt: int) -> FeatureReviewDecision:
         nonlocal feature_review_path
@@ -1497,7 +1508,18 @@ def _run_feature_review_and_repair_loop(
                 )
                 written[item.finding_id] = attempt_path
                 stable_record = decision_record.model_copy(update={"decision_id": stable_decision_id})
-                write_supervisor_decision_artifact(release_bundle_path=release_root, decision=stable_record)
+                stable_path = write_supervisor_decision_artifact(
+                    release_bundle_path=release_root, decision=stable_record
+                )
+                if item.classification in {"scope_expansion", "backlog_follow_up"} and item.selected_action == "defer":
+                    proposal_by_finding_id[item.finding_id] = {
+                        "finding_id": item.finding_id,
+                        "classification": item.classification,
+                        "selected_action": item.selected_action,
+                        "decision_artifact_path": str(stable_path),
+                        "matched_previous_finding_id": item.matched_previous_finding_id,
+                        "attempt": attempt,
+                    }
                 _report(
                     progress,
                     "event=feature_review_non_blocking_finding_classified attempt="
@@ -1536,6 +1558,7 @@ def _run_feature_review_and_repair_loop(
                 feature_review_recheck_path=feature_review_recheck_path,
                 feature_review_decision=feature_review_decision,
                 feature_review_recheck=feature_review_recheck,
+                feature_review_proposals=current_proposals(),
                 gating_decision=gating_decision,
             )
 
@@ -1573,6 +1596,7 @@ def _run_feature_review_and_repair_loop(
                 feature_review_recheck_path=feature_review_recheck_path,
                 feature_review_decision=feature_review_decision,
                 feature_review_recheck=feature_review_recheck,
+                feature_review_proposals=current_proposals(),
                 gating_decision=gating_decision,
             )
 
@@ -1617,6 +1641,7 @@ def _run_feature_review_and_repair_loop(
                     feature_review_recheck_path=feature_review_recheck_path,
                     feature_review_decision=feature_review_decision,
                     feature_review_recheck=feature_review_recheck,
+                    feature_review_proposals=current_proposals(),
                     gating_decision=gating_decision,
                 )
             write_required_finding_classifications(attempt=loop_index + 1)
@@ -1635,6 +1660,7 @@ def _run_feature_review_and_repair_loop(
                 feature_review_recheck_path=feature_review_recheck_path,
                 feature_review_decision=feature_review_decision,
                 feature_review_recheck=feature_review_recheck,
+                feature_review_proposals=current_proposals(),
                 gating_decision=gating_decision,
             )
 
@@ -1657,6 +1683,7 @@ def _run_feature_review_and_repair_loop(
                 feature_review_recheck_path=feature_review_recheck_path,
                 feature_review_decision=feature_review_decision,
                 feature_review_recheck=feature_review_recheck,
+                feature_review_proposals=current_proposals(),
                 gating_decision=gating_decision,
             )
 
@@ -1690,6 +1717,7 @@ def _run_feature_review_and_repair_loop(
                 feature_review_recheck_path=feature_review_recheck_path,
                 feature_review_decision=feature_review_decision,
                 feature_review_recheck=feature_review_recheck,
+                feature_review_proposals=current_proposals(),
                 gating_decision=gating_decision,
             )
 
@@ -1733,6 +1761,7 @@ def _run_feature_review_and_repair_loop(
                     feature_review_recheck_path=feature_review_recheck_path,
                     feature_review_decision=feature_review_decision,
                     feature_review_recheck=feature_review_recheck,
+                    feature_review_proposals=current_proposals(),
                     gating_decision=gating_decision,
                 )
 
@@ -1753,6 +1782,7 @@ def _run_feature_review_and_repair_loop(
                 feature_review_recheck_path=feature_review_recheck_path,
                 feature_review_decision=feature_review_decision,
                 feature_review_recheck=feature_review_recheck,
+                feature_review_proposals=current_proposals(),
                 gating_decision=gating_decision,
             )
         decision = run_review(attempt=loop_index + 2)
@@ -1773,6 +1803,7 @@ def _run_feature_review_and_repair_loop(
         feature_review_recheck_path=feature_review_recheck_path,
         feature_review_decision=feature_review_decision,
         feature_review_recheck=feature_review_recheck,
+        feature_review_proposals=current_proposals(),
         gating_decision=gating_decision,
     )
 
@@ -2405,6 +2436,7 @@ def _write_release_summary(
     release_soft_gate_decision_path: Path | None,
     feature_review_path: Path | None,
     feature_review_recheck_path: Path | None,
+    feature_review_proposals: list[dict[str, object]],
     finalization_gate: dict[str, object],
 ) -> Path:
     summary_dir = runs_dir / run_id
@@ -2424,6 +2456,7 @@ def _write_release_summary(
         "release_soft_gate_decision_path": str(release_soft_gate_decision_path) if release_soft_gate_decision_path else None,
         "feature_review_path": str(feature_review_path) if feature_review_path else None,
         "feature_review_recheck_path": str(feature_review_recheck_path) if feature_review_recheck_path else None,
+        "feature_review_proposals": feature_review_proposals,
         "finalization_gate": finalization_gate,
         "integration_branch": integration_branch,
         "integration_commit": integration_commit,
