@@ -839,13 +839,13 @@ Reviewer backend assumptions (implemented today):
 
 Implemented `feature_review_recheck.json` stop reasons:
 - `resolved`: no findings remained after re-check.
-- `accepted_with_rationale`: only optional findings remained; explicit acceptance rationale is persisted in `feature_review.json` (`accepted_risks`) if the reviewer response omitted one.
+- `accepted_with_rationale`: optional findings remained, or a required finding was adjudicated as verification-only/conditional after the configured integration verification rerun passed. Explicit acceptance rationale is persisted in `feature_review.json` (`accepted_risks`) when needed.
 - `blocked_by_retry_budget`: required findings remained after bounded repair retries.
 - `blocked_by_hard_gate`: reviewer escalation, repair-contract generation failure, repair-task failure, or verification rerun failure blocked progression.
 
 `feature_review_recheck.json.stop_reason` is validated against exactly this fixed taxonomy.
 
-Finalization gating treats unresolved required findings from the reviewer decision as authoritative, and also treats unresolved blocked-state recheck findings as required unless the same finding IDs are explicitly optional in the latest reviewer decision. That keeps the reviewer loop bounded to the integrated feature branch while leaving broader multi-epic review orchestration, persistent memory, and pre-epic state refresh as planned work.
+Finalization gating treats unresolved required findings from the reviewer decision as authoritative, and also treats unresolved blocked-state recheck findings as required unless the same finding IDs are explicitly optional or accepted with rationale in the recheck record. The implemented adjudication path is intentionally narrow: it can accept false-positive required findings such as "confirm syntax/imports" only after the integration verification rerun passes, and it does not accept findings that require implementation changes. That keeps the reviewer loop bounded to the integrated feature branch while leaving broader multi-epic review orchestration, persistent memory, and pre-epic state refresh as planned work.
 
 The planned multi-epic governor should expose one parent log stream:
 

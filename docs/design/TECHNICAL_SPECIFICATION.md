@@ -719,9 +719,9 @@ Implemented re-check stop taxonomy for `feature_review_recheck.json`:
 
 `FeatureReviewRecheckRecord.stop_reason` is constrained to this enumerated set.
 
-`accepted_with_rationale` means only optional findings remained at re-check time; if the reviewer omitted acceptance rationale, the release flow persists an explicit rationale entry in `feature_review.json.accepted_risks`.
+`accepted_with_rationale` means optional findings remained at re-check time, or a required finding was adjudicated as verification-only/conditional after the configured integration verification rerun passed. If the reviewer omitted acceptance rationale, the release flow persists an explicit rationale entry in `feature_review.json.accepted_risks`.
 
-Release finalization gating uses unresolved required findings from the latest reviewer decision. For blocked re-check states, unresolved re-check findings are treated as required unless they are explicitly classified as optional in the latest reviewer decision, preventing false-positive finalization when unresolved required findings persist. This is the implemented boundary for the reviewer loop; the broader pre-epic governor review and persistent memory layers remain planned.
+Release finalization gating uses unresolved required findings from the latest reviewer decision. For blocked re-check states, unresolved re-check findings are treated as required unless they are explicitly classified as optional in the latest reviewer decision or accepted with rationale in the recheck artifact. Required-finding adjudication is deliberately narrow: verification-only or conditional findings can be accepted after passing verification, while findings that require implementation changes remain blocking. This is the implemented boundary for the reviewer loop; the broader pre-epic governor review and persistent memory layers remain planned.
 
 ## Security and Auth
 

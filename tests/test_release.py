@@ -24,6 +24,7 @@ from agentic_devloop.release import (
     _ensure_no_existing_task_branches,
     _ensure_no_existing_worktrees,
     _command_with_env_prefixes,
+    _verification_adjudicated_required_finding_ids,
     _multiplexed_progress,
     _release_dependency_map,
     _should_preserve_task_branch,
@@ -1857,6 +1858,42 @@ def test_feature_review_rerun_worktree_cleanup_guard_requires_rerun_root(tmp_pat
 
     with pytest.raises(ValueError, match="forced cleanup"):
         _assert_safe_feature_review_rerun_worktree(unsafe_worktree, rerun_root)
+
+
+def test_feature_review_required_finding_adjudication_is_limited_to_verification_only_findings() -> None:
+    syntax_finding = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "demo",
+            "reviewer": "hybrid",
+            "summary": "review",
+            "recommendation": "require_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "syntax-risk",
+                    "severity": "critical",
+                    "summary": "Confirm the module parses; possible syntax issue in diff excerpt.",
+                    "affected_files": ["src/agentic_devloop/feature_review.py"],
+                    "required_repairs": [
+                        "Open the file and ensure strings are valid; fix formatting if needed.",
+                        "Rerun compileall and pytest to confirm imports pass.",
+                    ],
+                },
+                {
+                    "finding_id": "real-change",
+                    "severity": "high",
+                    "summary": "Missing implementation behavior.",
+                    "affected_files": ["src/agentic_devloop/release.py"],
+                    "required_repairs": ["Implement the missing finalization behavior."],
+                },
+            ],
+        }
+    )
+
+    accepted = _verification_adjudicated_required_finding_ids(syntax_finding.findings)
+
+    assert accepted == ["syntax-risk"]
 
 
 def test_run_release_feature_review_optional_findings_are_accepted_not_resolved(tmp_path: Path) -> None:

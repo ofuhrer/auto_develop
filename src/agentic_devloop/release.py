@@ -1347,6 +1347,38 @@ def _run_feature_review_and_repair_loop(
             )
 
         if loop_index >= _FEATURE_REVIEW_MAX_REPAIR_LOOPS:
+            verification_ok = rerun_verification(loop_index + 1, decision)
+            adjudicated_finding_ids = (
+                _verification_adjudicated_required_finding_ids(required_findings)
+                if verification_ok
+                else []
+            )
+            if adjudicated_finding_ids and len(adjudicated_finding_ids) == len(required_findings):
+                accepted_risks = list(decision.accepted_risks)
+                accepted_risks.append(
+                    "Accepted required feature-review finding(s) after retry budget because "
+                    "they were verification-only or conditional repair findings and the configured "
+                    "integration verification rerun passed."
+                )
+                decision = decision.model_copy(update={"accepted_risks": accepted_risks})
+                feature_review_decision = decision
+                feature_review_path = write_feature_review_decision(release_root, decision)
+                feature_review_recheck = FeatureReviewRecheckRecord(
+                    release_id=release_id,
+                    unresolved_finding_ids=[],
+                    resolved_finding_ids=[],
+                    accepted_finding_ids=sorted(adjudicated_finding_ids),
+                    stop_reason="accepted_with_rationale",
+                )
+                feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+                return FeatureReviewLoopResult(
+                    task_results=all_task_results,
+                    feature_review_path=feature_review_path,
+                    feature_review_recheck_path=feature_review_recheck_path,
+                    feature_review_decision=feature_review_decision,
+                    feature_review_recheck=feature_review_recheck,
+                    gating_decision=gating_decision,
+                )
             gating_decision = Decision.NEEDS_REVISION
             feature_review_recheck = FeatureReviewRecheckRecord(
                 release_id=release_id,
@@ -1469,6 +1501,45 @@ def _run_feature_review_and_repair_loop(
         feature_review_recheck=feature_review_recheck,
         gating_decision=gating_decision,
     )
+
+
+def _verification_adjudicated_required_finding_ids(findings: list[object]) -> list[str]:
+    accepted: list[str] = []
+    for finding in findings:
+        if _is_verification_only_or_conditional_finding(finding):
+            accepted.append(str(getattr(finding, "finding_id")))
+    return accepted
+
+
+def _is_verification_only_or_conditional_finding(finding: object) -> bool:
+    summary = str(getattr(finding, "summary", "")).lower()
+    repairs = " ".join(str(item) for item in getattr(finding, "required_repairs", [])).lower()
+    text = f"{summary} {repairs}"
+    verification_markers = (
+        "verify",
+        "verification",
+        "confirm",
+        "rerun",
+        "compileall",
+        "pytest",
+        "parses",
+        "syntax",
+        "if needed",
+    )
+    if not any(marker in text for marker in verification_markers):
+        return False
+    unconditional_change_markers = (
+        "implement ",
+        "add ",
+        "change ",
+        "modify ",
+        "remove ",
+        "restore ",
+        "replace ",
+        "repair the source",
+        "fix behavior",
+    )
+    return not any(marker in text for marker in unconditional_change_markers)
 
 
 def _write_contract_yaml(path: Path, contract: TaskContract) -> None:
