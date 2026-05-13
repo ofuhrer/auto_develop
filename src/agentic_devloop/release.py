@@ -2216,8 +2216,125 @@ def _bounded_normalize_feature_review_payload(
                 return None, f"finding {finding_id} has empty evidence_paths that are not derivable from release evidence."
             finding_payload["evidence_paths"] = derived
         normalized_findings.append(finding_payload)
+    normalized_findings.extend(_normalize_feature_review_limitations(payload=normalized, context=context))
+    if any(_is_missing_required_final_verification_evidence_finding(item) for item in normalized_findings):
+        normalized["recommendation"] = FeatureReviewRecommendation.ESCALATE.value
     normalized["findings"] = normalized_findings
+    normalized.pop("limitations", None)
     return normalized, None
+
+
+def _normalize_feature_review_limitations(*, payload: dict[str, object], context) -> list[dict[str, object]]:
+    raw_limitations = payload.get("limitations")
+    if not isinstance(raw_limitations, list):
+        return []
+    normalized: list[dict[str, object]] = []
+    for index, entry in enumerate(raw_limitations, start=1):
+        limitation = _build_feature_review_limitation_finding(entry=entry, index=index, context=context)
+        if limitation is not None:
+            normalized.append(limitation)
+    return normalized
+
+
+def _build_feature_review_limitation_finding(*, entry: object, index: int, context) -> dict[str, object] | None:
+    text = ""
+    raw_evidence: object = None
+    kind = ""
+    if isinstance(entry, str):
+        text = entry.strip()
+    elif isinstance(entry, dict):
+        text = str(entry.get("summary") or entry.get("detail") or entry.get("message") or "").strip()
+        raw_evidence = entry.get("evidence_paths")
+        if raw_evidence is None:
+            raw_evidence = entry.get("evidence")
+        kind = str(entry.get("type") or entry.get("kind") or "").strip().lower()
+    else:
+        return None
+    if not text:
+        return None
+
+    lower = f"{kind} {text.lower()}"
+    if "truncat" in lower:
+        limitation_kind = "truncated_context"
+    elif "uncertain" in lower or "unsure" in lower or "confidence" in lower:
+        limitation_kind = "uncertainty"
+    elif "missing" in lower and "evidence" in lower:
+        limitation_kind = "missing_evidence_reference"
+    else:
+        limitation_kind = "reviewer_limitation"
+
+    required_repairs: list[str] = []
+    optional_follow_ups: list[str] = []
+    severity = "moderate"
+    if _text_requires_final_verification_evidence(lower):
+        severity = "high"
+        required_repairs.append(
+            "Provide required final integration verification evidence paths in the reviewer decision payload."
+        )
+    else:
+        optional_follow_ups.append(
+            "Preserve this reviewer limitation in handoff artifacts and provide missing context/evidence in the next review pass."
+        )
+
+    evidence_paths = _clean_feature_review_evidence_list(raw_evidence)
+    if not evidence_paths:
+        evidence_paths = _default_feature_review_limitation_evidence_paths(context=context)
+    if not evidence_paths:
+        return None
+
+    return {
+        "finding_id": f"limitation-{limitation_kind}-{index}",
+        "severity": severity,
+        "summary": f"Reviewer limitation ({limitation_kind}): {text}",
+        "affected_files": ["feature_review_context"],
+        "evidence_paths": evidence_paths,
+        "required_repairs": required_repairs,
+        "optional_follow_ups": optional_follow_ups,
+    }
+
+
+def _clean_feature_review_evidence_list(values: object) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    cleaned: list[str] = []
+    for item in values:
+        value = str(item).strip()
+        if value:
+            cleaned.append(value)
+    return cleaned
+
+
+def _default_feature_review_limitation_evidence_paths(*, context) -> list[str]:
+    candidates = [
+        context.final_integration_verification_path,
+        context.final_integration_verification_log_path,
+        context.final_integration_worktree_log_path,
+        context.release_summary_path,
+        context.release_review_path,
+    ]
+    resolved = [str(path.resolve()) for path in candidates if path is not None]
+    if resolved:
+        return resolved
+    return [str(path).strip() for path in getattr(context, "changed_files", []) if str(path).strip()]
+
+
+def _text_requires_final_verification_evidence(text: str) -> bool:
+    mentions_final_verification = (
+        "final integration verification" in text
+        or ("final verification" in text and "integration" in text)
+    )
+    if not mentions_final_verification:
+        return False
+    has_required_marker = any(marker in text for marker in ("required", "must", "cannot", "hard stop"))
+    mentions_missing_evidence = "missing" in text and "evidence" in text
+    return has_required_marker and mentions_missing_evidence
+
+
+def _is_missing_required_final_verification_evidence_finding(finding: dict[str, object]) -> bool:
+    summary = str(finding.get("summary", "")).lower()
+    repairs = " ".join(str(item).lower() for item in finding.get("required_repairs", []) if isinstance(item, str))
+    text = f"{summary} {repairs}"
+    return _text_requires_final_verification_evidence(text)
 
 
 def _payload_looks_like_feature_review(payload: dict[str, object]) -> bool:

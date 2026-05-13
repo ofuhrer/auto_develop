@@ -2580,6 +2580,233 @@ def test_run_release_feature_review_normalization_rejects_semantic_changes(tmp_p
     assert "disagree on finding semantics" in (decision.refusal_reason or "")
 
 
+def test_run_release_feature_review_normalizes_truncated_context_limitation(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            "model_roles": {
+                "worker": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+                "reviewer": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    blocked = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "v0.1.0",
+            "reviewer": "deterministic",
+            "summary": "blocked",
+            "recommendation": "escalate",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "v0.1.0:feature_review_blocked",
+                    "severity": "critical",
+                    "summary": "Reviewer output was not valid FeatureReviewDecision JSON: limitations only",
+                    "affected_files": ["feature_review_context"],
+                    "evidence_paths": [str(tmp_path / "dummy.log")],
+                    "required_repairs": ["rerun"],
+                    "optional_follow_ups": [],
+                }
+            ],
+        }
+    )
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision, raw_output: str, output_dir: Path) -> None:
+            self.decision = decision
+            self.raw_output = raw_output
+            output_dir.mkdir(parents=True, exist_ok=True)
+            self.prompt_path = output_dir / "feature_review_prompt.md"
+            self.stdout_path = output_dir / "feature_review_stdout.log"
+            self.stderr_path = output_dir / "feature_review_stderr.log"
+            self.metadata_path = output_dir / "feature_review_metadata.json"
+            self.prompt_path.write_text("prompt\n", encoding="utf-8")
+            self.stdout_path.write_text(raw_output, encoding="utf-8")
+            self.stderr_path.write_text("", encoding="utf-8")
+            self.metadata_path.write_text('{"ok":true}\n', encoding="utf-8")
+
+    raw_output = json.dumps(
+        {
+            "decision": {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Approved with limitations noted.",
+                "recommendation": "approve",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [],
+                "limitations": [
+                    {
+                        "type": "truncated_context",
+                        "summary": "Context was truncated for git diff due to token budget.",
+                    }
+                ],
+            }
+        }
+    )
+
+    def fake_invoke_feature_reviewer(*_args, **kwargs):
+        return FakeBackendResult(blocked, raw_output, kwargs["output_dir"])
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    normalized_decision = json.loads(Path(summary["feature_review_path"]).read_text(encoding="utf-8"))
+    limitation = next(item for item in normalized_decision["findings"] if item["finding_id"].startswith("limitation-"))
+    assert result.decision == Decision.ACCEPTED
+    assert limitation["affected_files"] == ["feature_review_context"]
+    assert limitation["optional_follow_ups"]
+    assert limitation["evidence_paths"]
+
+
+def test_run_release_feature_review_normalization_keeps_missing_required_final_verification_as_hard_stop(
+    tmp_path: Path,
+) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            "model_roles": {
+                "worker": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+                "reviewer": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    blocked = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "v0.1.0",
+            "reviewer": "deterministic",
+            "summary": "blocked",
+            "recommendation": "escalate",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "v0.1.0:feature_review_blocked",
+                    "severity": "critical",
+                    "summary": "Reviewer output was not valid FeatureReviewDecision JSON: limitations only",
+                    "affected_files": ["feature_review_context"],
+                    "evidence_paths": [str(tmp_path / "dummy.log")],
+                    "required_repairs": ["rerun"],
+                    "optional_follow_ups": [],
+                }
+            ],
+        }
+    )
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision, raw_output: str, output_dir: Path) -> None:
+            self.decision = decision
+            self.raw_output = raw_output
+            output_dir.mkdir(parents=True, exist_ok=True)
+            self.prompt_path = output_dir / "feature_review_prompt.md"
+            self.stdout_path = output_dir / "feature_review_stdout.log"
+            self.stderr_path = output_dir / "feature_review_stderr.log"
+            self.metadata_path = output_dir / "feature_review_metadata.json"
+            self.prompt_path.write_text("prompt\n", encoding="utf-8")
+            self.stdout_path.write_text(raw_output, encoding="utf-8")
+            self.stderr_path.write_text("", encoding="utf-8")
+            self.metadata_path.write_text('{"ok":true}\n', encoding="utf-8")
+
+    raw_output = json.dumps(
+        {
+            "decision": {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Needs evidence handoff.",
+                "recommendation": "approve",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [],
+                "limitations": [
+                    {
+                        "type": "missing_evidence_reference",
+                        "summary": "Required final integration verification evidence is missing; this is a hard stop.",
+                    }
+                ],
+            }
+        }
+    )
+
+    def fake_invoke_feature_reviewer(*_args, **kwargs):
+        return FakeBackendResult(blocked, raw_output, kwargs["output_dir"])
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    decision_payload = json.loads(Path(summary["feature_review_path"]).read_text(encoding="utf-8"))
+    recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
+    limitation = next(item for item in decision_payload["findings"] if item["finding_id"].startswith("limitation-"))
+    assert result.decision == Decision.ESCALATED
+    assert decision_payload["recommendation"] == "escalate"
+    assert limitation["required_repairs"]
+    assert recheck["stop_reason"] == "blocked_by_hard_gate"
+
+
 def test_command_with_env_prefixes_wraps_leading_assignments() -> None:
     assert _command_with_env_prefixes(["PYTHONPATH=src", "/tmp/python", "-m", "pytest"]) == [
         "/usr/bin/env",
