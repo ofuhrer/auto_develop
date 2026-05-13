@@ -5,8 +5,8 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   subsystem failures, normalizes useful model output before strict validation, and
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
-current_focus: autonomous-finalization-and-cleanup
-active_epic: autonomous-finalization-and-cleanup
+current_focus: planner-normalization-generalization
+active_epic: null
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -26,15 +26,9 @@ completed_epics:
 - multi-epic-run-governor-initial-loop
 - multi-epic-run-governor-hardening
 - integration-review-evidence-handoff
+- autonomous-finalization-and-cleanup
 blocked_epics: []
 candidate_epics:
-- id: autonomous-finalization-and-cleanup
-  title: Land accepted feature branches and clean branches/worktrees by policy.
-  rationale: Successful feature branches still need a policy-owned merge or PR, push,
-    branch deletion, worktree cleanup, and durable state-memory update before unattended
-    multi-epic operation is credible.
-  priority: 2
-  next_release_id: autonomous-finalization-and-cleanup
 - id: planner-normalization-generalization
   title: Generalize planner-output normalization behind typed supervisor decisions.
   rationale: Recent cycles required reactive parser fixes for useful but schema-drifting
@@ -91,16 +85,24 @@ candidate_epics:
   priority: 10
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
-active_epics:
-- epic_id: autonomous-finalization-and-cleanup
-  retry_count: 0
-  repair_count: 0
-  outcome_references: []
-  unresolved_finding_references: []
-  state_review_snapshot_references: []
-  updated_at: '2026-05-13T19:11:37.574469Z'
+active_epics: []
 reviewed_epics: []
 completed_epic_records:
+- epic_id: autonomous-finalization-and-cleanup
+  status_reason: completed via feature/autonomous-finalization-and-cleanup and merged
+    into main; finalization policy models, finalization decision artifacts, PR handoff
+    evidence, cleanup eligibility, state-memory finalization updates, and review-repair
+    cleanup evidence handling are implemented
+  retry_count: 0
+  repair_count: 1
+  outcome_references:
+  - release_id: autonomous-finalization-and-cleanup
+    outcome: accepted
+    run_summary_path: runs/20260513T191351Z_autonomous-finalization-and-cleanup_release/release_summary.json
+    recorded_at: '2026-05-13T20:05:00Z'
+  unresolved_finding_references: []
+  state_review_snapshot_references: []
+  updated_at: '2026-05-13T20:05:00Z'
 - epic_id: integration-review-evidence-handoff
   status_reason: completed via feature/integration-review-evidence-handoff and merged
     into main; final verification evidence, review-context handoff, reviewer limitation
@@ -154,11 +156,11 @@ notes:
 - 'Dogfood finding: one-shot high-capability agents produced coherent implementations
   faster than over-decomposed contract batches. Prioritize supervisor-owned execution
   strategy and normalization before expanding multi-epic autonomy.'
-- 'Current top gap: accepted feature branches still require policy-owned merge/push/cleanup
-  and durable state-memory finalization before unattended multi-epic operation is
-  credible.'
-- 'Next sequencing: autonomous-finalization-and-cleanup, then planner-normalization-generalization,
-  then governor-cockpit-v2 and shared verification runtime.'
+- 'Current top gap: planner and reviewer output still requires reactive schema-specific
+  normalization repairs; this should move behind reusable typed supervisor normalization
+  actions before strict admission stops.'
+- 'Next sequencing: planner-normalization-generalization, then governor-cockpit-v2
+  and shared verification runtime.'
 - External targets should retain compact durable `.auto_develop/repo_state`, objectives,
   contracts, and outcome history in the target or control repo; raw runs remain local
   or archived evidence.
