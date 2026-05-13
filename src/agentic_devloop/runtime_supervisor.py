@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from agentic_devloop.contracts import normalize_planner_contract_plan_payload
 from agentic_devloop.models import (
     ContractPlan,
     ModelOutputNormalizationActionPayload,
@@ -378,10 +379,17 @@ class RuntimeSupervisor:
         self,
         *,
         source_evidence_paths: tuple[Path, ...],
+        expected_release_id: str,
         candidate_plan: ContractPlan | dict[str, Any],
     ) -> RuntimeSupervisorApplierResult:
         try:
-            normalized = ContractPlan.model_validate(candidate_plan)
+            normalized_candidate: ContractPlan | dict[str, Any] = candidate_plan
+            if isinstance(candidate_plan, dict):
+                normalized_candidate = normalize_planner_contract_plan_payload(
+                    candidate_plan,
+                    release_id=expected_release_id,
+                )
+            normalized = ContractPlan.model_validate(normalized_candidate)
             normalized = ContractPlan.model_validate(normalized.model_dump(mode="python"))
         except ValidationError:
             return RuntimeSupervisorApplierResult(

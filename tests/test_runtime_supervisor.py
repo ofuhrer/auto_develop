@@ -321,6 +321,7 @@ def test_planner_contract_normalization_produces_typed_proposal() -> None:
 
     result = supervisor.apply_planner_contract_normalization(
         source_evidence_paths=source_paths,
+        expected_release_id="runtime-supervisor-repair-loop",
         candidate_plan=valid_plan,
     )
 
@@ -367,3 +368,59 @@ def test_model_output_normalization_decision_produces_typed_proposal() -> None:
     assert result.proposal is not None
     assert result.proposal.action_kind == RepairActionKind.PLANNER_CONTRACT_NORMALIZATION
     assert result.proposal.decision.outcome.value == "normalized_and_retry"
+
+
+def test_planner_contract_normalization_repairs_wrapper_and_alias_drift() -> None:
+    supervisor = RuntimeSupervisor()
+    source_paths = _input(
+        RepairDecisionClassification.PLANNER_CONTRACT_NON_NORMALIZED,
+        attempt=1,
+        max_retries=3,
+    ).source_evidence_paths
+
+    candidate_plan = {
+        "release_id": "planner-normalization-generalization",
+        "planner": "strong-model",
+        "generated_contracts": [
+            {
+                "task_id": "demo-0001",
+                "title": "Wrapper drift",
+                "objective": "Wrapper drift",
+                "rationale": "Wrapper drift",
+                "depends_on": ["demo-0000"],
+                "suggested_contract": {
+                    "task_id": "demo-0001",
+                    "title": "Wrapper drift",
+                    "task_type": "docs_and_tests",
+                    "budget_class": "S",
+                    "objective": "Wrapper drift",
+                    "allowedFiles": ["src/agentic_devloop/runtime_supervisor.py"],
+                    "forbiddenChanges": ["Do not widen scope."],
+                    "verification": ["true"],
+                    "stopConditions": ["Stop when scope expands."],
+                    "requirements": ["remove me"],
+                    "implementation_requirements": ["Keep it bounded."],
+                },
+            }
+        ],
+        "warnings": [],
+    }
+
+    result = supervisor.apply_planner_contract_normalization(
+        source_evidence_paths=source_paths,
+        expected_release_id="planner-normalization-generalization",
+        candidate_plan=candidate_plan,
+    )
+
+    assert result.applied is True
+    assert result.proposal is not None
+    normalized_plan = result.proposal.normalized_plan
+    normalized_contract = normalized_plan.generated_contracts[0].suggested_contract
+
+    assert normalized_contract.release_id == "planner-normalization-generalization"
+    assert normalized_contract.task_type.value == "release_preparation"
+    assert normalized_contract.depends_on == ["demo-0000"]
+    assert "git diff" in normalized_contract.required_evidence
+    assert "changed-files list" in normalized_contract.required_evidence
+    assert any("planner_contract_payload_normalization=" in warning for warning in normalized_plan.warnings)
+    assert "Implementation requirements:" in normalized_contract.objective
