@@ -17,6 +17,49 @@ class CandidateEpic(BaseModel):
     rationale: str | None = None
 
 
+class OutcomeReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    release_id: str = Field(min_length=1)
+    task_id: str | None = Field(default=None, min_length=1)
+    outcome: str | None = Field(default=None, min_length=1)
+    run_summary_path: Path | None = None
+    recorded_at: datetime | None = None
+
+
+class UnresolvedFindingReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    finding_id: str = Field(min_length=1)
+    summary: str = Field(min_length=1)
+    severity: str | None = Field(default=None, min_length=1)
+    source_path: Path | None = None
+
+
+class StateReviewSnapshotReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    snapshot_path: Path
+    captured_at: datetime
+    release_id: str | None = Field(default=None, min_length=1)
+
+
+class EpicMemoryRecord(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    epic_id: str = Field(min_length=1)
+    title: str | None = Field(default=None, min_length=1)
+    rationale: str | None = Field(default=None, min_length=1)
+    status_reason: str | None = Field(default=None, min_length=1)
+    blocked_reason: str | None = Field(default=None, min_length=1)
+    retry_count: int = Field(default=0, ge=0)
+    repair_count: int = Field(default=0, ge=0)
+    outcome_references: list[OutcomeReference] = Field(default_factory=list)
+    unresolved_finding_references: list[UnresolvedFindingReference] = Field(default_factory=list)
+    state_review_snapshot_references: list[StateReviewSnapshotReference] = Field(default_factory=list)
+    updated_at: datetime | None = None
+
+
 class RecentRunSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -38,6 +81,11 @@ class BacklogState(BaseModel):
     blocked_epics: list[str] = Field(default_factory=list)
     candidate_epics: list[CandidateEpic] = Field(default_factory=list)
     recent_run_summaries: list[RecentRunSummary] = Field(default_factory=list)
+    active_epics: list[EpicMemoryRecord] = Field(default_factory=list)
+    reviewed_epics: list[EpicMemoryRecord] = Field(default_factory=list)
+    completed_epic_records: list[EpicMemoryRecord] = Field(default_factory=list)
+    skipped_epics: list[EpicMemoryRecord] = Field(default_factory=list)
+    blocked_epic_records: list[EpicMemoryRecord] = Field(default_factory=list)
     last_reviewed: date | None = None
     notes: list[str] = Field(default_factory=list)
 
@@ -77,6 +125,13 @@ class StateStore:
         state.active_epic = epic_id
         state.completed_epics = [value for value in state.completed_epics if value != epic_id]
         state.blocked_epics = [value for value in state.blocked_epics if value != epic_id]
+        state.completed_epic_records = [value for value in state.completed_epic_records if value.epic_id != epic_id]
+        state.blocked_epic_records = [value for value in state.blocked_epic_records if value.epic_id != epic_id]
+        state.skipped_epics = [value for value in state.skipped_epics if value.epic_id != epic_id]
+        self._set_record(
+            state.active_epics,
+            EpicMemoryRecord(epic_id=epic_id, updated_at=datetime.now(UTC)),
+        )
         self.save(state)
         return state
 
@@ -87,16 +142,103 @@ class StateStore:
         if epic_id not in state.completed_epics:
             state.completed_epics.append(epic_id)
         state.blocked_epics = [value for value in state.blocked_epics if value != epic_id]
+        state.active_epics = [value for value in state.active_epics if value.epic_id != epic_id]
+        state.blocked_epic_records = [value for value in state.blocked_epic_records if value.epic_id != epic_id]
+        state.skipped_epics = [value for value in state.skipped_epics if value.epic_id != epic_id]
+        self._set_record(
+            state.completed_epic_records,
+            EpicMemoryRecord(epic_id=epic_id, updated_at=datetime.now(UTC)),
+        )
         self.save(state)
         return state
 
-    def mark_blocked_epic(self, epic_id: str) -> BacklogState:
+    def mark_reviewed_epic(
+        self,
+        epic_id: str,
+        *,
+        status_reason: str | None = None,
+    ) -> BacklogState:
+        state = self.load()
+        self._set_record(
+            state.reviewed_epics,
+            EpicMemoryRecord(epic_id=epic_id, status_reason=status_reason, updated_at=datetime.now(UTC)),
+        )
+        self.save(state)
+        return state
+
+    def mark_skipped_epic(
+        self,
+        epic_id: str,
+        *,
+        status_reason: str,
+    ) -> BacklogState:
+        state = self.load()
+        if state.active_epic == epic_id:
+            state.active_epic = None
+        state.active_epics = [value for value in state.active_epics if value.epic_id != epic_id]
+        state.completed_epics = [value for value in state.completed_epics if value != epic_id]
+        state.blocked_epics = [value for value in state.blocked_epics if value != epic_id]
+        state.completed_epic_records = [value for value in state.completed_epic_records if value.epic_id != epic_id]
+        state.blocked_epic_records = [value for value in state.blocked_epic_records if value.epic_id != epic_id]
+        self._set_record(
+            state.skipped_epics,
+            EpicMemoryRecord(epic_id=epic_id, status_reason=status_reason, updated_at=datetime.now(UTC)),
+        )
+        self.save(state)
+        return state
+
+    def mark_blocked_epic(self, epic_id: str, *, blocked_reason: str | None = None) -> BacklogState:
         state = self.load()
         if state.active_epic == epic_id:
             state.active_epic = None
         if epic_id not in state.blocked_epics:
             state.blocked_epics.append(epic_id)
         state.completed_epics = [value for value in state.completed_epics if value != epic_id]
+        state.active_epics = [value for value in state.active_epics if value.epic_id != epic_id]
+        state.completed_epic_records = [value for value in state.completed_epic_records if value.epic_id != epic_id]
+        state.skipped_epics = [value for value in state.skipped_epics if value.epic_id != epic_id]
+        self._set_record(
+            state.blocked_epic_records,
+            EpicMemoryRecord(epic_id=epic_id, blocked_reason=blocked_reason, updated_at=datetime.now(UTC)),
+        )
+        self.save(state)
+        return state
+
+    def increment_epic_retry_count(self, epic_id: str, *, amount: int = 1) -> BacklogState:
+        return self._increment_epic_counter(epic_id, amount=amount, counter="retry_count")
+
+    def increment_epic_repair_count(self, epic_id: str, *, amount: int = 1) -> BacklogState:
+        return self._increment_epic_counter(epic_id, amount=amount, counter="repair_count")
+
+    def add_epic_outcome_reference(self, epic_id: str, reference: OutcomeReference) -> BacklogState:
+        state = self.load()
+        record = self._get_or_create_epic_record(state, epic_id)
+        record.outcome_references.append(reference)
+        record.updated_at = datetime.now(UTC)
+        self.save(state)
+        return state
+
+    def add_epic_unresolved_finding_reference(
+        self,
+        epic_id: str,
+        reference: UnresolvedFindingReference,
+    ) -> BacklogState:
+        state = self.load()
+        record = self._get_or_create_epic_record(state, epic_id)
+        record.unresolved_finding_references.append(reference)
+        record.updated_at = datetime.now(UTC)
+        self.save(state)
+        return state
+
+    def add_state_review_snapshot_reference(
+        self,
+        epic_id: str,
+        reference: StateReviewSnapshotReference,
+    ) -> BacklogState:
+        state = self.load()
+        record = self._get_or_create_epic_record(state, epic_id)
+        record.state_review_snapshot_references.append(reference)
+        record.updated_at = datetime.now(UTC)
         self.save(state)
         return state
 
@@ -135,3 +277,26 @@ class StateStore:
         state.recent_run_summaries = state.recent_run_summaries[:max_entries]
         self.save(state)
         return state
+
+    def _increment_epic_counter(self, epic_id: str, *, amount: int, counter: str) -> BacklogState:
+        if amount <= 0:
+            raise ValueError("amount must be greater than 0")
+        state = self.load()
+        record = self._get_or_create_epic_record(state, epic_id)
+        setattr(record, counter, getattr(record, counter) + amount)
+        record.updated_at = datetime.now(UTC)
+        self.save(state)
+        return state
+
+    def _get_or_create_epic_record(self, state: BacklogState, epic_id: str) -> EpicMemoryRecord:
+        for record in state.active_epics:
+            if record.epic_id == epic_id:
+                return record
+        record = EpicMemoryRecord(epic_id=epic_id, updated_at=datetime.now(UTC))
+        state.active_epics.insert(0, record)
+        return record
+
+    @staticmethod
+    def _set_record(records: list[EpicMemoryRecord], record: EpicMemoryRecord) -> None:
+        records[:] = [value for value in records if value.epic_id != record.epic_id]
+        records.insert(0, record)

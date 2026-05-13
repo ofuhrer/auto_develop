@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from agentic_devloop.state_store import BacklogState, StateStore
+from agentic_devloop.state_store import (
+    BacklogState,
+    OutcomeReference,
+    StateReviewSnapshotReference,
+    StateStore,
+    UnresolvedFindingReference,
+)
 
 
 def test_load_existing_backlog_state_yaml_with_compatibility_fields(tmp_path: Path) -> None:
@@ -65,6 +71,81 @@ def test_mark_active_completed_and_blocked_epic_transitions(tmp_path: Path) -> N
     assert blocked.active_epic is None
     assert blocked.blocked_epics == ["epic-3", "epic-2"]
     assert "epic-2" not in blocked.completed_epics
+
+
+def test_mark_reviewed_and_skipped_epic_transitions(tmp_path: Path) -> None:
+    state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
+    store = StateStore(state_path)
+    store.mark_active_epic("epic-1")
+
+    reviewed = store.mark_reviewed_epic("epic-1", status_reason="state-review-complete")
+    assert reviewed.reviewed_epics[0].epic_id == "epic-1"
+    assert reviewed.reviewed_epics[0].status_reason == "state-review-complete"
+
+    skipped = store.mark_skipped_epic("epic-1", status_reason="out-of-scope-for-release")
+    assert skipped.active_epic is None
+    assert skipped.skipped_epics[0].epic_id == "epic-1"
+    assert skipped.skipped_epics[0].status_reason == "out-of-scope-for-release"
+    assert skipped.completed_epics == []
+    assert skipped.blocked_epics == []
+
+
+def test_epic_memory_references_and_counters(tmp_path: Path) -> None:
+    state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
+    store = StateStore(state_path)
+
+    state = store.increment_epic_retry_count("epic-1")
+    state = store.increment_epic_repair_count("epic-1", amount=2)
+    state = store.add_epic_outcome_reference(
+        "epic-1",
+        OutcomeReference(
+            release_id="persistent-governor-memory",
+            task_id="pgm-0001",
+            outcome="accepted",
+            run_summary_path=Path("runs/persistent-governor-memory/review_summary.json"),
+            recorded_at=datetime(2026, 5, 13, 8, 0, tzinfo=UTC),
+        ),
+    )
+    state = store.add_epic_unresolved_finding_reference(
+        "epic-1",
+        UnresolvedFindingReference(
+            finding_id="finding-1",
+            summary="Feature review requires follow-up.",
+            severity="medium",
+            source_path=Path("runs/persistent-governor-memory/feature_review.json"),
+        ),
+    )
+    state = store.add_state_review_snapshot_reference(
+        "epic-1",
+        StateReviewSnapshotReference(
+            snapshot_path=Path("runs/persistent-governor-memory/state_review_snapshot.json"),
+            captured_at=datetime(2026, 5, 13, 9, 0, tzinfo=UTC),
+            release_id="persistent-governor-memory",
+        ),
+    )
+
+    record = state.active_epics[0]
+    assert record.epic_id == "epic-1"
+    assert record.retry_count == 1
+    assert record.repair_count == 2
+    assert record.outcome_references[0].release_id == "persistent-governor-memory"
+    assert record.unresolved_finding_references[0].finding_id == "finding-1"
+    assert str(record.state_review_snapshot_references[0].snapshot_path).endswith(
+        "state_review_snapshot.json"
+    )
+
+
+def test_durable_schema_rejects_empty_structured_ids_and_reasons() -> None:
+    with pytest.raises(ValueError):
+        OutcomeReference(release_id="", outcome="accepted")
+    with pytest.raises(ValueError):
+        UnresolvedFindingReference(finding_id="", summary="x")
+    with pytest.raises(ValueError):
+        UnresolvedFindingReference(finding_id="f-1", summary="")
+    with pytest.raises(ValueError):
+        BacklogState(candidate_epics=[{"id": "", "title": "Epic"}])
+    with pytest.raises(ValueError):
+        BacklogState(skipped_epics=[{"epic_id": "epic-1", "status_reason": ""}])
 
 
 def test_record_recent_run_summary_prepends_deduplicates_and_trims(tmp_path: Path) -> None:
