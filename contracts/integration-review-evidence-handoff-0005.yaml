@@ -1,0 +1,54 @@
+task_id: integration-review-evidence-handoff-0005
+release_id: integration-review-evidence-handoff
+title: Expose review evidence in summaries and docs
+task_type: documentation
+budget_class: S
+objective: Update release summary rendering, CLI-facing artifact summaries, and documentation
+  so final verification evidence, review prompt/input, reviewer output, normalized
+  findings, continuation decisions, repair records, and backlog follow-up records
+  are linked and described as implemented behavior.
+allowed_files:
+- src/agentic_devloop/release.py
+- src/agentic_devloop/cli.py
+- tests/test_release.py
+- tests/test_cli.py
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/README.md
+- README.md
+forbidden_changes:
+- Do not describe aspirational behavior as implemented unless covered by tests in
+  this release.
+- Do not change CLI command names or required flags.
+- Do not commit generated runtime evidence from runs/.
+- Do not broaden documentation beyond final integration review evidence handoff.
+- Do not weaken existing release summary JSON fields.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_release.py and tests/test_cli.py
+- documentation diff showing implemented final-review artifact trail
+- release summary assertion showing linked final verification and continuation artifacts
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_release.py tests/test_cli.py
+  profile: null
+stop_conditions:
+- Stop if documentation requires behavior not implemented by prior contracts.
+- Stop if release summary links cannot be asserted in tests.
+- Stop if CLI changes would break existing JSON output compatibility.
+- Stop if implementation requires changing more than 8 files.
+- Stop if the task requires changing files outside allowed_files.
+non_goals:
+- Do not implement new final-review behavior beyond summary/link exposure.
+- Do not add generated run artifacts or local worktrees.
+- Do not rewrite unrelated documentation sections.
+scientific_assumptions:
+- Not applicable; documentation and CLI summary task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- integration-review-evidence-handoff-0004

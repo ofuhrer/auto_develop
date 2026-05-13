@@ -1,0 +1,57 @@
+task_id: integration-review-evidence-handoff-0004
+release_id: integration-review-evidence-handoff
+title: Persist final review continuation decisions
+task_type: code_only
+budget_class: M
+objective: Add or extend typed release/governor artifacts so every final-review outcome
+  persists a continuation decision linking review findings, final verification evidence,
+  rerun validators, generated repair contracts, backlog follow-up proposals, accepted-risk
+  rationale, or hard-stop reason.
+allowed_files:
+- src/agentic_devloop/release.py
+- src/agentic_devloop/models.py
+- src/agentic_devloop/governor_log.py
+- src/agentic_devloop/state_store.py
+- tests/test_release.py
+- tests/test_governor_log.py
+- tests/test_state_store.py
+forbidden_changes:
+- Do not delete or overwrite existing feature_review.json or feature_review_recheck.json
+  artifacts.
+- Do not treat backlog follow-up deferral as release acceptance unless required verification
+  passed and no blocker remains.
+- Do not allow accepted-risk continuation without rationale and validators rerun evidence.
+- Do not generate backlog follow-up records outside the release run artifacts or configured
+  repo_state paths.
+- Do not change unrelated governor event schemas.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_release.py tests/test_governor_log.py and tests/test_state_store.py
+- serialized continuation decision examples for blocker, accepted risk, backlog follow-up,
+  and hard stop
+- release log or summary assertions linking continuation decisions to review artifacts
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_release.py tests/test_governor_log.py tests/test_state_store.py
+  profile: null
+stop_conditions:
+- Stop if accepted-risk records cannot prove rationale and validators rerun.
+- Stop if blocker decisions cannot be linked to generated bounded repair contracts.
+- Stop if backlog follow-up deferral would require changing backlog planner behavior.
+- Stop if implementation requires changing more than 7 files.
+- Stop if the task requires changing files outside allowed_files.
+non_goals:
+- Do not redesign backlog planning.
+- Do not change task execution or merge mechanics except final-review continuation
+  state handling.
+- Do not update documentation in this task.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- integration-review-evidence-handoff-0003

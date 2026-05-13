@@ -1,0 +1,53 @@
+task_id: integration-review-evidence-handoff-0003
+release_id: integration-review-evidence-handoff
+title: Normalize reviewer limitations into findings
+task_type: code_only
+budget_class: M
+objective: Extend feature-review output normalization to convert bounded reviewer
+  limitations, including truncated context, missing evidence references, and uncertainty
+  statements, into typed findings with evidence paths and actions, while preserving
+  hard stops for required missing verification evidence or broadened policy.
+allowed_files:
+- src/agentic_devloop/feature_review.py
+- src/agentic_devloop/release.py
+- src/agentic_devloop/models.py
+- tests/test_feature_review.py
+- tests/test_release.py
+forbidden_changes:
+- Do not accept unparseable reviewer JSON as a successful review.
+- Do not downgrade missing required final verification evidence to accepted risk.
+- Do not normalize findings in a way that changes reviewer semantics or affected files.
+- Do not generate repair contracts for files outside the mapped source contract scope.
+- Do not weaken FeatureReviewDecision or FeatureReviewFinding validation.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_feature_review.py and relevant tests/test_release.py
+  cases
+- test case showing truncated context becomes a typed limitation finding
+- test case showing missing required verification evidence remains a hard stop
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_feature_review.py tests/test_release.py
+  profile: null
+stop_conditions:
+- Stop if normalization would need to infer new affected source files not present
+  in reviewer output or review context.
+- Stop if missing required final verification evidence can pass as accepted risk.
+- Stop if policy broadening is needed to continue after a limitation finding.
+- Stop if implementation requires changing more than 5 files.
+- Stop if the task requires changing files outside allowed_files.
+non_goals:
+- Do not change final verification execution in this task.
+- Do not change release summary rendering except where needed for limitation findings
+  to serialize.
+- Do not update documentation in this task.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- integration-review-evidence-handoff-0002

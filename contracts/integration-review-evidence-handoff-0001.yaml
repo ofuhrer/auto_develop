@@ -1,0 +1,54 @@
+task_id: integration-review-evidence-handoff-0001
+release_id: integration-review-evidence-handoff
+title: Run final verification on integrated branch
+task_type: code_only
+budget_class: M
+objective: Add release-governor support for final configured verification on the exact
+  integrated feature branch after task and repair merges, recording branch name, commit
+  SHA, command results, stdout/stderr log paths, and an evidence artifact consumed
+  by final review.
+allowed_files:
+- src/agentic_devloop/release.py
+- src/agentic_devloop/verification.py
+- src/agentic_devloop/evidence.py
+- src/agentic_devloop/models.py
+- tests/test_release.py
+- tests/test_verification.py
+forbidden_changes:
+- Do not change task-level verification semantics for run-task.
+- Do not skip configured verification when the final review model is disabled or unavailable.
+- Do not record verification evidence without the integration branch name and commit
+  SHA.
+- Do not broaden verification profiles or weaken command failure handling.
+- Do not write runtime evidence outside the release run directory.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_release.py and tests/test_verification.py
+- sample final verification evidence JSON path and contents
+- verification command log paths captured in release summary
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_release.py tests/test_verification.py
+  profile: null
+stop_conditions:
+- Stop if implementation requires changing more than 6 files.
+- Stop if final verification cannot be tied to a concrete integration branch commit
+  SHA.
+- Stop if configured verification would need to be bypassed to make the release continue.
+- Stop if tests require assumptions about the developer's local Git state instead
+  of temporary repositories.
+- Stop if the task requires changing files outside allowed_files.
+non_goals:
+- Do not redesign the reviewer prompt format beyond adding final verification evidence
+  references.
+- Do not implement continuation decisions in this task.
+- Do not update user documentation in this task.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

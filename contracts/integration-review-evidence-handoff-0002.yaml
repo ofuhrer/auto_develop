@@ -1,0 +1,58 @@
+task_id: integration-review-evidence-handoff-0002
+release_id: integration-review-evidence-handoff
+title: Package bounded integration review context
+task_type: code_only
+budget_class: M
+objective: Update feature-review context assembly and prompt rendering to include
+  bounded integration diff summaries, changed-file inventory, relevant file excerpts,
+  release objective, accepted repair history, final verification logs, and prior review/recheck
+  artifacts while preserving explicit truncation metadata.
+allowed_files:
+- src/agentic_devloop/feature_review.py
+- src/agentic_devloop/release.py
+- src/agentic_devloop/context.py
+- src/agentic_devloop/models.py
+- tests/test_feature_review.py
+- tests/test_release.py
+forbidden_changes:
+- Do not pass whole-repository source dumps to the reviewer.
+- Do not remove existing prompt truncation safeguards.
+- Do not hide truncation, missing artifact, or context omission metadata from the
+  reviewer.
+- Do not change repair-contract generation behavior except to include accepted repair
+  history in context.
+- Do not require network access or external services in tests.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_feature_review.py and relevant tests/test_release.py
+  cases
+- rendered reviewer prompt fixture or assertion showing final verification and prior
+  artifacts included
+- assertions proving truncation and changed-file inventory are represented
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_feature_review.py tests/test_release.py
+  profile: null
+stop_conditions:
+- Stop if context packaging requires allowing more than 6 source or test files.
+- Stop if complete integration diff context cannot be bounded with existing truncation
+  controls.
+- Stop if reviewer input omits either final verification evidence or prior review/recheck
+  artifact links.
+- Stop if tests become dependent on the developer's local repository history instead
+  of temporary repositories.
+- Stop if the task requires changing files outside allowed_files.
+non_goals:
+- Do not implement final verification execution in this task.
+- Do not implement continuation-decision persistence in this task.
+- Do not update CLI documentation in this task.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- integration-review-evidence-handoff-0001
