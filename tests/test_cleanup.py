@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -170,6 +171,67 @@ def test_cleanup_release_artifacts_refuses_unmerged_integration_branch_deletion(
     } in report.skipped_branches
     assert "feature/v1.0.0" in branches
     assert "agent/v1.0.0/demo-0001" in branches
+
+
+def test_cleanup_uses_finalization_decision_referenced_by_release_summary(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    worktree_root = tmp_path / "worktrees"
+    config_dir = tmp_path / "configs"
+    runs_dir = tmp_path / "runs"
+    _create_repo(repo)
+    _write_config(config_dir, repo, worktree_root)
+    _git(repo, "checkout", "-b", "feature/v1.0.0")
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    _git(repo, "add", "feature.txt")
+    _git(repo, "commit", "-m", "feature only")
+    _git(repo, "checkout", "main")
+    release_run_dir = runs_dir / "20260513T120000Z_v1.0.0_release"
+    release_run_dir.mkdir(parents=True)
+    decision_path = release_run_dir / "finalization_decision.json"
+    decision_path.write_text(
+        json.dumps(
+            {
+                "release_id": "v1.0.0",
+                "run_id": "20260513T120000Z_v1.0.0",
+                "requested_mode": "merge-main",
+                "policy": {"policy": "local_merge", "required_credential_env_vars": []},
+                "policy_source": "config",
+                "gate": {"allowed": True, "reason": "ok", "decision": "accepted"},
+                "outcome": "executed",
+                "stop_reason": None,
+                "missing_credentials": [],
+                "git_commands": ["git merge --no-edit feature/v1.0.0 (into main)"],
+                "handoff_path": None,
+                "finalization": {"merged": True, "pushed": False, "failed_step": None, "error": None},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (release_run_dir / "release_summary.json").write_text(
+        json.dumps(
+            {
+                "run_id": "20260513T120000Z_v1.0.0",
+                "release_id": "v1.0.0",
+                "decision": "accepted",
+                "finalization_decision_path": str(decision_path),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    report = cleanup_release_artifacts(
+        project_id="demo",
+        release_id="v1.0.0",
+        config_dir=config_dir,
+        include_integration_branch=True,
+        runs_dir=runs_dir,
+    )
+
+    assert report.finalization_evidence_path == decision_path
+    assert report.eligible_branches == ["feature/v1.0.0"]
+    assert report.skipped_branches == []
 
 
 def test_remove_worktree_refuses_path_outside_worktree_root(tmp_path) -> None:

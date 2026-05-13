@@ -44,16 +44,24 @@ def cleanup_release_artifacts(
     task_branches = _matching_branches(repo_path, f"agent/{release_id}/*")
     integration_branch = feature_branch_name(release_id)
     integration_branch_candidate = integration_branch if include_integration_branch else None
-    evidence_path = _find_release_summary_path(runs_dir=runs_dir, release_id=release_id)
-    finalization_evidence = _load_finalization_evidence(evidence_path)
+    release_summary_path = _find_release_summary_path(runs_dir=runs_dir, release_id=release_id)
+    evidence_path = _find_finalization_decision_path(release_summary_path)
+    finalization_evidence = _load_json(evidence_path)
 
     if integration_branch_candidate and not _branch_exists(repo_path, integration_branch_candidate):
         integration_branch_candidate = None
 
-    eligible_worktree_paths = list(worktree_paths)
     skipped_worktree_paths: list[dict[str, str]] = []
+    eligible_worktree_paths: list[Path] = []
     eligible_branches: list[str] = []
     skipped_branches: list[dict[str, str]] = []
+
+    for worktree_path in worktree_paths:
+        reason = _worktree_skip_reason(worktree_root=worktree_root, worktree_path=worktree_path, release_id=release_id)
+        if reason is None:
+            eligible_worktree_paths.append(worktree_path)
+        else:
+            skipped_worktree_paths.append({"path": str(worktree_path), "reason": reason})
 
     for branch in task_branches:
         reason = _branch_skip_reason(
@@ -165,7 +173,25 @@ def _find_release_summary_path(*, runs_dir: Path, release_id: str) -> Path | Non
     return candidates[0] if candidates else None
 
 
-def _load_finalization_evidence(path: Path | None) -> dict[str, object] | None:
+def _find_finalization_decision_path(summary_path: Path | None) -> Path | None:
+    if summary_path is None:
+        return None
+    summary = _load_json(summary_path)
+    if not isinstance(summary, dict):
+        return None
+    value = summary.get("finalization_decision_path")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    configured_path = Path(value)
+    if configured_path.is_absolute() or configured_path.exists():
+        return configured_path
+    sibling_path = summary_path.parent / configured_path.name
+    if sibling_path.exists():
+        return sibling_path
+    return configured_path
+
+
+def _load_json(path: Path | None) -> dict[str, object] | None:
     if path is None:
         return None
     try:
@@ -241,6 +267,14 @@ def _integration_branch_skip_reason(
 def _evidence_marks_integration_branch_eligible(finalization_evidence: dict[str, object] | None) -> bool:
     if not isinstance(finalization_evidence, dict):
         return False
+    if finalization_evidence.get("outcome") == "executed":
+        finalization = finalization_evidence.get("finalization")
+        if isinstance(finalization, dict):
+            if finalization.get("merged") is True:
+                return True
+        policy = finalization_evidence.get("policy")
+        if isinstance(policy, dict) and policy.get("policy") == "local_merge":
+            return True
     finalization = finalization_evidence.get("finalization")
     if isinstance(finalization, dict):
         if finalization.get("merged") is True:
@@ -256,6 +290,14 @@ def _evidence_marks_integration_branch_eligible(finalization_evidence: dict[str,
             if action in {"merge-main", "push-main"}:
                 return True
     return False
+
+
+def _worktree_skip_reason(*, worktree_root: Path, worktree_path: Path, release_id: str) -> str | None:
+    if not _is_inside(worktree_path, worktree_root):
+        return "outside_worktree_root"
+    if release_id not in worktree_path.name:
+        return "non_release_worktree"
+    return None
 
 
 def _current_branch(repo_path: Path) -> str:

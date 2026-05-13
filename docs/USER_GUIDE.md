@@ -626,7 +626,7 @@ The finalization choices are:
 - `merge-main`: merge `feature/<release>` into the base branch locally.
 - `push-main`: merge `feature/<release>` into the base branch and push it.
 
-The configured `release_finalization_policy` controls the policy-owned finalization stage after accepted work passes review:
+The configured `release_finalization_policy` controls the policy-owned finalization stage after accepted work passes review. The CLI `--release-finalize` value is retained for evidence compatibility and older workflows, but it does not override the configured policy once `release_finalization_policy` is present:
 
 - `local_merge`: merge the accepted feature branch into the base branch locally.
 - `push_feature`: push the accepted feature branch for PR review or downstream integration.
