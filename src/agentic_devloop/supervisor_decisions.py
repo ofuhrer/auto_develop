@@ -40,6 +40,7 @@ _LEGACY_VALIDATORS_DECISION_TYPES = {
     SupervisorDecisionType.RELEASE_SCHEDULING.value,
     SupervisorDecisionType.EXECUTION_STRATEGY.value,
     SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION.value,
+    SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION.value,
 }
 
 

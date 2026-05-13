@@ -298,6 +298,23 @@ def test_parse_feature_review_finding_classification_decision() -> None:
     assert decision.selected_action == FeatureReviewFindingAction.ACCEPT
 
 
+def test_parse_legacy_feature_review_finding_classification_decision_adds_validators_migration_default() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+        "finding_id": "fr-legacy-001",
+        "classification": FeatureReviewFindingClassification.BLOCKER,
+        "selected_action": FeatureReviewFindingAction.REPAIR,
+        "outcome": FeatureReviewFindingOutcome.CONTINUE,
+        "fallback_plan": "Escalate if bounded repair cannot resolve the blocker safely.",
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, FeatureReviewFindingClassificationDecision)
+    assert decision.validators_to_rerun == [LEGACY_VALIDATORS_UNSPECIFIED]
+
+
 def test_feature_review_finding_classification_requires_expected_action_outcome_mapping() -> None:
     with pytest.raises(ValidationError, match="repair or accept requires continue outcome"):
         FeatureReviewFindingClassificationDecision.model_validate(

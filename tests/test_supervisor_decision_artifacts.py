@@ -295,6 +295,43 @@ def test_load_legacy_model_output_normalization_artifact_requires_explicit_rerun
             load_supervisor_decision_artifact(artifact_path)
 
 
+def test_load_legacy_feature_review_finding_classification_artifact_adds_validators_migration_default(
+    tmp_path: Path,
+) -> None:
+    evidence_file = tmp_path / "finding-classification-evidence.log"
+    evidence_file.write_text("legacy finding classification\n", encoding="utf-8")
+    artifact_path = tmp_path / "supervisor_decisions" / "legacy-feature-review-finding-classification.json"
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION_V1,
+                "decision_id": "legacy-finding-classification-001",
+                "release_id": "review-loop-convergence-policy",
+                "decided_at": "2026-05-13T08:00:00",
+                "decided_by": "supervisor-agent",
+                "rationale": "Legacy artifact predates explicit validator rerun storage.",
+                "evidence_paths": ["finding-classification-evidence.log"],
+                "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+                "finding_id": "fr-legacy-001",
+                "classification": FeatureReviewFindingClassification.BACKLOG_FOLLOW_UP,
+                "selected_action": FeatureReviewFindingAction.DEFER,
+                "outcome": FeatureReviewFindingOutcome.STOP,
+                "fallback_plan": "Track backlog follow-up and stop the current finding.",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.warns(UserWarning, match="legacy supervisor decision artifact"):
+        loaded = load_supervisor_decision_artifact(artifact_path)
+
+    assert isinstance(loaded, FeatureReviewFindingClassificationDecision)
+    assert loaded.validators_to_rerun == [LEGACY_VALIDATORS_UNSPECIFIED]
+
+
 def test_write_and_load_model_output_normalization_artifact_round_trip(tmp_path: Path) -> None:
     evidence_file = tmp_path / "normalization-evidence.log"
     evidence_file.write_text("normalized output accepted\n", encoding="utf-8")
