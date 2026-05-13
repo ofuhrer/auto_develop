@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import warnings
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal
@@ -43,6 +43,7 @@ class SupervisorDecisionType(StrEnum):
     ENVIRONMENT_REPAIR = "environment_repair"
     FEATURE_REVIEW_FINDING_CLASSIFICATION = "feature_review_finding_classification"
     RELEASE_FINALIZATION = "release_finalization"
+    SCOPE_RISK_BUDGET_POLICY = "scope_risk_budget_policy"
 
 
 _LEGACY_VALIDATORS_DECISION_TYPES = {
@@ -547,6 +548,109 @@ class ReleaseFinalizationDecision(SupervisorDecisionBase):
         return self
 
 
+class ScopeRiskClassification(StrEnum):
+    MECHANICAL = "mechanical"
+    COHESIVE = "cohesive"
+    RISKY = "risky"
+    SCOPE_CREEP = "scope_creep"
+
+
+class ScopeRiskAction(StrEnum):
+    ACCEPT_WITH_GUARDS = "accept_with_guards"
+    SPLIT_TASK = "split_task"
+    NARROW_SCOPE_AND_RETRY = "narrow_scope_and_retry"
+    REPLAN = "replan"
+    STOP = "stop"
+
+
+class ScopeRiskOutcome(StrEnum):
+    ACCEPTED_WITH_GUARDS = "accepted_with_guards"
+    SPLIT_AND_RETRY = "split_and_retry"
+    NARROWED_AND_RETRY = "narrowed_and_retry"
+    REPLAN_AND_RETRY = "replan_and_retry"
+    STOPPED = "stopped"
+
+
+class ScopeRiskAffectedScope(StrEnum):
+    TASK = "task"
+    RELEASE = "release"
+
+
+class ScopeRiskBudgetPolicyDecision(SupervisorDecisionBase):
+    decision_type: Literal[SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY] = (
+        SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY
+    )
+    classification: ScopeRiskClassification
+    selected_action: ScopeRiskAction
+    outcome: ScopeRiskOutcome
+    fallback_plan: str = Field(min_length=1)
+    validators_to_rerun: list[str]
+    configured_changed_files_limit: int = Field(gt=0)
+    actual_changed_files: int = Field(ge=0)
+    configured_diff_size_limit: int = Field(gt=0)
+    actual_diff_size: int = Field(ge=0)
+    affected_scope: ScopeRiskAffectedScope
+    affected_task_id: str | None = None
+    hard_safety_findings: list[str] = Field(default_factory=list)
+
+    @field_validator("decided_at")
+    @classmethod
+    def decided_at_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    @field_validator("evidence_paths")
+    @classmethod
+    def evidence_paths_must_be_confined_release_relative(cls, values: list[Path]) -> list[Path]:
+        if not values:
+            raise ValueError("evidence_paths must not be empty")
+        for value in values:
+            if value.is_absolute():
+                raise ValueError("scope-risk evidence_paths must be release-relative")
+            if ".." in value.parts:
+                raise ValueError("scope-risk evidence_paths must not include parent traversal")
+        return values
+
+    @field_validator("validators_to_rerun")
+    @classmethod
+    def validators_to_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if not values or any(not value.strip() for value in values):
+            raise ValueError("validators to rerun must not be empty")
+        return values
+
+    @field_validator("hard_safety_findings")
+    @classmethod
+    def hard_safety_findings_must_not_include_empty_values(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("hard safety findings must not include empty values")
+        return values
+
+    @model_validator(mode="after")
+    def classification_action_and_scope_must_be_consistent(self) -> "ScopeRiskBudgetPolicyDecision":
+        outcome_by_action = {
+            ScopeRiskAction.ACCEPT_WITH_GUARDS: ScopeRiskOutcome.ACCEPTED_WITH_GUARDS,
+            ScopeRiskAction.SPLIT_TASK: ScopeRiskOutcome.SPLIT_AND_RETRY,
+            ScopeRiskAction.NARROW_SCOPE_AND_RETRY: ScopeRiskOutcome.NARROWED_AND_RETRY,
+            ScopeRiskAction.REPLAN: ScopeRiskOutcome.REPLAN_AND_RETRY,
+            ScopeRiskAction.STOP: ScopeRiskOutcome.STOPPED,
+        }
+        if self.outcome != outcome_by_action[self.selected_action]:
+            raise ValueError("selected_action must match outcome")
+        if self.affected_scope == ScopeRiskAffectedScope.TASK and not self.affected_task_id:
+            raise ValueError("affected_scope=task requires affected_task_id")
+        if self.affected_scope == ScopeRiskAffectedScope.RELEASE and self.affected_task_id:
+            raise ValueError("affected_scope=release must not include affected_task_id")
+        if self.selected_action == ScopeRiskAction.ACCEPT_WITH_GUARDS:
+            if self.classification not in {ScopeRiskClassification.MECHANICAL, ScopeRiskClassification.COHESIVE}:
+                raise ValueError("accept_with_guards requires mechanical or cohesive classification")
+            if self.hard_safety_findings:
+                raise ValueError("accept_with_guards must not include hard_safety_findings")
+        if self.hard_safety_findings and self.selected_action != ScopeRiskAction.STOP:
+            raise ValueError("hard_safety_findings require stop action")
+        return self
+
+
 SupervisorDecisionRecord = Annotated[
     (
         ReleaseSchedulingDecision
@@ -559,6 +663,7 @@ SupervisorDecisionRecord = Annotated[
         | EnvironmentRepairDecision
         | FeatureReviewFindingClassificationDecision
         | ReleaseFinalizationDecision
+        | ScopeRiskBudgetPolicyDecision
     ),
     Field(discriminator="decision_type"),
 ]

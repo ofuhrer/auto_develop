@@ -84,8 +84,8 @@ def deterministic_review(
                 finding_id=f"{task.task_id}:changed_files_budget",
                 severity=severity,
                 risk=(
-                    f"Changed files over budget: {changed_files_count} exceeds "
-                    f"{budget.max_changed_files_per_task}."
+                    f"Scope-risk changed-files overage: over budget: {changed_files_count} "
+                    f"exceeds {budget.max_changed_files_per_task} changed files."
                 ),
                 recommended_actions=[
                     "Review whether task scope should be split.",
@@ -105,8 +105,8 @@ def deterministic_review(
                 finding_id=f"{task.task_id}:diff_lines_budget",
                 severity=severity,
                 risk=(
-                    f"Diff lines over budget: {diff_lines} exceeds "
-                    f"{budget.max_diff_lines_per_task}."
+                    f"Scope-risk diff-size overage: over budget: {diff_lines} "
+                    f"exceeds {budget.max_diff_lines_per_task} diff lines."
                 ),
                 recommended_actions=[
                     "Review whether task scope should be split.",
@@ -120,7 +120,7 @@ def deterministic_review(
 
     if soft_gate_findings:
         risks.append(
-            "Task exceeded one or more size budgets; reviewer/supervisor soft-gate decision is required."
+            "Task exceeded one or more size budgets; a scope-risk reviewer/supervisor soft-gate decision is required."
         )
 
     return ReviewDecision(

@@ -119,6 +119,15 @@ decision, which can serialize the release when the supervisor selects
 unsupported or stale scheduling decisions fail deterministically instead of
 falling back silently.
 
+The implemented soft scope-risk policy uses the same record layer for
+changed-file and diff-size overages once the deterministic hard gates have
+passed. Those findings are supervisor-adjudicated rather than automatic stops,
+and they still carry evidence paths, rationale, fallback plan, and validator
+rerun metadata. When a release encounters a scope-risk overage without an
+existing scope-risk decision artifact, the runtime now writes a deterministic
+typed `scope_risk_budget_policy` placeholder decision in the same run and keeps
+the release blocked until an explicit accepted-with-guards decision exists.
+
 ## Relationship To Hard Gates
 
 Supervisor decisions do not bypass deterministic validators.
@@ -127,6 +136,8 @@ The kernel still owns hard rejection for:
 
 - forbidden paths;
 - generated artifacts that are out of scope;
+- lockfiles, migrations, and other configured exclusive paths;
+- files outside task scope;
 - missing required evidence;
 - unsafe finalization;
 - destructive operations;
@@ -147,6 +158,11 @@ The `release_scheduling` path is now the second runtime consumer. It writes a
 typed scheduling decision when release overlap is present, reloads it strictly,
 and rejects stale or unsupported scheduling artifacts without weakening hard
 path, artifact, or verification gates.
+
+The `scope_risk_budget_policy` path is now an implemented runtime consumer. It
+writes or loads typed scope-risk decisions after hard gates and verification
+pass, gates acceptance/finalization based on typed outcomes, and keeps missing
+or invalid artifacts as blocking conditions.
 
 The broader multi-epic governor that would repeatedly consume these records is
 still planned.

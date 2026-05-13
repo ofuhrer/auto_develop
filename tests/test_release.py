@@ -25,6 +25,7 @@ from agentic_devloop.models import FeatureReviewDecision, FeatureReviewRecheckRe
 from agentic_devloop.orchestrator import TaskRunResult, executor_config_for_task, executor_configs_for_task
 from agentic_devloop.release import (
     collect_release_planning_state_review_snapshot,
+    make_release_run_id,
     _assert_safe_final_integration_verification_worktree,
     _assert_safe_feature_review_rerun_worktree,
     _build_release_finalization_gate,
@@ -45,9 +46,15 @@ from agentic_devloop.release import (
 from agentic_devloop.supervisor_decisions import (
     FeatureReviewFindingClassificationDecision,
     ReleaseSchedulingAction,
+    ScopeRiskAction,
+    ScopeRiskAffectedScope,
+    ScopeRiskBudgetPolicyDecision,
+    ScopeRiskClassification,
+    ScopeRiskOutcome,
     SupervisorDecisionType,
     load_supervisor_decision_artifact,
     supervisor_decision_artifact_path,
+    write_supervisor_decision_artifact,
 )
 from agentic_devloop.runtime_supervisor import (
     PlannerAdmissionRepairDecisionArtifact,
@@ -83,6 +90,25 @@ class FakeExecutor:
             backend="fake",
             model=None,
         )
+
+
+class ManyFilesExecutor(FakeExecutor):
+    def __init__(self, *, files_per_task: int) -> None:
+        self._files_per_task = files_per_task
+
+    def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+        result = super().run(prompt_path=prompt_path, worktree_path=worktree_path, output_dir=output_dir)
+        prompt_text = prompt_path.read_text(encoding="utf-8")
+        task_id = "unknown"
+        if "task_id: demo-0001" in prompt_text:
+            task_id = "demo-0001"
+        elif "task_id: demo-0002" in prompt_text:
+            task_id = "demo-0002"
+        docs_dir = worktree_path / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        for index in range(1, self._files_per_task + 1):
+            (docs_dir / f"{task_id}-{index}.md").write_text(f"# {task_id} {index}\n", encoding="utf-8")
+        return result
 
 
 class SlowFakeExecutor(FakeExecutor):
@@ -1353,6 +1379,267 @@ def test_run_release_failed_task_remains_hard_failure_even_with_soft_budget_find
     assert result.finalization is None
     assert summary["soft_budget_findings"]
     assert summary["release_soft_gate_decision_path"] is None
+
+
+def _write_scope_risk_budget_policy_decision(
+    *,
+    release_root: Path,
+    release_id: str,
+    decided_at: datetime,
+    affected_task_id: str,
+    selected_action: ScopeRiskAction,
+    outcome: ScopeRiskOutcome,
+    classification: ScopeRiskClassification = ScopeRiskClassification.MECHANICAL,
+    hard_safety_findings: list[str] | None = None,
+) -> Path:
+    evidence_path = release_root / "scope_risk_evidence.txt"
+    evidence_path.write_text("scope risk evidence\n", encoding="utf-8")
+    decision = ScopeRiskBudgetPolicyDecision.model_validate(
+        {
+            "decision_type": SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY,
+            "decision_id": f"{release_id}__scope_risk__{affected_task_id}",
+            "release_id": release_id,
+            "decided_at": decided_at,
+            "decided_by": "test",
+            "rationale": "scope-risk budget policy test decision",
+            "evidence_paths": [str(Path("scope_risk_evidence.txt"))],
+            "classification": classification,
+            "selected_action": selected_action,
+            "outcome": outcome,
+            "fallback_plan": "Split or replan if validation fails.",
+            "validators_to_rerun": ["verification", "release_summary"],
+            "configured_changed_files_limit": 8,
+            "actual_changed_files": 9,
+            "configured_diff_size_limit": 600,
+            "actual_diff_size": 9,
+            "affected_scope": ScopeRiskAffectedScope.TASK,
+            "affected_task_id": affected_task_id,
+            "hard_safety_findings": hard_safety_findings or [],
+        }
+    )
+    return write_supervisor_decision_artifact(release_bundle_path=release_root, decision=decision)
+
+
+def test_run_release_generates_scope_risk_decision_and_blocks_without_explicit_acceptance(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, max_strong_model_calls_per_release=10)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/*"]).model_dump(mode="json"),
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=ManyFilesExecutor(files_per_task=9),
+        merge_on_accept=True,
+        release_finalize="merge-main",
+    )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert result.decision == Decision.NEEDS_REVISION
+    assert result.finalization is None
+    assert summary["scope_risk_budget_policy_gate"]["allowed"] is False
+    assert any(
+        "requires replan_and_retry" in reason
+        for reason in summary["scope_risk_budget_policy_gate"]["blocking_reasons"]
+    )
+    decision_paths = summary["scope_risk_budget_policy_decision_paths"]
+    assert decision_paths
+    decision_path = Path(decision_paths[0])
+    decision = load_supervisor_decision_artifact(decision_path)
+    assert isinstance(decision, ScopeRiskBudgetPolicyDecision)
+    assert decision.selected_action == ScopeRiskAction.REPLAN
+    assert decision.outcome == ScopeRiskOutcome.REPLAN_AND_RETRY
+    assert decision.classification == ScopeRiskClassification.MECHANICAL
+    assert decision.evidence_paths
+    assert all(not path.is_absolute() and ".." not in path.parts for path in decision.evidence_paths)
+    assert any("changed_files.txt" in str(path) for path in decision.evidence_paths)
+    assert decision.fallback_plan
+    assert decision.validators_to_rerun
+
+
+def test_run_release_scope_risk_decision_uses_structured_metrics_when_risk_parse_fails(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, max_strong_model_calls_per_release=10)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/*"]).model_dump(mode="json"),
+    )
+
+    with patch("agentic_devloop.release._parse_scope_risk_budget_from_finding", return_value=None):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=ManyFilesExecutor(files_per_task=9),
+            merge_on_accept=True,
+            release_finalize="merge-main",
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    decision = load_supervisor_decision_artifact(Path(summary["scope_risk_budget_policy_decision_paths"][0]))
+
+    assert isinstance(decision, ScopeRiskBudgetPolicyDecision)
+    assert decision.classification == ScopeRiskClassification.MECHANICAL
+    assert decision.configured_changed_files_limit == 8
+    assert decision.configured_diff_size_limit == 600
+    assert decision.actual_changed_files > decision.configured_changed_files_limit
+    assert decision.actual_diff_size >= 0
+
+
+def test_run_release_allows_soft_scope_overage_with_accepted_scope_risk_decision(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, max_strong_model_calls_per_release=10)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/*"]).model_dump(mode="json"),
+    )
+    runs_dir = tmp_path / "runs"
+    now = datetime(2026, 5, 12, tzinfo=UTC)
+    run_id = make_release_run_id("v0.1.0", now)
+    release_root = runs_dir / run_id
+    release_root.mkdir(parents=True, exist_ok=True)
+    decision_path = _write_scope_risk_budget_policy_decision(
+        release_root=release_root,
+        release_id="v0.1.0",
+        decided_at=now,
+        affected_task_id="demo-0001",
+        selected_action=ScopeRiskAction.ACCEPT_WITH_GUARDS,
+        outcome=ScopeRiskOutcome.ACCEPTED_WITH_GUARDS,
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=runs_dir,
+        executor=ManyFilesExecutor(files_per_task=9),
+        merge_on_accept=True,
+        release_finalize="merge-main",
+        now=now,
+    )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert result.decision == Decision.ACCEPTED
+    assert result.finalization is not None
+    assert decision_path.exists()
+    assert str(decision_path) in summary["scope_risk_budget_policy_gate"]["selected_decision_paths"]
+
+
+def test_run_release_does_not_finalize_when_scope_risk_decision_requires_stop(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, max_strong_model_calls_per_release=10)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/*"]).model_dump(mode="json"),
+    )
+    runs_dir = tmp_path / "runs"
+    now = datetime(2026, 5, 12, tzinfo=UTC)
+    run_id = make_release_run_id("v0.1.0", now)
+    release_root = runs_dir / run_id
+    release_root.mkdir(parents=True, exist_ok=True)
+    _write_scope_risk_budget_policy_decision(
+        release_root=release_root,
+        release_id="v0.1.0",
+        decided_at=now,
+        affected_task_id="demo-0001",
+        selected_action=ScopeRiskAction.STOP,
+        outcome=ScopeRiskOutcome.STOPPED,
+        classification=ScopeRiskClassification.RISKY,
+        hard_safety_findings=["unsafe scope escalation"],
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=runs_dir,
+        executor=ManyFilesExecutor(files_per_task=9),
+        merge_on_accept=True,
+        release_finalize="merge-main",
+        now=now,
+    )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert result.decision == Decision.NEEDS_REVISION
+    assert result.finalization is None
+    assert summary["scope_risk_budget_policy_gate"]["allowed"] is False
+    assert any("requires stopped" in reason for reason in summary["scope_risk_budget_policy_gate"]["blocking_reasons"])
+
+
+@pytest.mark.parametrize(
+    ("selected_action", "outcome", "expected_gate_phrase"),
+    [
+        (ScopeRiskAction.SPLIT_TASK, ScopeRiskOutcome.SPLIT_AND_RETRY, "requires split_and_retry"),
+        (ScopeRiskAction.REPLAN, ScopeRiskOutcome.REPLAN_AND_RETRY, "requires replan_and_retry"),
+    ],
+)
+def test_run_release_scope_risk_split_or_replan_decision_blocks_finalize_and_preserves_hard_gate(
+    tmp_path,
+    selected_action: ScopeRiskAction,
+    outcome: ScopeRiskOutcome,
+    expected_gate_phrase: str,
+) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, max_strong_model_calls_per_release=10)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/*"]).model_dump(mode="json"),
+    )
+    runs_dir = tmp_path / "runs"
+    now = datetime(2026, 5, 12, tzinfo=UTC)
+    run_id = make_release_run_id("v0.1.0", now)
+    release_root = runs_dir / run_id
+    release_root.mkdir(parents=True, exist_ok=True)
+    decision_path = _write_scope_risk_budget_policy_decision(
+        release_root=release_root,
+        release_id="v0.1.0",
+        decided_at=now,
+        affected_task_id="demo-0001",
+        selected_action=selected_action,
+        outcome=outcome,
+        classification=ScopeRiskClassification.COHESIVE,
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=runs_dir,
+        executor=ManyFilesExecutor(files_per_task=9),
+        merge_on_accept=True,
+        release_finalize="merge-main",
+        now=now,
+    )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert result.decision == Decision.NEEDS_REVISION
+    assert result.finalization is None
+    assert summary["scope_risk_budget_policy_gate"]["allowed"] is False
+    assert any(
+        expected_gate_phrase in reason for reason in summary["scope_risk_budget_policy_gate"]["blocking_reasons"]
+    )
+    assert str(decision_path) in summary["scope_risk_budget_policy_gate"]["selected_decision_paths"]
+    assert str(decision_path) in summary["scope_risk_budget_policy_gate"]["blocking_decision_paths"]
 
 
 def test_release_preflight_ignores_metadata_files(tmp_path) -> None:

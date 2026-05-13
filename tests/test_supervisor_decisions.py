@@ -34,6 +34,11 @@ from agentic_devloop.supervisor_decisions import (
     RepairLoopOutcome,
     SCHEMA_VERSION_V1,
     SchedulingOutcome,
+    ScopeRiskAction,
+    ScopeRiskAffectedScope,
+    ScopeRiskBudgetPolicyDecision,
+    ScopeRiskClassification,
+    ScopeRiskOutcome,
     SoftBudgetAcceptanceDecision,
     SupervisorDecisionType,
     LEGACY_VALIDATORS_UNSPECIFIED,
@@ -757,6 +762,199 @@ def test_parse_supervisor_decision_rejects_unsupported_type() -> None:
 
     with pytest.raises(ValidationError):
         parse_supervisor_decision(payload)
+
+
+def test_parse_scope_risk_budget_policy_decision() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY,
+        "classification": ScopeRiskClassification.COHESIVE,
+        "selected_action": ScopeRiskAction.ACCEPT_WITH_GUARDS,
+        "outcome": ScopeRiskOutcome.ACCEPTED_WITH_GUARDS,
+        "fallback_plan": "Split and rerun if verification detects semantic drift.",
+        "validators_to_rerun": ["changed_files", "diff_size", "verification"],
+        "configured_changed_files_limit": 8,
+        "actual_changed_files": 12,
+        "configured_diff_size_limit": 500,
+        "actual_diff_size": 740,
+        "affected_scope": ScopeRiskAffectedScope.TASK,
+        "affected_task_id": "soft-scope-budget-policy-0001",
+        "evidence_paths": ["runs/release/changed_files.txt", "runs/release/git_diff.patch"],
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, ScopeRiskBudgetPolicyDecision)
+    assert decision.classification == ScopeRiskClassification.COHESIVE
+    assert decision.selected_action == ScopeRiskAction.ACCEPT_WITH_GUARDS
+
+
+def test_scope_risk_budget_policy_requires_non_empty_required_fields() -> None:
+    with pytest.raises(ValidationError, match="evidence_paths must not be empty"):
+        ScopeRiskBudgetPolicyDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY,
+                "classification": ScopeRiskClassification.COHESIVE,
+                "selected_action": ScopeRiskAction.ACCEPT_WITH_GUARDS,
+                "outcome": ScopeRiskOutcome.ACCEPTED_WITH_GUARDS,
+                "fallback_plan": "Split if verification regresses.",
+                "validators_to_rerun": ["verification"],
+                "configured_changed_files_limit": 8,
+                "actual_changed_files": 12,
+                "configured_diff_size_limit": 500,
+                "actual_diff_size": 740,
+                "affected_scope": ScopeRiskAffectedScope.TASK,
+                "affected_task_id": "soft-scope-budget-policy-0001",
+                "evidence_paths": [],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="validators to rerun must not be empty"):
+        ScopeRiskBudgetPolicyDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY,
+                "classification": ScopeRiskClassification.COHESIVE,
+                "selected_action": ScopeRiskAction.ACCEPT_WITH_GUARDS,
+                "outcome": ScopeRiskOutcome.ACCEPTED_WITH_GUARDS,
+                "fallback_plan": "Split if verification regresses.",
+                "validators_to_rerun": [],
+                "configured_changed_files_limit": 8,
+                "actual_changed_files": 12,
+                "configured_diff_size_limit": 500,
+                "actual_diff_size": 740,
+                "affected_scope": ScopeRiskAffectedScope.TASK,
+                "affected_task_id": "soft-scope-budget-policy-0001",
+                "evidence_paths": ["runs/release/changed_files.txt"],
+            }
+        )
+
+
+@pytest.mark.parametrize("evidence_path", ["/tmp/changed_files.txt", "../changed_files.txt"])
+def test_scope_risk_budget_policy_requires_release_relative_evidence_paths(evidence_path: str) -> None:
+    with pytest.raises(ValidationError, match="scope-risk evidence_paths"):
+        ScopeRiskBudgetPolicyDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY,
+                "classification": ScopeRiskClassification.MECHANICAL,
+                "selected_action": ScopeRiskAction.REPLAN,
+                "outcome": ScopeRiskOutcome.REPLAN_AND_RETRY,
+                "fallback_plan": "Split if verification regresses.",
+                "validators_to_rerun": ["verification"],
+                "configured_changed_files_limit": 8,
+                "actual_changed_files": 12,
+                "configured_diff_size_limit": 500,
+                "actual_diff_size": 740,
+                "affected_scope": ScopeRiskAffectedScope.TASK,
+                "affected_task_id": "soft-scope-budget-policy-0001",
+                "evidence_paths": [evidence_path],
+            }
+        )
+
+
+def test_scope_risk_budget_policy_blocks_soft_acceptance_for_hard_safety_findings() -> None:
+    with pytest.raises(ValidationError, match="must not include hard_safety_findings"):
+        ScopeRiskBudgetPolicyDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY,
+                "classification": ScopeRiskClassification.MECHANICAL,
+                "selected_action": ScopeRiskAction.ACCEPT_WITH_GUARDS,
+                "outcome": ScopeRiskOutcome.ACCEPTED_WITH_GUARDS,
+                "fallback_plan": "Stop if hard gates are violated.",
+                "validators_to_rerun": ["verification"],
+                "configured_changed_files_limit": 8,
+                "actual_changed_files": 20,
+                "configured_diff_size_limit": 500,
+                "actual_diff_size": 2000,
+                "affected_scope": ScopeRiskAffectedScope.RELEASE,
+                "evidence_paths": ["runs/release/changed_files.txt"],
+                "hard_safety_findings": ["forbidden path touched: migrations/001.sql"],
+            }
+        )
+
+
+def test_scope_risk_budget_policy_allows_mechanical_acceptance_without_hard_safety_findings() -> None:
+    decision = ScopeRiskBudgetPolicyDecision.model_validate(
+        {
+            **BASE,
+            "decision_type": SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY,
+            "classification": ScopeRiskClassification.MECHANICAL,
+            "selected_action": ScopeRiskAction.ACCEPT_WITH_GUARDS,
+            "outcome": ScopeRiskOutcome.ACCEPTED_WITH_GUARDS,
+            "fallback_plan": "Escalate to split if verification regresses.",
+            "validators_to_rerun": ["verification", "diff_size"],
+            "configured_changed_files_limit": 8,
+            "actual_changed_files": 19,
+            "configured_diff_size_limit": 500,
+            "actual_diff_size": 1500,
+            "affected_scope": ScopeRiskAffectedScope.TASK,
+            "affected_task_id": "soft-scope-budget-policy-0001",
+            "evidence_paths": ["runs/release/changed_files.txt"],
+        }
+    )
+
+    assert decision.selected_action == ScopeRiskAction.ACCEPT_WITH_GUARDS
+    assert decision.outcome == ScopeRiskOutcome.ACCEPTED_WITH_GUARDS
+
+
+def test_scope_risk_budget_policy_rejects_risky_accept_with_guards_classification() -> None:
+    with pytest.raises(ValidationError, match="accept_with_guards requires mechanical or cohesive classification"):
+        ScopeRiskBudgetPolicyDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY,
+                "classification": ScopeRiskClassification.RISKY,
+                "selected_action": ScopeRiskAction.ACCEPT_WITH_GUARDS,
+                "outcome": ScopeRiskOutcome.ACCEPTED_WITH_GUARDS,
+                "fallback_plan": "Escalate to hard stop.",
+                "validators_to_rerun": ["verification"],
+                "configured_changed_files_limit": 8,
+                "actual_changed_files": 12,
+                "configured_diff_size_limit": 500,
+                "actual_diff_size": 740,
+                "affected_scope": ScopeRiskAffectedScope.TASK,
+                "affected_task_id": "soft-scope-budget-policy-0001",
+                "evidence_paths": ["runs/release/changed_files.txt"],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("selected_action", "outcome"),
+    [
+        (ScopeRiskAction.SPLIT_TASK, ScopeRiskOutcome.SPLIT_AND_RETRY),
+        (ScopeRiskAction.REPLAN, ScopeRiskOutcome.REPLAN_AND_RETRY),
+    ],
+)
+def test_parse_scope_risk_budget_policy_split_and_replan_decisions(
+    selected_action: ScopeRiskAction,
+    outcome: ScopeRiskOutcome,
+) -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY,
+        "classification": ScopeRiskClassification.COHESIVE,
+        "selected_action": selected_action,
+        "outcome": outcome,
+        "fallback_plan": "Retry via bounded contract decomposition.",
+        "validators_to_rerun": ["changed_files", "verification"],
+        "configured_changed_files_limit": 8,
+        "actual_changed_files": 12,
+        "configured_diff_size_limit": 500,
+        "actual_diff_size": 740,
+        "affected_scope": ScopeRiskAffectedScope.TASK,
+        "affected_task_id": "soft-scope-budget-policy-0001",
+        "evidence_paths": ["runs/release/changed_files.txt", "runs/release/git_diff.patch"],
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, ScopeRiskBudgetPolicyDecision)
+    assert decision.selected_action == selected_action
+    assert decision.outcome == outcome
 
 
 def test_effective_validators_to_rerun_filters_legacy_sentinel() -> None:

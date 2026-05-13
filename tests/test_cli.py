@@ -151,6 +151,8 @@ def test_run_release_command_outputs_budget_artifact_paths(monkeypatch, capsys, 
     assert '"feature_review_prompt_path":' in captured.out
     assert '"final_review_continuation_decision_path":' in captured.out
     assert '"final_integration_verification_path":' in captured.out
+    assert '"scope_risk_budget_policy_decision_paths":' in captured.out
+    assert '"scope_risk_budget_policy_gate":' in captured.out
 
 
 def test_run_release_command_outputs_finalization_gate(monkeypatch, capsys, tmp_path) -> None:

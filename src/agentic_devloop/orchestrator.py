@@ -475,13 +475,16 @@ def _apply_budget_soft_gate_decision(
     if severe:
         outcome = SoftGateDecisionOutcome.REJECT
         final_decision = Decision.NEEDS_REVISION
-        rationale = "Budget overage severity is high; task must be split before acceptance."
+        rationale = "Scope-risk budget overage severity is high; task must be split before acceptance."
         fallback_plan = "Split the task scope and rerun verification."
         supervisor_outcome = BudgetAcceptanceOutcome.SPLIT_TASK
     else:
         outcome = SoftGateDecisionOutcome.ACCEPT_WITH_MITIGATION
         final_decision = Decision.ACCEPTED
-        rationale = "Minor budget overage accepted because hard invariants and verification passed."
+        rationale = (
+            f"Modest scope-risk budget overage accepted because hard invariants and verification passed "
+            f"(actual={budget_details.actual:g}, limit={budget_details.configured_limit:g})."
+        )
         fallback_plan = "Escalate to task split if overage repeats in the next attempt."
         supervisor_outcome = BudgetAcceptanceOutcome.ACCEPT_OVERAGE
     if not budget_details.parsed:
