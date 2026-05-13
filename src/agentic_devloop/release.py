@@ -89,6 +89,7 @@ class ReleaseRunResult:
     decision: Decision
     integration_branch: str | None = None
     finalization: FinalizeResult | None = None
+    finalization_gate: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -336,11 +337,25 @@ def run_release(
         release_metrics["decision"] = decision
         metrics_path = _write_release_metrics(runs_dir=runs_dir, run_id=run_id, metrics=release_metrics)
         _report(progress, "event=release_budget_exceeded violations=" + json.dumps(budget_violations, sort_keys=True))
+    finalization_gate = _build_release_finalization_gate(
+        decision=decision,
+        feature_review_recheck=feature_review_recheck,
+    )
+    if not bool(finalization_gate["allowed"]):
+        _report(
+            progress,
+            "event=release_finalization_blocked reason="
+            + str(finalization_gate["reason"])
+            + " unresolved_required_findings="
+            + json.dumps(finalization_gate["unresolved_required_finding_ids"], sort_keys=True),
+        )
     finalization = _finalize_release(
         repo_path=config.repo_path,
         integration_branch=feature_branch,
         base_branch=config.default_base_branch,
         decision=decision,
+        allowed=bool(finalization_gate["allowed"]),
+        blocked_reason=str(finalization_gate["reason"]),
         mode=release_finalize,
         progress=progress,
     )
@@ -361,6 +376,7 @@ def run_release(
         release_soft_gate_decision_path=release_soft_gate_decision_path,
         feature_review_path=feature_review_path,
         feature_review_recheck_path=feature_review_recheck_path,
+        finalization_gate=finalization_gate,
     )
     review_path = _write_release_review(
         runs_dir=runs_dir,
@@ -380,6 +396,7 @@ def run_release(
         feature_review_path=feature_review_path,
         feature_review_recheck=feature_review_recheck,
         feature_review_recheck_path=feature_review_recheck_path,
+        finalization_gate=finalization_gate,
     )
     _report(progress, f"event=release_decision decision={decision}")
     _report(progress, f"event=release_review path={review_path}")
@@ -411,6 +428,7 @@ def run_release(
         decision=decision,
         integration_branch=feature_branch,
         finalization=finalization,
+        finalization_gate=finalization_gate,
     )
 
 
@@ -1408,10 +1426,15 @@ def _finalize_release(
     integration_branch: str,
     base_branch: str,
     decision: Decision,
+    allowed: bool,
+    blocked_reason: str,
     mode: str,
     progress: Callable[[str], None] | None,
 ) -> FinalizeResult | None:
     if mode == "none":
+        return None
+    if not allowed:
+        _report(progress, f"release_finalization_skipped reason={blocked_reason}")
         return None
     if decision != Decision.ACCEPTED:
         _report(progress, f"release_finalization_skipped decision={decision}")
@@ -1511,6 +1534,7 @@ def _write_release_summary(
     release_soft_gate_decision_path: Path | None,
     feature_review_path: Path | None,
     feature_review_recheck_path: Path | None,
+    finalization_gate: dict[str, object],
 ) -> Path:
     summary_dir = runs_dir / run_id
     summary_dir.mkdir(parents=True, exist_ok=True)
@@ -1529,6 +1553,7 @@ def _write_release_summary(
         "release_soft_gate_decision_path": str(release_soft_gate_decision_path) if release_soft_gate_decision_path else None,
         "feature_review_path": str(feature_review_path) if feature_review_path else None,
         "feature_review_recheck_path": str(feature_review_recheck_path) if feature_review_recheck_path else None,
+        "finalization_gate": finalization_gate,
         "integration_branch": integration_branch,
         "finalization": {
             "merged": finalization.merged,
@@ -1575,6 +1600,7 @@ def _write_release_review(
     feature_review_path: Path | None,
     feature_review_recheck: FeatureReviewRecheckRecord | None,
     feature_review_recheck_path: Path | None,
+    finalization_gate: dict[str, object],
 ) -> Path:
     review_path = runs_dir / run_id / "release_review.md"
     lines = [
@@ -1657,14 +1683,60 @@ def _write_release_review(
             [
                 "## Release Finalization",
                 "",
+                f"- Allowed: `{finalization_gate['allowed']}`",
+                f"- Gate reason: `{finalization_gate['reason']}`",
+                f"- Unresolved required findings: `{len(finalization_gate['unresolved_required_finding_ids'])}`",
                 f"- Merged: `{finalization.merged}`",
                 f"- Pushed: `{finalization.pushed}`",
                 f"- Error: `{finalization.error or 'none'}`",
                 "",
             ]
         )
+    elif not bool(finalization_gate["allowed"]):
+        lines.extend(
+            [
+                "## Release Finalization",
+                "",
+                f"- Allowed: `{finalization_gate['allowed']}`",
+                f"- Gate reason: `{finalization_gate['reason']}`",
+                f"- Unresolved required findings: `{len(finalization_gate['unresolved_required_finding_ids'])}`",
+                "",
+            ]
+        )
     review_path.write_text("\n".join(lines), encoding="utf-8")
     return review_path
+
+
+def _build_release_finalization_gate(
+    *,
+    decision: Decision,
+    feature_review_recheck: FeatureReviewRecheckRecord | None,
+) -> dict[str, object]:
+    unresolved_required_finding_ids = (
+        list(feature_review_recheck.unresolved_finding_ids)
+        if feature_review_recheck and feature_review_recheck.unresolved_finding_ids
+        else []
+    )
+    if unresolved_required_finding_ids:
+        return {
+            "allowed": False,
+            "reason": "unresolved_required_findings",
+            "unresolved_required_finding_ids": unresolved_required_finding_ids,
+            "decision": decision,
+        }
+    if decision != Decision.ACCEPTED:
+        return {
+            "allowed": False,
+            "reason": "release_decision_not_accepted",
+            "unresolved_required_finding_ids": [],
+            "decision": decision,
+        }
+    return {
+        "allowed": True,
+        "reason": "allowed",
+        "unresolved_required_finding_ids": [],
+        "decision": decision,
+    }
 
 
 def _build_release_metrics(

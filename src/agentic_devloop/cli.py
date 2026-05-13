@@ -687,7 +687,7 @@ def _task_run_result(result) -> dict[str, object]:
 
 
 def _release_run_result(result) -> dict[str, object]:
-    return {
+    output = {
         "release_id": result.release_id,
         "run_id": result.run_id,
         "summary_path": str(result.summary_path),
@@ -700,6 +700,9 @@ def _release_run_result(result) -> dict[str, object]:
         "decision": result.decision,
         "tasks": [_task_run_result(task_result) for task_result in result.task_results],
     }
+    if getattr(result, "finalization_gate", None) is not None:
+        output["finalization_gate"] = result.finalization_gate
+    return output
 
 
 def _plan_release_result(result, *, inspect_proposed_contracts: bool) -> dict[str, object]:

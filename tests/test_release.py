@@ -1482,6 +1482,105 @@ def test_run_release_feature_review_repair_loop_records_artifacts(tmp_path: Path
     assert recheck["stop_reason"] == "resolved"
 
 
+def test_run_release_blocks_finalization_on_unresolved_required_feature_review_findings(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {
+                "worker": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+                "reviewer": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    decision = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "v0.1.0",
+            "reviewer": "strong_model",
+            "summary": "Required repair cannot be mapped to a bounded repair contract.",
+            "recommendation": "require_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "finding-required-1",
+                    "severity": "high",
+                    "summary": "Fix required in file outside allowed contract scope.",
+                    "affected_files": ["src/outside_scope.py"],
+                    "required_repairs": ["Apply a code fix."],
+                    "optional_follow_ups": [],
+                }
+            ],
+        }
+    )
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", return_value=FakeBackendResult(decision)), patch(
+        "agentic_devloop.release.generate_repair_contracts_for_required_findings",
+        return_value=[],
+    ):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+            release_finalize="merge-main",
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    review = result.review_path.read_text(encoding="utf-8")
+
+    assert result.finalization is None
+    assert result.finalization_gate is not None
+    assert result.finalization_gate["allowed"] is False
+    assert result.finalization_gate["reason"] == "unresolved_required_findings"
+    assert result.finalization_gate["unresolved_required_finding_ids"] == ["finding-required-1"]
+    assert summary["finalization_gate"]["reason"] == "unresolved_required_findings"
+    assert summary["finalization_gate"]["unresolved_required_finding_ids"] == ["finding-required-1"]
+    assert "- Gate reason: `unresolved_required_findings`" in review
+    assert "- Unresolved required findings: `1`" in review
+
+
 def _task_contract(
     task_id: str,
     budget_class: str = "S",
