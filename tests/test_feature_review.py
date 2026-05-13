@@ -219,6 +219,10 @@ def test_invoke_feature_reviewer_parses_decision_and_writes_artifacts(monkeypatc
             duration_seconds=0.1,
         )
 
+    monkeypatch.setattr(
+        "agentic_devloop.feature_review.shutil.which",
+        lambda name: "/usr/bin/codex" if name == "codex" else None,
+    )
     monkeypatch.setattr("agentic_devloop.feature_review.run_process", fake_run_process)
 
     output_dir = tmp_path / "feature_review"
@@ -238,6 +242,34 @@ def test_invoke_feature_reviewer_parses_decision_and_writes_artifacts(monkeypatc
     assert result.prompt_path.exists()
 
 
+def test_invoke_feature_reviewer_returns_blocked_decision_when_codex_missing(monkeypatch, tmp_path: Path) -> None:
+    def should_not_run_process(*_args, **_kwargs):
+        raise AssertionError("run_process should not be invoked when codex is missing")
+
+    monkeypatch.setattr("agentic_devloop.feature_review.shutil.which", lambda _name: None)
+    monkeypatch.setattr("agentic_devloop.feature_review.run_process", should_not_run_process)
+
+    output_dir = tmp_path / "feature_review"
+    result = invoke_feature_reviewer(
+        config=ExecutorConfig(type="codex_cli", model="reviewer", max_walltime_minutes=1),
+        repo_path=tmp_path,
+        prompt="review this",
+        release_id="rel-3",
+        output_dir=output_dir,
+    )
+
+    assert result.decision.recommendation == FeatureReviewRecommendation.ESCALATE
+    assert result.decision.reviewer == Reviewer.DETERMINISTIC
+    assert result.decision.findings
+    assert "`codex` was not found on PATH" in result.decision.findings[0].summary
+
+    metadata = json.loads(result.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["configured_backend"] == "codex_cli"
+    assert metadata["backend"] is None
+    assert metadata["exit_code"] is None
+    assert "`codex` was not found on PATH" in metadata["error"]
+
+
 def test_invoke_feature_reviewer_backend_failure_returns_blocked_decision(monkeypatch, tmp_path: Path) -> None:
     def fake_run_process(command, *, cwd, timeout_seconds, shell=False, input_text=None, **_kwargs):
         del command, cwd, timeout_seconds, shell, input_text
@@ -249,6 +281,10 @@ def test_invoke_feature_reviewer_backend_failure_returns_blocked_decision(monkey
             duration_seconds=0.2,
         )
 
+    monkeypatch.setattr(
+        "agentic_devloop.feature_review.shutil.which",
+        lambda name: "/usr/bin/codex" if name == "codex" else None,
+    )
     monkeypatch.setattr("agentic_devloop.feature_review.run_process", fake_run_process)
 
     output_dir = tmp_path / "feature_review"
