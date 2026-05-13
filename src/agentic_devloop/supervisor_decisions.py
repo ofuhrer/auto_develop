@@ -478,9 +478,7 @@ def parse_supervisor_decision(payload: object) -> SupervisorDecisionRecord:
 
 def effective_validators_to_rerun(validators_to_rerun: list[str]) -> list[str]:
     """Return concrete validators; the legacy sentinel means unspecified."""
-    if validators_to_rerun == [LEGACY_VALIDATORS_UNSPECIFIED]:
-        return []
-    return validators_to_rerun
+    return [validator for validator in validators_to_rerun if validator != LEGACY_VALIDATORS_UNSPECIFIED]
 
 
 def _normalize_legacy_supervisor_decision_payload(payload: object) -> tuple[object, bool]:
