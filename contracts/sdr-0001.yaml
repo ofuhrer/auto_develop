@@ -1,0 +1,41 @@
+task_id: sdr-0001
+release_id: supervisor-decision-records
+title: Define versioned supervisor decision schemas
+task_type: code_only
+budget_class: M
+objective: Add typed, versioned models for supervisor decisions covering scheduling, repair-loop continuation, review-finding adjudication, soft-budget acceptance, contract normalization, and environment repair without wiring runtime behavior yet.
+allowed_files:
+  - src/agentic_devloop/supervisor_decisions.py
+  - tests/test_supervisor_decisions.py
+  - docs/design/SUPERVISOR_DECISIONS.md
+forbidden_changes:
+  - Do not modify CLI behavior.
+  - Do not modify release orchestration flow.
+  - Do not change existing task contract schemas except by importing shared types if strictly necessary.
+  - Do not weaken or remove any existing validation logic.
+  - Do not write runtime evidence under runs/.
+required_evidence:
+  - git diff
+  - changed-files list
+  - pytest output for tests/test_supervisor_decisions.py
+  - compileall output
+  - git diff --check output
+verification:
+  commands:
+    - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_supervisor_decisions.py
+    - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m compileall src
+    - git diff --check
+  profile: null
+stop_conditions:
+  - Stop if existing project model conventions are unclear after inspecting nearby schema modules.
+  - Stop if adding the schemas requires broad changes to unrelated orchestrator or CLI modules.
+  - Stop if tests would need to depend on local Git state or generated runtime artifacts.
+non_goals:
+  - Do not persist or consume supervisor decisions in runtime code yet.
+  - Do not implement release scheduling or repair-loop policy.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

@@ -1,0 +1,49 @@
+task_id: sdr-0005
+release_id: supervisor-decision-records
+title: Document implemented decision records and planned governor behavior
+task_type: documentation
+budget_class: S
+objective: Update user docs, development docs, roadmap/design notes, and repo-state memory to distinguish implemented typed supervisor decision records from still-planned N-epic governor behavior.
+allowed_files:
+  - docs/USER_GUIDE.md
+  - docs/DEVELOPMENT.md
+  - docs/README.md
+  - docs/design/ARCHITECTURE.md
+  - docs/design/TECHNICAL_SPECIFICATION.md
+  - docs/design/CRITICAL_ASSESSMENT.md
+  - docs/design/ROADMAP_AND_BACKLOG.md
+  - repo_state/auto_develop/backlog_state.yaml
+  - repo_state/auto_develop/known_failures.md
+  - repo_state/auto_develop/release_plan.yaml
+forbidden_changes:
+  - Do not claim full N-epic governor behavior is implemented.
+  - Do not rewrite unrelated roadmap sections.
+  - Do not modify code or tests.
+  - Do not add generated runtime evidence under runs/.
+  - Do not add target-specific durable state for external repositories.
+required_evidence:
+  - git diff
+  - changed-files list
+  - documentation review notes confirming implemented-versus-planned wording
+  - git diff --check output
+verification:
+  commands:
+    - git diff --check
+  profile: null
+stop_conditions:
+  - Stop if expected roadmap or repo-state files do not exist and adding replacements would require guessing the documentation structure.
+  - Stop if documentation would need to describe runtime behavior before the migration task has landed.
+  - Stop if requested wording would imply hard gates are supervisor-overridable.
+non_goals:
+  - Do not implement additional supervisor decision behavior.
+  - Do not create new objectives or contracts.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+  - sdr-0001
+  - sdr-0002
+  - sdr-0003
+  - sdr-0004
