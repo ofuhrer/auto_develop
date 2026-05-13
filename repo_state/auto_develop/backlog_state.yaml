@@ -113,7 +113,7 @@ completed_epic_records:
   repair_count: 5
   outcome_references:
   - release_id: planner-normalization-generalization
-    outcome: needs_revision_then_manually_verified
+    outcome: accepted
     run_summary_path: runs/20260513T195414Z_planner-normalization-generalization_release/release_summary.json
     recorded_at: '2026-05-13T20:35:00Z'
   finalization_outcome_references: []
