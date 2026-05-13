@@ -248,6 +248,53 @@ def test_load_legacy_execution_strategy_artifact_adds_validators_migration_defau
     assert loaded.validators_to_rerun == [LEGACY_VALIDATORS_UNSPECIFIED]
 
 
+def test_load_legacy_model_output_normalization_artifact_requires_explicit_rerun_validators(
+    tmp_path: Path,
+) -> None:
+    evidence_file = tmp_path / "normalization-evidence.log"
+    evidence_file.write_text("normalized output accepted\n", encoding="utf-8")
+    raw_artifact = tmp_path / "feature_review.raw.json"
+    raw_artifact.write_text("{}\n", encoding="utf-8")
+    normalized_artifact = tmp_path / "feature_review.normalized.json"
+    normalized_artifact.write_text("{}\n", encoding="utf-8")
+    artifact_path = tmp_path / "supervisor_decisions" / "legacy-model-output-normalization.json"
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION_V1,
+                "decision_id": "legacy-normalization-001",
+                "release_id": "model-output-normalization",
+                "decided_at": "2026-05-13T08:00:00",
+                "decided_by": "supervisor-agent",
+                "rationale": "Legacy artifact predates explicit validator rerun storage.",
+                "evidence_paths": ["normalization-evidence.log"],
+                "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+                "risk_level": DecisionRiskLevel.MODERATE,
+                "raw_artifact_paths": ["feature_review.raw.json"],
+                "validation_errors": [
+                    {
+                        "field": "findings[0].evidence_paths",
+                        "message": "Field required",
+                        "error_type": "missing",
+                    }
+                ],
+                "selected_action": ModelOutputNormalizationAction.APPLY_NORMALIZATION,
+                "outcome": ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
+                "fallback_plan": "Refuse and stop if normalized output still fails validation.",
+                "normalized_artifact_path": "feature_review.normalized.json",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.warns(UserWarning, match="legacy supervisor decision artifact"):
+        with pytest.raises(ValidationError, match="requires explicit validators_to_rerun"):
+            load_supervisor_decision_artifact(artifact_path)
+
+
 def test_write_and_load_model_output_normalization_artifact_round_trip(tmp_path: Path) -> None:
     evidence_file = tmp_path / "normalization-evidence.log"
     evidence_file.write_text("normalized output accepted\n", encoding="utf-8")

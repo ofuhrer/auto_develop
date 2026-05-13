@@ -409,8 +409,11 @@ class ModelOutputNormalizationDecision(SupervisorDecisionBase):
         if self.outcome == ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY:
             if not self.validation_errors:
                 raise ValueError("normalized_and_retry requires validation_errors")
-            if not self.validators_to_rerun:
-                raise ValueError("normalized_and_retry requires validators_to_rerun")
+            if not effective_validators_to_rerun(self.validators_to_rerun):
+                raise ValueError(
+                    "normalized_and_retry requires explicit validators_to_rerun; "
+                    "legacy_schema_v1_validators_unspecified is not runnable"
+                )
             if self.normalized_artifact_path is None:
                 raise ValueError("normalized_and_retry requires normalized_artifact_path")
             if self.refusal_reason is not None:
@@ -464,6 +467,13 @@ _SUPERVISOR_DECISION_ADAPTER = TypeAdapter(SupervisorDecisionRecord)
 def parse_supervisor_decision(payload: object) -> SupervisorDecisionRecord:
     normalized_payload, _ = _normalize_legacy_supervisor_decision_payload(payload)
     return _SUPERVISOR_DECISION_ADAPTER.validate_python(normalized_payload)
+
+
+def effective_validators_to_rerun(validators_to_rerun: list[str]) -> list[str]:
+    """Return concrete validators; the legacy sentinel means unspecified."""
+    if validators_to_rerun == [LEGACY_VALIDATORS_UNSPECIFIED]:
+        return []
+    return validators_to_rerun
 
 
 def _normalize_legacy_supervisor_decision_payload(payload: object) -> tuple[object, bool]:

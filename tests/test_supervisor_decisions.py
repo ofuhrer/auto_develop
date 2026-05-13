@@ -402,6 +402,29 @@ def test_parse_model_output_normalization_decision() -> None:
     assert decision.outcome == ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY
 
 
+def test_parse_legacy_model_output_normalization_decision_requires_explicit_rerun_validators() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+        "risk_level": DecisionRiskLevel.HIGH,
+        "raw_artifact_paths": ["runs/release/reviewer_raw.json"],
+        "validation_errors": [
+            {
+                "field": "findings[0].evidence_paths",
+                "message": "Field required",
+                "error_type": "missing",
+            }
+        ],
+        "selected_action": ModelOutputNormalizationAction.APPLY_NORMALIZATION,
+        "outcome": ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
+        "fallback_plan": "Refuse and stop if rerun validation still fails.",
+        "normalized_artifact_path": "runs/release/feature_review.normalized.json",
+    }
+
+    with pytest.raises(ValidationError, match="requires explicit validators_to_rerun"):
+        parse_supervisor_decision(payload)
+
+
 def test_model_output_normalization_requires_consistent_outcome_fields() -> None:
     with pytest.raises(ValidationError, match="selected_action must match outcome"):
         ModelOutputNormalizationDecision.model_validate(
@@ -462,7 +485,7 @@ def test_model_output_normalization_requires_consistent_outcome_fields() -> None
             }
         )
 
-    with pytest.raises(ValidationError, match="requires validators_to_rerun"):
+    with pytest.raises(ValidationError, match="requires explicit validators_to_rerun"):
         ModelOutputNormalizationDecision.model_validate(
             {
                 **BASE,
