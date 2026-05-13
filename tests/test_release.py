@@ -13,7 +13,13 @@ import yaml
 import pytest
 
 from agentic_devloop.git_finalize import FinalizeResult
-from agentic_devloop.models import ExecutorResult, ProjectConfig, TaskContract
+from agentic_devloop.models import (
+    ExecutorResult,
+    FinalReviewContinuationDecision,
+    FinalReviewContinuationOutcome,
+    ProjectConfig,
+    TaskContract,
+)
 from agentic_devloop.models import Decision, Reviewer, ReviewDecision
 from agentic_devloop.models import FeatureReviewDecision, FeatureReviewRecheckRecord
 from agentic_devloop.orchestrator import TaskRunResult, executor_config_for_task, executor_configs_for_task
@@ -4076,6 +4082,111 @@ def test_release_finalization_gate_only_counts_required_findings() -> None:
     assert gate["allowed"] is False
     assert gate["reason"] == "release_decision_not_accepted"
     assert gate["unresolved_required_finding_ids"] == []
+
+
+def test_run_release_persists_final_review_continuation_decision_artifact(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    decision = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "v0.1.0",
+            "reviewer": "strong_model",
+            "summary": "Required repair cannot be mapped.",
+            "recommendation": "require_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "finding-required-1",
+                    "severity": "high",
+                    "summary": "Fix required in file outside allowed contract scope.",
+                    "affected_files": ["src/outside_scope.py"],
+                    "required_repairs": ["Apply a code fix."],
+                    "optional_follow_ups": [],
+                }
+            ],
+        }
+    )
+
+    class FakeBackendResult:
+        def __init__(self, value: FeatureReviewDecision) -> None:
+            self.decision = value
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", return_value=FakeBackendResult(decision)), patch(
+        "agentic_devloop.release.generate_repair_contracts_for_required_findings",
+        return_value=[],
+    ):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    continuation_path = Path(summary["final_review_continuation_decision_path"])
+    continuation = json.loads(continuation_path.read_text(encoding="utf-8"))
+
+    assert continuation["outcome"] == "hard_stop"
+    assert continuation["feature_review_path"] == summary["feature_review_path"]
+    assert continuation["feature_review_recheck_path"] == summary["feature_review_recheck_path"]
+    assert continuation["finding_ids"] == []
+    assert isinstance(continuation["hard_stop_reason"], str)
+    assert continuation["hard_stop_reason"]
+    assert "final_review_continuation_decision_path" in summary
+
+
+def test_final_review_continuation_decision_serialized_examples() -> None:
+    blocker = FinalReviewContinuationDecision(
+        release_id="v0.1.0",
+        outcome=FinalReviewContinuationOutcome.BLOCKER,
+        feature_review_path=Path("runs/r1/feature_review.json"),
+        feature_review_recheck_path=Path("runs/r1/feature_review_recheck.json"),
+        finding_ids=["f-blocker"],
+        generated_repair_contract_paths=[Path("runs/r1/feature_review/repairs_01/f-blocker.yaml")],
+    )
+    accepted_risk = FinalReviewContinuationDecision(
+        release_id="v0.1.0",
+        outcome=FinalReviewContinuationOutcome.ACCEPTED_RISK,
+        feature_review_path=Path("runs/r2/feature_review.json"),
+        feature_review_recheck_path=Path("runs/r2/feature_review_recheck.json"),
+        final_integration_verification_path=Path("runs/r2/final_integration_verification/final_integration_verification.json"),
+        finding_ids=["f-risk"],
+        rerun_validator_evidence_paths=[Path("runs/r2/feature_review/verification_rerun_01/verification.log")],
+        accepted_risk_rationale="reviewer limitation acknowledged; validators rerun passed",
+    )
+    backlog_follow_up = FinalReviewContinuationDecision(
+        release_id="v0.1.0",
+        outcome=FinalReviewContinuationOutcome.BACKLOG_FOLLOW_UP,
+        feature_review_path=Path("runs/r3/feature_review.json"),
+        feature_review_recheck_path=Path("runs/r3/feature_review_recheck.json"),
+        final_integration_verification_path=Path("runs/r3/final_integration_verification/final_integration_verification.json"),
+        finding_ids=["f-follow-up"],
+        backlog_follow_up_proposal_paths=[Path("runs/r3/supervisor_decisions/followup.json")],
+    )
+    hard_stop = FinalReviewContinuationDecision(
+        release_id="v0.1.0",
+        outcome=FinalReviewContinuationOutcome.HARD_STOP,
+        feature_review_path=Path("runs/r4/feature_review.json"),
+        feature_review_recheck_path=Path("runs/r4/feature_review_recheck.json"),
+        finding_ids=["f-stop"],
+        hard_stop_reason="blocked_by_hard_gate",
+    )
+
+    assert blocker.model_dump(mode="json")["outcome"] == "blocker"
+    assert accepted_risk.model_dump(mode="json")["outcome"] == "accepted_risk"
+    assert backlog_follow_up.model_dump(mode="json")["outcome"] == "backlog_follow_up"
+    assert hard_stop.model_dump(mode="json")["outcome"] == "hard_stop"
 
 
 def _task_contract(
