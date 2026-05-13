@@ -2292,6 +2292,8 @@ def _release_dependency_map(
             )
     for finding in overlap_report.findings:
         if finding.severity == "minor":
+            if finding.second_task_id not in dependencies:
+                continue
             dependencies[finding.second_task_id].add(finding.first_task_id)
     return {
         task_id: sorted(values - completed_task_ids)

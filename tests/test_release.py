@@ -476,6 +476,22 @@ def test_release_dependency_map_accepts_completed_prior_release_tasks() -> None:
     assert dependencies == {}
 
 
+def test_release_dependency_map_ignores_overlap_edges_for_completed_tasks() -> None:
+    active = _task_contract("demo-0002", allowed_files=["docs/guides/setup.md"]).model_copy(
+        update={"depends_on": ["demo-0001"]}
+    )
+    completed = _task_contract("demo-0001", allowed_files=["docs/guides/**"])
+    report = analyze_contract_overlaps([completed, active])
+
+    dependencies = _release_dependency_map(
+        [active],
+        report,
+        completed_task_ids={"demo-0001"},
+    )
+
+    assert dependencies == {}
+
+
 def test_completed_release_task_ids_reads_accepted_merged_summaries(tmp_path) -> None:
     summary_dir = tmp_path / "20260512T000000Z_demo_release"
     summary_dir.mkdir(parents=True)
