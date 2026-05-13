@@ -1,0 +1,24 @@
+release_id: autonomous-finalization-and-cleanup
+title: Autonomous finalization and cleanup for accepted feature branches
+objective: After an integrated feature branch passes verification and release-local
+  reviewer or supervisor acceptance, autonomously apply the configured finalization
+  policy, merge or prepare a PR candidate, push when policy allows, clean merged feature
+  and agent branches/worktrees, and persist a durable finalization decision plus repo-state
+  memory update.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- Accepted integrated feature branches record a typed finalization decision with selected
+  action, policy basis, evidence paths, fallback plan, validators rerun, and durable
+  outcome references.
+- Configured policies support at least local merge, push-feature or PR-preparation
+  handoff, and explicit stop when credentials or policy are missing.
+- Merged task branches, eligible feature branches, and stale worktrees are cleaned
+  only when policy-safe, with dry-run or evidence records for skipped cleanup.
+- Repo-state memory records finalization outcome, release summary path, branch/commit
+  references, unresolved findings, and next recommended backlog state before the next
+  governor cycle starts.
+- Hard gates remain non-bypassable for unsafe finalization, missing credentials, destructive
+  operations outside policy, failed verification, and unresolved required review findings.
+- Tests cover accepted finalization, missing-policy stop, missing-credentials stop,
+  cleanup safety, and state-memory update behavior.

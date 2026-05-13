@@ -1,0 +1,59 @@
+task_id: autonomous-finalization-and-cleanup-0003
+release_id: autonomous-finalization-and-cleanup
+title: Clean release branches and worktrees only after policy-safe finalization
+task_type: code_only
+budget_class: M
+objective: Extend cleanup behavior to consume release finalization evidence, distinguish
+  eligible and skipped artifacts, refuse unsafe branch/worktree deletion, and write
+  cleanup reports for both dry-run and force paths.
+allowed_files:
+- src/agentic_devloop/cleanup.py
+- src/agentic_devloop/cli.py
+- tests/test_cleanup.py
+- tests/test_cli.py
+forbidden_changes:
+- Do not change finalization policy evaluation or Git merge/push execution in this
+  task.
+- Do not delete the integration branch unless finalization evidence proves it is merged
+  or the policy explicitly marks it eligible.
+- Do not remove paths outside the configured worktree root.
+- Do not delete the current branch, base branch, unmerged task branches, or branches
+  without matching release ownership.
+- Do not make cleanup force the default; cleanup must remain dry-run unless explicitly
+  forced or policy-safe automation opts in with evidence.
+required_evidence:
+- git diff
+- pytest output for tests/test_cleanup.py tests/test_cli.py
+- dry-run cleanup report showing candidates and skipped reasons
+- force cleanup report showing removed worktrees and deleted branches in a temporary
+  repo
+- negative test evidence for refusing current branch, unmerged feature branch, and
+  path outside worktree root
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_cleanup.py tests/test_cli.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if implementation requires changing more than 4 files.
+- Stop if safe cleanup cannot be proven with temporary Git repositories in tests.
+- Stop if cleanup needs to inspect or mutate runtime directories outside configured
+  worktree roots and release evidence paths.
+- Stop if branch deletion would require using destructive Git commands beyond safe
+  branch deletion and worktree removal already scoped by checks.
+- Stop if CLI output would stop being machine-readable JSON where it currently is
+  JSON.
+non_goals:
+- Do not implement finalization decision schema.
+- Do not execute merge or push finalization actions.
+- Do not update repo-state memory.
+- Do not add remote branch deletion.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: true
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- autonomous-finalization-and-cleanup-0002

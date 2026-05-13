@@ -6,6 +6,7 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
 current_focus: autonomous-finalization-and-cleanup
+active_epic: autonomous-finalization-and-cleanup
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -90,7 +91,14 @@ candidate_epics:
   priority: 10
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
-active_epics: []
+active_epics:
+- epic_id: autonomous-finalization-and-cleanup
+  retry_count: 0
+  repair_count: 0
+  outcome_references: []
+  unresolved_finding_references: []
+  state_review_snapshot_references: []
+  updated_at: '2026-05-13T19:11:37.574469Z'
 reviewed_epics: []
 completed_epic_records:
 - epic_id: integration-review-evidence-handoff
@@ -147,7 +155,8 @@ notes:
   faster than over-decomposed contract batches. Prioritize supervisor-owned execution
   strategy and normalization before expanding multi-epic autonomy.'
 - 'Current top gap: accepted feature branches still require policy-owned merge/push/cleanup
-  and durable state-memory finalization before unattended multi-epic operation is credible.'
+  and durable state-memory finalization before unattended multi-epic operation is
+  credible.'
 - 'Next sequencing: autonomous-finalization-and-cleanup, then planner-normalization-generalization,
   then governor-cockpit-v2 and shared verification runtime.'
 - External targets should retain compact durable `.auto_develop/repo_state`, objectives,

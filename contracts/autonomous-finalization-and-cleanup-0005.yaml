@@ -1,0 +1,63 @@
+task_id: autonomous-finalization-and-cleanup-0005
+release_id: autonomous-finalization-and-cleanup
+title: Document and smoke-test autonomous finalization policy workflow
+task_type: documentation
+budget_class: S
+objective: Update docs and example config for finalization policy options, missing-policy
+  and missing-credential stops, PR-preparation handoff artifacts, cleanup safety,
+  repo-state memory updates, and CLI smoke expectations.
+allowed_files:
+- README.md
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- configs/auto_develop.yaml
+- tests/test_cli.py
+forbidden_changes:
+- Do not describe planned capabilities as implemented unless covered by earlier tasks
+  in this release.
+- Do not change release orchestration logic in this documentation task.
+- Do not add generated runtime evidence or local worktree paths to tracked examples.
+- Do not weaken CLI JSON output assertions.
+- Do not add examples that require real remote credentials or network access.
+required_evidence:
+- git diff
+- pytest output for tests/test_cli.py
+- help smoke output for agentic_devloop --help and run-release --help
+- documentation excerpts identifying local_merge, push_feature, pr_preparation, and
+  explicit stop behavior
+- example config diff showing safe non-secret policy configuration
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_cli.py
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop
+    --help
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop
+    run-release --help
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if implementation code changes beyond tests are needed to make documentation
+  true.
+- Stop if docs would need to mention credentials or secrets directly instead of environment-variable
+  names or policy requirements.
+- Stop if example config would make auto_develop push or merge by default without
+  explicit policy.
+- Stop if help smoke tests cannot run in the local environment.
+- Stop if documentation changes require editing more than 5 files.
+non_goals:
+- Do not implement finalization models or execution.
+- Do not implement cleanup behavior.
+- Do not modify repo-state memory logic.
+- Do not add new contracts or objectives.
+scientific_assumptions:
+- Not applicable; documentation and smoke-test task.
+fixture_changes_allowed: true
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- autonomous-finalization-and-cleanup-0001
+- autonomous-finalization-and-cleanup-0002
+- autonomous-finalization-and-cleanup-0003
+- autonomous-finalization-and-cleanup-0004

@@ -1,0 +1,59 @@
+task_id: autonomous-finalization-and-cleanup-0001
+release_id: autonomous-finalization-and-cleanup
+title: Add typed release finalization policy and decision models
+task_type: code_only
+budget_class: M
+objective: Add strict Pydantic models and config validation for release finalization
+  policies and finalization decision artifacts. Support at least local_merge, push_feature,
+  pr_preparation, and stop_missing_policy_or_credentials outcomes without wiring execution
+  yet.
+allowed_files:
+- src/agentic_devloop/models.py
+- src/agentic_devloop/config.py
+- src/agentic_devloop/supervisor_decisions.py
+- tests/test_models.py
+- tests/test_config.py
+- tests/test_supervisor_decisions.py
+forbidden_changes:
+- Do not execute Git merge, push, cleanup, or worktree deletion behavior in this task.
+- Do not change existing task-level FinalizeResult semantics except by adding compatible
+  typed release-level models.
+- Do not weaken strict model validation or allow unknown fields on new release finalization
+  models.
+- Do not change CLI argument names or release execution flow in this task.
+- Do not update runtime evidence formats outside the new typed finalization decision
+  model.
+required_evidence:
+- git diff
+- pytest output for tests/test_models.py tests/test_config.py tests/test_supervisor_decisions.py
+- examples of model validation for local_merge, push_feature, pr_preparation, missing_policy
+  stop, and missing_credentials stop
+- validation failure evidence for invalid policy/action combinations
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_models.py tests/test_config.py tests/test_supervisor_decisions.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if implementation requires changing more than 6 files.
+- Stop if model changes require broad rewrites of existing release, governor, or CLI
+  orchestration.
+- Stop if finalization decisions cannot be validated with strict typed fields for
+  policy basis, evidence paths, fallback plan, validators rerun, and outcome references.
+- Stop if credential-sensitive data would need to be stored in artifacts instead of
+  booleans, env var names, or redacted references.
+- Stop if tests would need to rely on the developer's local Git state instead of pure
+  model/config fixtures.
+non_goals:
+- Do not implement finalization execution.
+- Do not implement cleanup behavior.
+- Do not update repo-state memory.
+- Do not add remote provider API integrations.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: true
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

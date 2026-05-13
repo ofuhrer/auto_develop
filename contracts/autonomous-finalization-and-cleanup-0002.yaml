@@ -1,0 +1,59 @@
+task_id: autonomous-finalization-and-cleanup-0002
+release_id: autonomous-finalization-and-cleanup
+title: Execute configured finalization policy after accepted release gates
+task_type: code_only
+budget_class: L
+objective: 'Update release finalization flow to evaluate the typed policy from configuration
+  and release gates, rerun required validators, write a durable finalization decision
+  artifact, and execute only allowed actions: local merge, push feature, PR-preparation
+  handoff artifact, or explicit stop for missing policy/credentials/failed gates.'
+allowed_files:
+- src/agentic_devloop/release.py
+- src/agentic_devloop/git_finalize.py
+- src/agentic_devloop/evidence.py
+- tests/test_release.py
+- tests/test_evidence.py
+forbidden_changes:
+- Do not delete branches, remove worktrees, or perform cleanup in this task.
+- Do not bypass failed final integration verification, unresolved required review
+  findings, dirty repository checks, merge lock checks, or missing credential checks.
+- Do not push to a base branch unless the configured policy explicitly allows that
+  exact action.
+- Do not call external PR APIs; PR preparation must be a durable handoff artifact
+  with branch, commit, title/body inputs, and fallback instructions.
+- Do not change task-level run-task finalization behavior except where shared evidence
+  helpers need backward-compatible additions.
+required_evidence:
+- git diff
+- pytest output for tests/test_release.py tests/test_evidence.py
+- accepted local-merge finalization decision artifact path and asserted payload
+- missing-policy stop decision artifact path and asserted payload
+- missing-credentials stop decision artifact path and asserted payload
+- failed-gate stop evidence proving no Git finalization command was executed
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_release.py tests/test_evidence.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if implementation requires changing more than 5 files.
+- Stop if policy evaluation cannot distinguish missing policy, missing credentials,
+  failed verification, and unresolved required findings as separate hard-stop reasons.
+- Stop if tests require network access, real remotes, or real credentials.
+- Stop if finalization can proceed without a durable typed decision artifact.
+- Stop if PR-preparation requires integrating a hosting-provider API instead of writing
+  a handoff artifact.
+non_goals:
+- Do not implement cleanup.
+- Do not update governor state memory.
+- Do not update user documentation.
+- Do not add new planner behavior.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: true
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- autonomous-finalization-and-cleanup-0001

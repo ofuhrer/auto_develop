@@ -1,0 +1,61 @@
+task_id: autonomous-finalization-and-cleanup-0004
+release_id: autonomous-finalization-and-cleanup
+title: Persist finalization outcome into repo-state memory before next governor cycle
+task_type: code_only
+budget_class: M
+objective: Extend StateStore and governor cycle handling to persist release finalization
+  results and cleanup references, including branch/commit refs, release summary path,
+  unresolved findings, durable outcome references, and next recommended backlog state
+  before any subsequent governor cycle begins.
+allowed_files:
+- src/agentic_devloop/state_store.py
+- src/agentic_devloop/governor.py
+- src/agentic_devloop/backlog.py
+- tests/test_state_store.py
+- tests/test_backlog.py
+forbidden_changes:
+- Do not run Git merge, push, cleanup, or worktree deletion from state-store code.
+- Do not remove or rewrite existing backlog memory fields in a backward-incompatible
+  way.
+- Do not mark an epic completed when finalization is blocked by hard gates or unresolved
+  required findings.
+- Do not advance to the next governor cycle before recording blocked finalization
+  memory.
+- Do not store credential values, raw secrets, or remote tokens in repo-state memory.
+required_evidence:
+- git diff
+- pytest output for tests/test_state_store.py tests/test_backlog.py
+- state memory fixture showing accepted finalization outcome with summary path, branch,
+  commit, and cleanup report reference
+- state memory fixture showing blocked finalization with unresolved findings and recommended
+  backlog state
+- governor test proving memory is written before a second cycle can start
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_state_store.py tests/test_backlog.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if implementation requires changing more than 5 files.
+- Stop if repo-state memory changes cannot remain backward compatible with existing
+  backlog_state.yaml files.
+- Stop if finalization memory cannot be linked to a concrete release summary path
+  and branch/commit reference when available.
+- Stop if blocked finalization could be recorded as completed work.
+- Stop if tests require a real repository outside a temporary directory.
+non_goals:
+- Do not implement finalization execution.
+- Do not implement cleanup deletion behavior.
+- Do not update CLI rendering beyond data structures already returned by governor/backlog
+  models.
+- Do not add roadmap editing.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: true
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- autonomous-finalization-and-cleanup-0002
+- autonomous-finalization-and-cleanup-0003
