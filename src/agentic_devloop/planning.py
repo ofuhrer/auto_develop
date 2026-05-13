@@ -726,6 +726,10 @@ def _persist_planner_admission_repair_stop(
     ]
     if not evidence_paths:
         evidence_paths = [Path("in_memory_planner_output.json")]
+    absolute_evidence_paths = [path.resolve() for path in evidence_paths]
+    persisted_evidence_paths = [
+        _relative_to_bundle_root_or_original(path=path, bundle_root=bundle_path) for path in absolute_evidence_paths
+    ]
     action_payload = PlannerAdmissionRepairActionPayload.model_validate(
         {
             "admission_failure_inputs": failure_inputs,
@@ -737,13 +741,13 @@ def _persist_planner_admission_repair_stop(
             ),
             "fallback_plan": "Stop planning and require a bounded planner rerun that satisfies admission constraints.",
             "validators_to_rerun": list(validators_to_rerun),
-            "evidence_paths": [path.resolve() for path in evidence_paths],
+            "evidence_paths": persisted_evidence_paths,
             "stop_reason": failure_message,
         }
     )
     supervisor = RuntimeSupervisor()
     supervisor_result = supervisor.apply_planner_admission_repair_action(
-        source_evidence_paths=tuple(path.resolve() for path in evidence_paths),
+        source_evidence_paths=tuple(absolute_evidence_paths),
         action_payload=action_payload,
     )
     supervisor_decision_payload = {
@@ -773,6 +777,13 @@ def _persist_planner_admission_repair_stop(
         + "\n",
         encoding="utf-8",
     )
+
+
+def _relative_to_bundle_root_or_original(*, path: Path, bundle_root: Path) -> Path:
+    try:
+        return path.relative_to(bundle_root)
+    except ValueError:
+        return path
 
 
 def _match_generated_contract_for_admission_error(
