@@ -1,0 +1,25 @@
+release_id: review-loop-convergence-policy
+title: Add convergence policy for reviewer repair loops
+objective: Teach the release-local feature-review repair loop to classify repeated
+  or adjacent reviewer findings as release blockers, accepted soft findings, duplicates,
+  false positives, scope expansion, or backlog follow-ups, then continue, repair,
+  defer, or stop based on typed supervisor decisions rather than unbounded repair
+  churn.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- 'Feature-review repair loops persist typed supervisor decisions for each required
+  or repeated finding classification: blocker, soft finding, duplicate, false positive,
+  scope expansion, or backlog follow-up.'
+- Blocking in-scope findings still produce bounded repair contracts, verification
+  reruns, reviewer re-checks, and finalization gates.
+- Duplicate, false-positive, already-proven-by-verification, and accepted soft findings
+  can be accepted only with rationale, evidence paths, fallback plan, and validators
+  rerun.
+- Scope-expansion and non-blocking adjacent quality findings are recorded as backlog
+  or repo-state update proposals instead of extending the current repair loop indefinitely.
+- Retry and convergence limits are explicit, evidence-backed, and covered by focused
+  tests for repeated reviewer findings, adjacent findings after repair, false positives
+  after passing verification, and unresolved true blockers.
+- Documentation and repo-state notes distinguish the implemented release-local convergence
+  policy from the still-planned broader N-epic governor loop.

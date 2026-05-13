@@ -1,0 +1,50 @@
+task_id: review-loop-convergence-policy-0001
+release_id: review-loop-convergence-policy
+title: Add typed feature review finding classification decisions
+task_type: code_only
+budget_class: M
+objective: Add a strict supervisor decision model for release-local feature-review
+  finding classification with enum values for blocker, soft_finding, duplicate, false_positive,
+  scope_expansion, and backlog_follow_up; action/outcome values for repair, accept,
+  defer, continue, and stop; required fallback_plan and validators_to_rerun fields;
+  validation that non-blocking accepted classifications require rationale, evidence
+  paths, fallback plan, and validators; artifact write/load coverage through the existing
+  supervisor decision artifact path.
+allowed_files:
+- src/agentic_devloop/supervisor_decisions.py
+- tests/test_supervisor_decisions.py
+- tests/test_supervisor_decision_artifacts.py
+forbidden_changes:
+- Do not change release orchestration behavior in this task.
+- Do not weaken existing supervisor decision validation, schema_version validation,
+  StrictModel extra-field rejection, or evidence path containment.
+- Do not remove or rename existing supervisor decision enum values unless tests prove
+  backward compatibility.
+- Do not edit docs, release.py, feature_review.py, configs, objectives, contracts,
+  generated runtime evidence, or lockfiles.
+required_evidence:
+- git diff
+- pytest output for supervisor decision model tests
+- pytest output for supervisor decision artifact tests
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_supervisor_decisions.py tests/test_supervisor_decision_artifacts.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if the new classification cannot be represented as a strict versioned supervisor
+  decision without loosening existing models.
+- Stop if accepted duplicate, false-positive, soft, scope-expansion, or backlog-follow-up
+  decisions can validate without rationale, evidence paths, fallback plan, and validators_to_rerun.
+- Stop if implementation requires release loop or reviewer prompt changes outside
+  the allowed files.
+non_goals:
+- Do not integrate the new decision into the release repair loop yet.
+- Do not implement backlog writing or repo-state proposals in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

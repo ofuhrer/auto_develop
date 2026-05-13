@@ -1,0 +1,50 @@
+task_id: review-loop-convergence-policy-0005
+release_id: review-loop-convergence-policy
+title: Document release-local convergence policy
+task_type: documentation
+budget_class: S
+objective: Document how release-local feature review convergence decisions are persisted,
+  how blockers continue through bounded repairs and finalization gates, how duplicates/false
+  positives/soft findings are accepted with evidence, how scope expansion/backlog
+  follow-ups are recorded as proposals, and which broader N-epic governor behavior
+  remains planned rather than implemented.
+allowed_files:
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/design/SUPERVISOR_DECISIONS.md
+- docs/design/TECHNICAL_SPECIFICATION.md
+- repo_state/auto_develop/architecture_summary.md
+- repo_state/auto_develop/backlog_state.yaml
+forbidden_changes:
+- Do not change source code, tests, contracts, configs, objectives, generated runtime
+  evidence, lockfiles, or release artifacts.
+- Do not describe planned N-epic governor behavior as implemented.
+- Do not remove existing documented CLI behavior contracts.
+- Do not add target-specific durable state outside repo_state/auto_develop.
+required_evidence:
+- git diff
+- documentation grep or pytest output showing docs remain readable
+- git diff --check output
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_supervisor_decisions.py tests/test_feature_review.py tests/test_release.py
+    -k 'feature_review or supervisor'
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if code changes are required to make the documentation truthful.
+- Stop if documentation cannot clearly distinguish implemented release-local convergence
+  policy from planned broader governor behavior.
+- Stop if repo-state updates would require deleting or rewriting unrelated backlog
+  history.
+non_goals:
+- Do not implement any additional convergence behavior in this task.
+- Do not create new contracts or runtime evidence.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- review-loop-convergence-policy-0004
