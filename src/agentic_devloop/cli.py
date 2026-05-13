@@ -6,6 +6,7 @@ import sys
 from dataclasses import is_dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from agentic_devloop import __version__
 from agentic_devloop.backlog import CodexBacklogPlannerBackend, plan_backlog
@@ -1197,6 +1198,13 @@ def _existing_paths(paths: list[Path | None]) -> list[Path]:
 def _with_updates(value, updates: dict[str, object]):
     if is_dataclass(value):
         return replace(value, **updates)
-    for key, update in updates.items():
-        setattr(value, key, update)
-    return value
+    model_copy = getattr(value, "model_copy", None)
+    if callable(model_copy):
+        return model_copy(update=updates)
+    if isinstance(value, SimpleNamespace):
+        merged = vars(value) | updates
+        return SimpleNamespace(**merged)
+    raise TypeError(
+        "_with_updates supports dataclasses, pydantic models (model_copy), and SimpleNamespace; "
+        f"received {type(value).__name__}"
+    )
