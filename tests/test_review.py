@@ -67,6 +67,7 @@ def test_deterministic_review_classifies_minor_budget_overage_as_soft_finding() 
     assert decision.decision == Decision.ACCEPTED
     assert len(decision.soft_gate_findings) == 1
     assert decision.soft_gate_findings[0].severity == SoftGateSeverity.LOW
+    assert "Scope-risk changed-files overage: 11 changed files" in decision.soft_gate_findings[0].risk
 
 
 def _task_contract() -> TaskContract:

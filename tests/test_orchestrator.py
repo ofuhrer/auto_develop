@@ -353,6 +353,7 @@ def test_run_task_writes_typed_soft_budget_acceptance_decision(tmp_path) -> None
     )
 
     assert result.decision.decision == "accepted"
+    assert "Modest scope-risk budget overage accepted" in result.decision.rationale
     decision_dir = result.bundle_path / "supervisor_decisions"
     artifacts = sorted(decision_dir.glob("soft_budget_acceptance__*.json"))
     assert len(artifacts) == 1
@@ -1295,10 +1296,18 @@ def test_run_task_accepts_minor_budget_overage_with_soft_gate_artifact(tmp_path)
 
     assert result.decision.decision == "accepted"
     assert result.decision.reviewer == "hybrid"
+    assert "Modest scope-risk budget overage accepted" in result.decision.rationale
     payload = json.loads((result.bundle_path / "soft_gate_decision.json").read_text(encoding="utf-8"))
     assert payload["finding"]["severity"] == "low"
+    assert "Scope-risk diff-size overage" in payload["finding"]["risk"]
     assert payload["decision"]["decision"] == "accept_with_mitigation"
     assert payload["decision"]["validators_rerun"] == ["verification", "allowed_files", "scientific_review"]
+    decision_dir = result.bundle_path / "supervisor_decisions"
+    artifacts = sorted(decision_dir.glob("soft_budget_acceptance__*.json"))
+    assert len(artifacts) == 1
+    loaded = load_supervisor_decision_artifact(artifacts[0])
+    assert isinstance(loaded, SoftBudgetAcceptanceDecision)
+    assert loaded.budget_name == "max_diff_lines_per_task"
 
 
 def test_run_task_rejects_severe_budget_overage_with_soft_gate_artifact(tmp_path) -> None:
