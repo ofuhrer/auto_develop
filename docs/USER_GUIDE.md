@@ -831,7 +831,7 @@ Relationship to nearby commands:
 
 `run-backlog` is intentionally one epic per invocation. A multi-epic governor command is planned but not yet the documented user workflow.
 
-`run-release` writes a deterministic `release_review.md` evidence summary. If the project config also defines `model_roles.reviewer`, it invokes a separate reviewer agent over `base..feature`, writes `feature_review.json`, generates bounded repair contracts for required findings, reruns verification using validated reviewer-requested commands or the default verification profile, writes `feature_review_recheck.json`, and blocks PR/merge/push finalization when required findings remain unresolved or only accepted with rationale.
+`run-release` writes a deterministic `release_review.md` evidence summary. If the project config also defines `model_roles.reviewer`, it invokes a separate reviewer agent over `base..feature`, writes `feature_review.json`, generates bounded repair contracts for required findings, reruns verification using validated reviewer-requested commands or the default verification profile, writes `feature_review_recheck.json`, and blocks PR/merge/push finalization while unresolved required findings remain.
 
 Reviewer backend assumptions (implemented today):
 - Feature review currently runs via the Codex CLI backend (`executor.type: codex_cli`). `run-release` preflights the reviewer backend and blocks review immediately when `codex` is missing from `PATH` or the configured reviewer executor type is unsupported.
@@ -845,7 +845,9 @@ Implemented `feature_review_recheck.json` stop reasons:
 
 `feature_review_recheck.json.stop_reason` is validated against exactly this fixed taxonomy.
 
-Finalization gating treats unresolved required findings from the reviewer decision as authoritative, and also treats unresolved blocked-state recheck findings as required unless the same finding IDs are explicitly optional or accepted with rationale in the recheck record. The implemented adjudication path is intentionally narrow: it can accept false-positive required findings such as "confirm syntax/imports" only after the integration verification rerun passes, and it does not accept findings that require implementation changes. That keeps the reviewer loop bounded to the integrated feature branch while leaving broader multi-epic review orchestration, persistent memory, and pre-epic state refresh as planned work.
+Finalization gating blocks when unresolved finding IDs from `feature_review_recheck.json` intersect with required findings from the latest `feature_review.json` decision. In a blocked re-check state (`blocked_by_retry_budget` / `blocked_by_hard_gate`) where the latest reviewer decision carries no required findings but unresolved finding IDs remain, the gate treats those unresolved IDs as required unless the same IDs are explicitly optional findings in the latest reviewer decision. (Today the gate does not consult the re-check record's `accepted_finding_ids` / `resolved_finding_ids`; it relies on unresolved IDs plus the latest reviewer decision's required/optional classification.)
+
+The implemented adjudication path is intentionally narrow: it can accept false-positive required findings such as "confirm syntax/imports" only after the integration verification rerun passes, and it does not accept findings that require implementation changes. That keeps the reviewer loop bounded to the integrated feature branch while leaving broader multi-epic review orchestration, persistent memory, and pre-epic state refresh as planned work.
 
 The planned multi-epic governor should expose one parent log stream:
 
