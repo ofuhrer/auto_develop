@@ -1469,7 +1469,7 @@ def _run_feature_review_and_repair_loop(
                 if item.selected_action == "accept":
                     outcome = FeatureReviewFindingOutcome.CONTINUE
                 else:
-                    outcome = FeatureReviewFindingOutcome.STOP
+                    outcome = FeatureReviewFindingOutcome.STOP_FINDING
                 evidence_paths: list[str] = []
                 if feature_review_path is not None:
                     evidence_paths.append(str(feature_review_path.resolve()))
@@ -1477,6 +1477,7 @@ def _run_feature_review_and_repair_loop(
                 rationale = (
                     "Classified non-blocking finding with convergence context; "
                     f"classification={item.classification} action={item.selected_action} "
+                    "defer_outcome_scope=stop_pursuing_this_finding "
                     f"matched_previous_finding_id={match_hint} "
                     f"repeated_by_finding_id={str(item.repeated_by_finding_id).lower()} "
                     f"adjacent_similarity={item.adjacent_similarity:.3f}."

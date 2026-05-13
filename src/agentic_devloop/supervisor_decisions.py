@@ -261,7 +261,8 @@ class FeatureReviewFindingAction(StrEnum):
 
 class FeatureReviewFindingOutcome(StrEnum):
     CONTINUE = "continue"
-    STOP = "stop"
+    STOP_FINDING = "stop"
+    STOP = STOP_FINDING
 
 
 class FeatureReviewFindingClassificationDecision(SupervisorDecisionBase):
@@ -287,7 +288,7 @@ class FeatureReviewFindingClassificationDecision(SupervisorDecisionBase):
         if self.selected_action in {FeatureReviewFindingAction.REPAIR, FeatureReviewFindingAction.ACCEPT}:
             if self.outcome != FeatureReviewFindingOutcome.CONTINUE:
                 raise ValueError("repair or accept requires continue outcome")
-        if self.selected_action == FeatureReviewFindingAction.DEFER and self.outcome != FeatureReviewFindingOutcome.STOP:
+        if self.selected_action == FeatureReviewFindingAction.DEFER and self.outcome != FeatureReviewFindingOutcome.STOP_FINDING:
             raise ValueError("defer requires stop outcome")
         if (
             self.classification == FeatureReviewFindingClassification.BLOCKER
