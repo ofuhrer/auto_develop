@@ -84,8 +84,8 @@ def deterministic_review(
                 finding_id=f"{task.task_id}:changed_files_budget",
                 severity=severity,
                 risk=(
-                    f"Scope-risk changed-files overage: {changed_files_count} changed files "
-                    f"over budget: {changed_files_count} exceeds {budget.max_changed_files_per_task}."
+                    f"Scope-risk changed-files overage: over budget: {changed_files_count} "
+                    f"exceeds {budget.max_changed_files_per_task} changed files."
                 ),
                 recommended_actions=[
                     "Review whether task scope should be split.",
@@ -105,8 +105,8 @@ def deterministic_review(
                 finding_id=f"{task.task_id}:diff_lines_budget",
                 severity=severity,
                 risk=(
-                    f"Scope-risk diff-size overage: {diff_lines} diff lines "
-                    f"over budget: {diff_lines} exceeds {budget.max_diff_lines_per_task}."
+                    f"Scope-risk diff-size overage: over budget: {diff_lines} "
+                    f"exceeds {budget.max_diff_lines_per_task} diff lines."
                 ),
                 recommended_actions=[
                     "Review whether task scope should be split.",
