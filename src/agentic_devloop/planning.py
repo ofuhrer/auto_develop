@@ -28,6 +28,10 @@ from agentic_devloop.models import (
 from agentic_devloop.planner_backend import PlannerBackendResult
 from agentic_devloop.runtime_supervisor import RuntimeSupervisor, RuntimeSupervisorApplierStopKind
 from agentic_devloop.supervisor_decisions import (
+    ModelOutputNormalizationAction,
+    ModelOutputNormalizationDecision,
+    ModelOutputNormalizationOutcome,
+    ModelOutputValidationError,
     DecisionRiskLevel,
     ExecutionStrategyAction as SupervisorExecutionStrategyAction,
     ExecutionStrategyDecision,
@@ -237,11 +241,16 @@ def plan_release_contracts(
             )
             backend_paths = _planner_backend_paths(backend_output)
             raw_output = backend_output.raw_output if isinstance(backend_output, PlannerBackendResult) else backend_output
+            normalization_evidence_paths = tuple(
+                path for path in backend_paths.values() if isinstance(path, Path) and path.exists()
+            )
             plan = parse_planner_output(
                 raw_output,
                 release_id=objective.release_id,
                 planner=mode,
                 project_config=config,
+                normalization_bundle_path=plan_dir,
+                normalization_source_evidence_paths=normalization_evidence_paths,
             )
             plan = plan.model_copy(
                 update={
@@ -538,6 +547,8 @@ def parse_planner_output(
     release_id: str,
     planner: str,
     project_config: ProjectConfig | None = None,
+    normalization_bundle_path: Path | None = None,
+    normalization_source_evidence_paths: tuple[Path, ...] = (),
 ) -> ContractPlan:
     if isinstance(raw_output, str):
         raw_output = _extract_json_object(raw_output)
@@ -545,11 +556,13 @@ def parse_planner_output(
             raw_output = json.loads(raw_output)
         except json.JSONDecodeError as error:
             raise ValueError("planner output must be valid JSON") from error
+    initial_validation_errors: list[dict[str, str]] = []
     if isinstance(raw_output, dict):
+        initial_validation_errors = _contract_plan_validation_errors(raw_output)
         raw_output = _normalize_planner_contract_payloads(raw_output, release_id=release_id)
     supervisor = RuntimeSupervisor()
     normalization = supervisor.apply_planner_contract_normalization(
-        source_evidence_paths=(),
+        source_evidence_paths=normalization_source_evidence_paths,
         candidate_plan=raw_output,
     )
     if not normalization.applied or normalization.proposal is None:
@@ -557,6 +570,15 @@ def parse_planner_output(
             normalization.stop_evidence.reason
             if normalization.stop_evidence is not None
             else "Planner normalization failed ContractPlan/TaskContract validation."
+        )
+        _persist_model_output_normalization_decision(
+            release_id=release_id,
+            planner=planner,
+            bundle_path=normalization_bundle_path,
+            source_evidence_paths=normalization_source_evidence_paths,
+            validation_errors=initial_validation_errors,
+            normalized_plan=None,
+            refusal_reason=reason,
         )
         raise PlannerNormalizationError(
             "planner output did not match the contract plan schema",
@@ -566,11 +588,31 @@ def parse_planner_output(
             ),
         )
     plan = normalization.proposal.normalized_plan
+    normalization_decision_path: Path | None = None
+    if initial_validation_errors:
+        normalization_decision_path = _persist_model_output_normalization_decision(
+            release_id=release_id,
+            planner=planner,
+            bundle_path=normalization_bundle_path,
+            source_evidence_paths=normalization_source_evidence_paths,
+            validation_errors=initial_validation_errors,
+            normalized_plan=plan,
+            refusal_reason=None,
+        )
     if plan.release_id != release_id:
         raise ValueError(
             f"planner output release_id {plan.release_id!r} did not match expected {release_id!r}"
         )
     plan = plan.model_copy(update={"planner": planner})
+    if normalization_decision_path is not None:
+        plan = plan.model_copy(
+            update={
+                "warnings": [
+                    *plan.warnings,
+                    f"model_output_normalization_decision_path={normalization_decision_path}",
+                ]
+            }
+        )
     plan = _normalize_contracts_for_admission(plan, project_config=project_config)
     try:
         validate_generated_contracts(plan, project_config=project_config)
@@ -594,6 +636,86 @@ def parse_planner_output(
             ) from error
         raise
     return plan
+
+
+def _contract_plan_validation_errors(candidate_plan: object) -> list[dict[str, str]]:
+    try:
+        ContractPlan.model_validate(candidate_plan)
+        return []
+    except Exception as error:
+        validation_error = getattr(error, "errors", None)
+        if not callable(validation_error):
+            return []
+        payload: list[dict[str, str]] = []
+        for item in validation_error():
+            location = item.get("loc", ())
+            path = ".".join(str(token) for token in location) if location else "<root>"
+            payload.append(
+                {
+                    "field": path,
+                    "message": str(item.get("msg", "validation failed")),
+                    "error_type": str(item.get("type", "value_error")),
+                }
+            )
+        return payload
+
+
+def _persist_model_output_normalization_decision(
+    *,
+    release_id: str,
+    planner: str,
+    bundle_path: Path | None,
+    source_evidence_paths: tuple[Path, ...],
+    validation_errors: list[dict[str, str]],
+    normalized_plan: ContractPlan | None,
+    refusal_reason: str | None,
+) -> Path | None:
+    if bundle_path is None:
+        return None
+    raw_paths = [path for path in source_evidence_paths if path.exists()]
+    if not raw_paths:
+        return None
+    if normalized_plan is None:
+        selected_action = ModelOutputNormalizationAction.REFUSE
+        outcome = ModelOutputNormalizationOutcome.REFUSED_AND_STOP
+        normalized_artifact_path = None
+    else:
+        selected_action = ModelOutputNormalizationAction.APPLY_NORMALIZATION
+        outcome = ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY
+        normalized_artifact_path = bundle_path / "normalized_contract_plan.json"
+        if normalized_plan is not None:
+            normalized_artifact_path.write_text(
+                json.dumps(normalized_plan.model_dump(mode="json"), indent=2) + "\n",
+                encoding="utf-8",
+            )
+    decision = ModelOutputNormalizationDecision.model_validate(
+        {
+            "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+            "decision_id": f"{release_id}_{planner}_planner_output",
+            "release_id": release_id,
+            "decided_at": datetime.now(UTC),
+            "decided_by": "parse_planner_output",
+            "rationale": (
+                "Captured planner ContractPlan/TaskContract validation errors and applied bounded normalization."
+                if outcome == ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY
+                else "Planner output could not be normalized within bounded policy."
+            ),
+            "evidence_paths": [str(path.resolve()) for path in raw_paths],
+            "risk_level": DecisionRiskLevel.MODERATE,
+            "raw_artifact_paths": [str(path.resolve()) for path in raw_paths],
+            "validation_errors": [
+                ModelOutputValidationError.model_validate(item).model_dump(mode="json")
+                for item in validation_errors
+            ],
+            "selected_action": selected_action,
+            "outcome": outcome,
+            "fallback_plan": "Stop planning and require bounded planner rerun with strict schema output.",
+            "validators_to_rerun": ["ContractPlan", "TaskContract", "validate_generated_contracts"],
+            "normalized_artifact_path": str(normalized_artifact_path.resolve()) if normalized_artifact_path else None,
+            "refusal_reason": refusal_reason,
+        }
+    )
+    return write_supervisor_decision_artifact(release_bundle_path=bundle_path, decision=decision)
 
 
 def _normalize_planner_contract_payloads(raw_plan: dict[str, Any], *, release_id: str) -> dict[str, Any]:

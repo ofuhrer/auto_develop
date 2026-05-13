@@ -13,6 +13,9 @@ from agentic_devloop.supervisor_decisions import (
     ExecutionStrategyAction,
     ExecutionStrategyDecision,
     ExecutionStrategyOutcome,
+    ModelOutputNormalizationAction,
+    ModelOutputNormalizationDecision,
+    ModelOutputNormalizationOutcome,
     ReleaseSchedulingAction,
     ReleaseSchedulingDecision,
     SCHEMA_VERSION_V1,
@@ -73,6 +76,35 @@ def _execution_strategy_decision(*, evidence_paths: list[Path]) -> ExecutionStra
     )
 
 
+def _model_output_normalization_decision(*, evidence_paths: list[Path]) -> ModelOutputNormalizationDecision:
+    return ModelOutputNormalizationDecision.model_validate(
+        {
+            "schema_version": SCHEMA_VERSION_V1,
+            "decision_id": "normalization-001",
+            "release_id": "model-output-normalization",
+            "decided_at": datetime(2026, 5, 13, 8, 0, 0),
+            "decided_by": "supervisor-agent",
+            "rationale": "Raw output is semantically useful and can be safely normalized.",
+            "evidence_paths": evidence_paths,
+            "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+            "risk_level": DecisionRiskLevel.MODERATE,
+            "raw_artifact_paths": [Path("feature_review.raw.json")],
+            "validation_errors": [
+                {
+                    "field": "findings[0].evidence_paths",
+                    "message": "Field required",
+                    "error_type": "missing",
+                }
+            ],
+            "selected_action": ModelOutputNormalizationAction.APPLY_NORMALIZATION,
+            "outcome": ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
+            "fallback_plan": "Refuse and stop if normalized output fails validation.",
+            "validators_to_rerun": ["review_findings_schema", "release_review_gate"],
+            "normalized_artifact_path": Path("feature_review.normalized.json"),
+        }
+    )
+
+
 def test_supervisor_decision_artifact_path_is_deterministic(tmp_path: Path) -> None:
     path = supervisor_decision_artifact_path(
         release_bundle_path=tmp_path,
@@ -121,10 +153,47 @@ def test_write_and_load_supervisor_decision_artifact_round_trip(tmp_path: Path) 
     assert loaded == decision
 
 
+def test_load_supervisor_decision_artifact_accepts_bundle_relative_evidence_path(
+    tmp_path: Path,
+) -> None:
+    evidence_file = tmp_path / "changed_files.txt"
+    evidence_file.write_text("src/agentic_devloop/release.py\n", encoding="utf-8")
+    decision = _decision(evidence_paths=[Path("changed_files.txt")])
+
+    artifact_path = write_supervisor_decision_artifact(
+        release_bundle_path=tmp_path,
+        decision=decision,
+    )
+    loaded = load_supervisor_decision_artifact(artifact_path)
+
+    assert loaded == decision
+
+
 def test_write_and_load_execution_strategy_artifact_round_trip(tmp_path: Path) -> None:
     evidence_file = tmp_path / "strategy-evidence.log"
     evidence_file.write_text("selected one-shot\n", encoding="utf-8")
     decision = _execution_strategy_decision(evidence_paths=[evidence_file])
+
+    artifact_path = write_supervisor_decision_artifact(
+        release_bundle_path=tmp_path,
+        decision=decision,
+    )
+    loaded = load_supervisor_decision_artifact(artifact_path)
+
+    assert artifact_path.exists()
+    assert loaded == decision
+
+
+def test_write_and_load_model_output_normalization_artifact_round_trip(tmp_path: Path) -> None:
+    evidence_file = tmp_path / "normalization-evidence.log"
+    evidence_file.write_text("normalized output accepted\n", encoding="utf-8")
+    raw_artifact = tmp_path / "feature_review.raw.json"
+    raw_artifact.write_text("{}\n", encoding="utf-8")
+    normalized_artifact = tmp_path / "feature_review.normalized.json"
+    normalized_artifact.write_text("{}\n", encoding="utf-8")
+    decision = _model_output_normalization_decision(
+        evidence_paths=[evidence_file, raw_artifact, normalized_artifact]
+    )
 
     artifact_path = write_supervisor_decision_artifact(
         release_bundle_path=tmp_path,
@@ -202,7 +271,7 @@ def test_load_supervisor_decision_artifact_rejects_relative_evidence_path_traver
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="escapes artifact directory"):
+    with pytest.raises(ValueError, match="escapes artifact bundle"):
         load_supervisor_decision_artifact(artifact_path)
 
 

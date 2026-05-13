@@ -74,6 +74,11 @@ from agentic_devloop.runtime_supervisor import (
     TuningReportPaths,
 )
 from agentic_devloop.supervisor_decisions import (
+    DecisionRiskLevel,
+    ModelOutputNormalizationAction,
+    ModelOutputNormalizationDecision,
+    ModelOutputNormalizationOutcome,
+    ModelOutputValidationError,
     ReleaseSchedulingAction,
     ReleaseSchedulingDecision,
     ReleaseSchedulingStalenessInputs,
@@ -1288,7 +1293,14 @@ def _run_feature_review_and_repair_loop(
                 release_id=release_id,
                 output_dir=attempt_dir,
             )
-            decision = backend.decision
+            decision = _normalize_feature_review_model_output_if_needed(
+                release_id=release_id,
+                release_root=release_root,
+                context=context,
+                backend=backend,
+                fallback_decision=backend.decision,
+                progress=progress,
+            )
         except FeatureReviewContextError as error:
             decision = FeatureReviewDecision.model_validate(
                 {
@@ -1567,6 +1579,366 @@ def _verification_adjudicated_required_finding_ids(findings: list[object]) -> li
         if _is_verification_only_or_conditional_finding(finding):
             accepted.append(str(getattr(finding, "finding_id")))
     return accepted
+
+
+def _normalize_feature_review_model_output_if_needed(
+    *,
+    release_id: str,
+    release_root: Path,
+    context,
+    backend,
+    fallback_decision: FeatureReviewDecision,
+    progress: Callable[[str], None] | None,
+) -> FeatureReviewDecision:
+    if not fallback_decision.findings:
+        return fallback_decision
+    blocked_summary = fallback_decision.findings[0].summary.lower()
+    if "not valid featurereviewdecision json" not in blocked_summary:
+        return fallback_decision
+
+    raw_paths = [backend.stdout_path, backend.stderr_path, backend.metadata_path, backend.prompt_path]
+    raw_payload = _extract_json_object_from_text(backend.raw_output)
+    if raw_payload is None:
+        _write_feature_review_output_normalization_decision(
+            release_id=release_id,
+            release_root=release_root,
+            raw_paths=raw_paths,
+            validation_errors=[],
+            selected_action=ModelOutputNormalizationAction.REFUSE,
+            outcome=ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+            normalized_artifact_path=None,
+            refusal_reason="Reviewer output was not parseable JSON; bounded normalization could not proceed.",
+        )
+        _report(progress, "event=feature_review_output_normalization_refused reason=unparseable_json")
+        return fallback_decision
+
+    validation_errors = _feature_review_validation_errors(raw_payload)
+    normalized_payload, refusal_reason = _bounded_normalize_feature_review_payload(
+        raw_payload=raw_payload,
+        context=context,
+    )
+    if normalized_payload is None:
+        _write_feature_review_output_normalization_decision(
+            release_id=release_id,
+            release_root=release_root,
+            raw_paths=raw_paths,
+            validation_errors=validation_errors,
+            selected_action=ModelOutputNormalizationAction.REFUSE,
+            outcome=ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+            normalized_artifact_path=None,
+            refusal_reason=refusal_reason or "Reviewer output normalization refused by bounded policy.",
+        )
+        _report(progress, "event=feature_review_output_normalization_refused reason=bounded_policy")
+        return fallback_decision
+
+    try:
+        normalized_decision = FeatureReviewDecision.model_validate(normalized_payload)
+        _validate_feature_review_review_decision_bridge(normalized_decision)
+    except Exception as error:  # noqa: BLE001 - refusal is captured in decision artifact.
+        _write_feature_review_output_normalization_decision(
+            release_id=release_id,
+            release_root=release_root,
+            raw_paths=raw_paths,
+            validation_errors=validation_errors,
+            selected_action=ModelOutputNormalizationAction.REFUSE,
+            outcome=ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+            normalized_artifact_path=None,
+            refusal_reason=f"Normalized reviewer output remained invalid: {error}",
+        )
+        _report(progress, "event=feature_review_output_normalization_refused reason=invalid_after_normalization")
+        return fallback_decision
+
+    normalized_artifact_path = release_root / "feature_review" / "normalized_feature_review_decision.json"
+    normalized_artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    normalized_artifact_path.write_text(
+        json.dumps(normalized_decision.model_dump(mode="json"), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    _write_feature_review_output_normalization_decision(
+        release_id=release_id,
+        release_root=release_root,
+        raw_paths=raw_paths,
+        validation_errors=validation_errors,
+        selected_action=ModelOutputNormalizationAction.APPLY_NORMALIZATION,
+        outcome=ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
+        normalized_artifact_path=normalized_artifact_path,
+        refusal_reason=None,
+    )
+    _report(progress, f"event=feature_review_output_normalized path={normalized_artifact_path}")
+    return normalized_decision
+
+
+def _extract_json_object_from_text(text: str) -> dict[str, object] | None:
+    try:
+        loaded = json.loads(text)
+    except json.JSONDecodeError:
+        loaded = None
+    if isinstance(loaded, dict):
+        return loaded
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escape:
+                escape = False
+                continue
+            if char == "\\":
+                escape = True
+                continue
+            if char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char == "{":
+            depth += 1
+            continue
+        if char == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = text[start : index + 1]
+                try:
+                    parsed = json.loads(candidate)
+                except json.JSONDecodeError:
+                    return None
+                return parsed if isinstance(parsed, dict) else None
+    return None
+
+
+def _feature_review_validation_errors(candidate: object) -> list[dict[str, str]]:
+    try:
+        FeatureReviewDecision.model_validate(candidate)
+        return []
+    except Exception as error:  # noqa: BLE001 - validation errors are best-effort evidence.
+        errors_fn = getattr(error, "errors", None)
+        if not callable(errors_fn):
+            return []
+        payload: list[dict[str, str]] = []
+        for item in errors_fn():
+            loc = item.get("loc", ())
+            payload.append(
+                {
+                    "field": ".".join(str(token) for token in loc) if loc else "<root>",
+                    "message": str(item.get("msg", "validation failed")),
+                    "error_type": str(item.get("type", "value_error")),
+                }
+            )
+        return payload
+
+
+def _bounded_normalize_feature_review_payload(
+    *,
+    raw_payload: dict[str, object],
+    context,
+) -> tuple[dict[str, object] | None, str | None]:
+    candidate = dict(raw_payload)
+    nested_candidate = None
+    for key in ("decision", "feature_review", "review", "result", "output"):
+        value = raw_payload.get(key)
+        if isinstance(value, dict):
+            nested_candidate = value
+            break
+    if nested_candidate is not None:
+        if _payload_looks_like_feature_review(candidate) and _payload_looks_like_feature_review(nested_candidate):
+            if _feature_review_semantics_fingerprint(candidate) != _feature_review_semantics_fingerprint(nested_candidate):
+                return None, "Reviewer wrapper and nested decision disagree on finding semantics."
+        candidate = dict(nested_candidate)
+
+    if not _payload_looks_like_feature_review(candidate):
+        return None, "Reviewer output did not include a recognizable FeatureReviewDecision payload."
+
+    normalized = dict(candidate)
+    recommendation = str(normalized.get("recommendation", "")).strip().lower()
+    recommendation_aliases = {
+        "approved": "approve",
+        "approve_with_fixes": "approve_with_repairs",
+        "requires_repairs": "require_repairs",
+        "needs_repairs": "require_repairs",
+        "require_changes": "require_repairs",
+        "escalated": "escalate",
+    }
+    if recommendation in recommendation_aliases:
+        normalized["recommendation"] = recommendation_aliases[recommendation]
+    reviewer = str(normalized.get("reviewer", "")).strip().lower()
+    reviewer_aliases = {"model": "strong_model", "strong": "strong_model", "human_reviewer": "human"}
+    if reviewer in reviewer_aliases:
+        normalized["reviewer"] = reviewer_aliases[reviewer]
+
+    findings = normalized.get("findings")
+    if not isinstance(findings, list):
+        return None, "Reviewer payload findings were not a list."
+    normalized_findings: list[dict[str, object]] = []
+    for finding in findings:
+        if not isinstance(finding, dict):
+            return None, "Reviewer payload contained non-object findings."
+        finding_payload = dict(finding)
+        if "evidence_paths" not in finding_payload and isinstance(finding_payload.get("evidence"), list):
+            finding_payload["evidence_paths"] = finding_payload["evidence"]
+        evidence = finding_payload.get("evidence_paths")
+        if isinstance(evidence, list):
+            cleaned = [str(item).strip() for item in evidence if str(item).strip()]
+        else:
+            cleaned = []
+        if not cleaned:
+            derived = _derive_feature_review_evidence_paths(finding_payload=finding_payload, context=context)
+            if not derived:
+                finding_id = str(finding_payload.get("finding_id", "<unknown>"))
+                return None, f"finding {finding_id} has empty evidence_paths that are not derivable from release evidence."
+            finding_payload["evidence_paths"] = derived
+        normalized_findings.append(finding_payload)
+    normalized["findings"] = normalized_findings
+    return normalized, None
+
+
+def _payload_looks_like_feature_review(payload: dict[str, object]) -> bool:
+    return "recommendation" in payload and "findings" in payload and "summary" in payload
+
+
+def _feature_review_semantics_fingerprint(payload: dict[str, object]) -> dict[str, object]:
+    findings = payload.get("findings")
+    normalized_findings: list[dict[str, object]] = []
+    if isinstance(findings, list):
+        for item in findings:
+            if not isinstance(item, dict):
+                continue
+            normalized_findings.append(
+                {
+                    "finding_id": item.get("finding_id"),
+                    "severity": item.get("severity"),
+                    "summary": item.get("summary"),
+                    "affected_files": item.get("affected_files"),
+                    "required_repairs": item.get("required_repairs"),
+                    "optional_follow_ups": item.get("optional_follow_ups"),
+                }
+            )
+    return {
+        "reviewer": payload.get("reviewer"),
+        "summary": payload.get("summary"),
+        "recommendation": payload.get("recommendation"),
+        "findings": normalized_findings,
+    }
+
+
+def _derive_feature_review_evidence_paths(*, finding_payload: dict[str, object], context) -> list[str]:
+    derivable: list[str] = []
+    affected_files = finding_payload.get("affected_files")
+    if isinstance(affected_files, list):
+        changed = {path for path in context.changed_files}
+        for value in affected_files:
+            path = str(value).strip()
+            if path and path in changed:
+                derivable.append(path)
+            if path and path.startswith("runs/"):
+                derivable.append(path)
+
+    artifact_paths = [
+        context.release_summary_path,
+        context.release_review_path,
+        context.release_metrics_path,
+        context.release_budget_path,
+        context.release_tuning_path,
+    ]
+    summary_text = " ".join(
+        str(value).lower()
+        for value in [
+            finding_payload.get("summary", ""),
+            " ".join(str(item) for item in finding_payload.get("required_repairs", []) if isinstance(item, str)),
+            " ".join(str(item) for item in finding_payload.get("optional_follow_ups", []) if isinstance(item, str)),
+        ]
+    )
+    artifact_keywords = {
+        "summary": "release_summary.json",
+        "review": "release_review.md",
+        "metric": "release_metrics.json",
+        "budget": "release_budget.json",
+        "tuning": "release_tuning.md",
+    }
+    for artifact_path in artifact_paths:
+        if artifact_path is None:
+            continue
+        filename = artifact_path.name.lower()
+        if filename in summary_text:
+            derivable.append(str(artifact_path.resolve()))
+            continue
+        if any(keyword in summary_text and target == filename for keyword, target in artifact_keywords.items()):
+            derivable.append(str(artifact_path.resolve()))
+
+    unique: list[str] = []
+    seen: set[str] = set()
+    for value in derivable:
+        item = str(value).strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        unique.append(item)
+    return unique
+
+
+def _validate_feature_review_review_decision_bridge(decision: FeatureReviewDecision) -> None:
+    mapped_decision = {
+        FeatureReviewRecommendation.APPROVE: Decision.ACCEPTED,
+        FeatureReviewRecommendation.APPROVE_WITH_REPAIRS: Decision.NEEDS_REVISION,
+        FeatureReviewRecommendation.REQUIRE_REPAIRS: Decision.NEEDS_REVISION,
+        FeatureReviewRecommendation.ESCALATE: Decision.ESCALATED,
+    }[decision.recommendation]
+    ReviewDecision.model_validate(
+        {
+            "task_id": f"feature-review:{decision.release_id}",
+            "decision": mapped_decision.value,
+            "reviewer": decision.reviewer.value,
+            "rationale": decision.summary,
+            "risks": list(decision.accepted_risks),
+            "follow_up_tasks": [],
+            "soft_gate_findings": [],
+        }
+    )
+
+
+def _write_feature_review_output_normalization_decision(
+    *,
+    release_id: str,
+    release_root: Path,
+    raw_paths: list[Path],
+    validation_errors: list[dict[str, str]],
+    selected_action: ModelOutputNormalizationAction,
+    outcome: ModelOutputNormalizationOutcome,
+    normalized_artifact_path: Path | None,
+    refusal_reason: str | None,
+) -> Path:
+    decision = ModelOutputNormalizationDecision.model_validate(
+        {
+            "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+            "decision_id": f"{release_id}__feature_review_output",
+            "release_id": release_id,
+            "decided_at": datetime.now(UTC),
+            "decided_by": "run_release_feature_review_loop",
+            "rationale": (
+                "Applied bounded normalization to reviewer output and reran strict feature-review validators."
+                if outcome == ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY
+                else "Refused reviewer output normalization because bounded policy could not guarantee safe semantics."
+            ),
+            "evidence_paths": [str(path.resolve()) for path in raw_paths if path.exists()],
+            "risk_level": DecisionRiskLevel.MODERATE,
+            "raw_artifact_paths": [str(path.resolve()) for path in raw_paths if path.exists()],
+            "validation_errors": [
+                ModelOutputValidationError.model_validate(item).model_dump(mode="json")
+                for item in validation_errors
+            ],
+            "selected_action": selected_action.value,
+            "outcome": outcome.value,
+            "fallback_plan": "Keep deterministic blocked feature-review decision and require bounded reviewer rerun.",
+            "validators_to_rerun": ["FeatureReviewDecision", "ReviewDecision"],
+            "normalized_artifact_path": str(normalized_artifact_path.resolve()) if normalized_artifact_path else None,
+            "refusal_reason": refusal_reason,
+        }
+    )
+    return write_supervisor_decision_artifact(release_bundle_path=release_root, decision=decision)
 
 
 def _is_verification_only_or_conditional_finding(finding: object) -> bool:
@@ -2572,7 +2944,18 @@ def _load_or_build_release_scheduling_decision(
         overlap_report=overlap_report,
     )
     if decision_path.exists():
-        loaded = load_supervisor_decision_artifact(decision_path)
+        try:
+            loaded = load_supervisor_decision_artifact(decision_path)
+        except Exception as error:  # noqa: BLE001 - bounded normalization handles typed reload safety.
+            loaded = _normalize_release_scheduling_model_output_if_needed(
+                release_id=release_id,
+                release_root=release_root,
+                decision_path=decision_path,
+                current_staleness_inputs=current_staleness_inputs,
+                load_error=error,
+            )
+            if loaded is None:
+                raise
         if not isinstance(loaded, ReleaseSchedulingDecision):
             raise ValueError(
                 f"release scheduling decision artifact has unsupported type: {loaded.decision_type}"
@@ -2581,6 +2964,8 @@ def _load_or_build_release_scheduling_decision(
             raise ValueError(
                 f"release scheduling decision artifact is stale for release {release_id}: {decision_path}"
             )
+        if loaded.selected_action not in {ReleaseSchedulingAction.SEQUENTIAL, ReleaseSchedulingAction.PARALLEL}:
+            raise ValueError(f"unsupported release scheduling action: {loaded.selected_action.value}")
         return loaded
 
     decision = _build_release_scheduling_decision(
@@ -2611,7 +2996,239 @@ def _load_or_build_release_scheduling_decision(
         raise ValueError(
             f"release scheduling decision artifact is stale for release {release_id}: {decision_path}"
         )
+    if loaded.selected_action not in {ReleaseSchedulingAction.SEQUENTIAL, ReleaseSchedulingAction.PARALLEL}:
+        raise ValueError(f"unsupported release scheduling action: {loaded.selected_action.value}")
     return loaded
+
+
+def _normalize_release_scheduling_model_output_if_needed(
+    *,
+    release_id: str,
+    release_root: Path,
+    decision_path: Path,
+    current_staleness_inputs: ReleaseSchedulingStalenessInputs,
+    load_error: Exception,
+) -> ReleaseSchedulingDecision | None:
+    raw_text = decision_path.read_text(encoding="utf-8")
+    raw_payload = _extract_json_object_from_text(raw_text)
+    raw_paths = [decision_path]
+    if raw_payload is None:
+        _write_release_scheduling_output_normalization_decision(
+            release_id=release_id,
+            release_root=release_root,
+            raw_paths=raw_paths,
+            validation_errors=_model_output_validation_errors_from_exception(load_error),
+            selected_action=ModelOutputNormalizationAction.REFUSE,
+            outcome=ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+            normalized_artifact_path=None,
+            refusal_reason="Release scheduling decision artifact was not parseable JSON.",
+        )
+        return None
+
+    validation_errors = _release_scheduling_validation_errors(raw_payload)
+    normalized_payload, refusal_reason = _bounded_normalize_release_scheduling_payload(
+        raw_payload=raw_payload,
+        release_id=release_id,
+        current_staleness_inputs=current_staleness_inputs,
+    )
+    if normalized_payload is None:
+        _write_release_scheduling_output_normalization_decision(
+            release_id=release_id,
+            release_root=release_root,
+            raw_paths=raw_paths,
+            validation_errors=validation_errors,
+            selected_action=ModelOutputNormalizationAction.REFUSE,
+            outcome=ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+            normalized_artifact_path=None,
+            refusal_reason=refusal_reason or "Release scheduling normalization refused by bounded policy.",
+        )
+        return None
+
+    try:
+        normalized_decision = ReleaseSchedulingDecision.model_validate(normalized_payload)
+        if normalized_decision.staleness_inputs != current_staleness_inputs:
+            raise ValueError("normalized release scheduling decision artifact remained stale")
+    except Exception as error:  # noqa: BLE001 - refusal evidence is persisted.
+        _write_release_scheduling_output_normalization_decision(
+            release_id=release_id,
+            release_root=release_root,
+            raw_paths=raw_paths,
+            validation_errors=validation_errors,
+            selected_action=ModelOutputNormalizationAction.REFUSE,
+            outcome=ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+            normalized_artifact_path=None,
+            refusal_reason=f"Normalized release scheduling output remained invalid: {error}",
+        )
+        return None
+
+    decision_path.write_text(
+        json.dumps(normalized_decision.model_dump(mode="json"), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    loaded = load_supervisor_decision_artifact(decision_path)
+    if not isinstance(loaded, ReleaseSchedulingDecision):
+        _write_release_scheduling_output_normalization_decision(
+            release_id=release_id,
+            release_root=release_root,
+            raw_paths=raw_paths,
+            validation_errors=validation_errors,
+            selected_action=ModelOutputNormalizationAction.REFUSE,
+            outcome=ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+            normalized_artifact_path=decision_path,
+            refusal_reason="Normalized release scheduling artifact reloaded to an unsupported decision type.",
+        )
+        return None
+
+    _write_release_scheduling_output_normalization_decision(
+        release_id=release_id,
+        release_root=release_root,
+        raw_paths=raw_paths,
+        validation_errors=validation_errors,
+        selected_action=ModelOutputNormalizationAction.APPLY_NORMALIZATION,
+        outcome=ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
+        normalized_artifact_path=decision_path,
+        refusal_reason=None,
+    )
+    return loaded
+
+
+def _release_scheduling_validation_errors(candidate: object) -> list[dict[str, str]]:
+    try:
+        ReleaseSchedulingDecision.model_validate(candidate)
+        return []
+    except Exception as error:  # noqa: BLE001 - validation errors are best-effort evidence.
+        return _model_output_validation_errors_from_exception(error)
+
+
+def _model_output_validation_errors_from_exception(error: Exception) -> list[dict[str, str]]:
+    errors_fn = getattr(error, "errors", None)
+    if not callable(errors_fn):
+        return []
+    payload: list[dict[str, str]] = []
+    for item in errors_fn():
+        loc = item.get("loc", ())
+        payload.append(
+            {
+                "field": ".".join(str(token) for token in loc) if loc else "<root>",
+                "message": str(item.get("msg", "validation failed")),
+                "error_type": str(item.get("type", "value_error")),
+            }
+        )
+    return payload
+
+
+def _bounded_normalize_release_scheduling_payload(
+    *,
+    raw_payload: dict[str, object],
+    release_id: str,
+    current_staleness_inputs: ReleaseSchedulingStalenessInputs,
+) -> tuple[dict[str, object] | None, str | None]:
+    candidate = dict(raw_payload)
+    nested_candidate = None
+    for key in ("decision", "scheduling_decision", "release_scheduling", "result", "output"):
+        value = raw_payload.get(key)
+        if isinstance(value, dict):
+            nested_candidate = value
+            break
+    if nested_candidate is not None:
+        if _payload_looks_like_release_scheduling(candidate) and _payload_looks_like_release_scheduling(nested_candidate):
+            if _release_scheduling_semantics_fingerprint(candidate) != _release_scheduling_semantics_fingerprint(
+                nested_candidate
+            ):
+                return None, "Supervisor wrapper and nested release scheduling decision disagree on selected action semantics."
+        candidate = dict(nested_candidate)
+
+    if not _payload_looks_like_release_scheduling(candidate):
+        return None, "Supervisor output did not include a recognizable release scheduling decision payload."
+
+    normalized = dict(candidate)
+    if "selected_action" not in normalized and "action" in normalized:
+        normalized["selected_action"] = normalized["action"]
+    if "decision_type" not in normalized:
+        normalized["decision_type"] = SupervisorDecisionType.RELEASE_SCHEDULING.value
+    if "release_id" not in normalized:
+        normalized["release_id"] = release_id
+    if "decision_id" not in normalized:
+        normalized["decision_id"] = f"{release_id}__scheduling"
+    if "decided_by" not in normalized:
+        normalized["decided_by"] = "run_release_scheduling_normalizer"
+    if "decided_at" not in normalized:
+        normalized["decided_at"] = datetime.now(UTC).isoformat()
+    if "rationale" not in normalized:
+        normalized["rationale"] = "Bounded normalization repaired wrapper/schema drift for release scheduling output."
+    if "overlap_findings" not in normalized:
+        normalized["overlap_findings"] = []
+    if "risk_level" not in normalized:
+        normalized["risk_level"] = DecisionRiskLevel.MODERATE.value
+    if "evidence_paths" not in normalized or not isinstance(normalized.get("evidence_paths"), list):
+        normalized["evidence_paths"] = []
+
+    selected_action = normalized.get("selected_action")
+    if not isinstance(selected_action, str):
+        return None, "Release scheduling selected_action was missing or invalid."
+    if selected_action not in {ReleaseSchedulingAction.SEQUENTIAL.value, ReleaseSchedulingAction.PARALLEL.value}:
+        return None, f"Unsupported release scheduling action for bounded normalization: {selected_action}"
+
+    action_enum = ReleaseSchedulingAction(selected_action)
+    normalized["outcome"] = _release_scheduling_outcome_for_action(action_enum).value
+    normalized["fallback_plan"] = _release_scheduling_fallback_plan(action_enum)
+    normalized["validators_to_rerun"] = _release_scheduling_validators_to_rerun(action_enum)
+    normalized["staleness_inputs"] = current_staleness_inputs.model_dump(mode="json")
+    return normalized, None
+
+
+def _payload_looks_like_release_scheduling(payload: dict[str, object]) -> bool:
+    return "selected_action" in payload or "action" in payload
+
+
+def _release_scheduling_semantics_fingerprint(payload: dict[str, object]) -> dict[str, object]:
+    return {
+        "release_id": payload.get("release_id"),
+        "selected_action": payload.get("selected_action", payload.get("action")),
+        "outcome": payload.get("outcome"),
+        "overlap_findings": payload.get("overlap_findings"),
+    }
+
+
+def _write_release_scheduling_output_normalization_decision(
+    *,
+    release_id: str,
+    release_root: Path,
+    raw_paths: list[Path],
+    validation_errors: list[dict[str, str]],
+    selected_action: ModelOutputNormalizationAction,
+    outcome: ModelOutputNormalizationOutcome,
+    normalized_artifact_path: Path | None,
+    refusal_reason: str | None,
+) -> Path:
+    decision = ModelOutputNormalizationDecision.model_validate(
+        {
+            "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+            "decision_id": f"{release_id}__release_scheduling_output",
+            "release_id": release_id,
+            "decided_at": datetime.now(UTC),
+            "decided_by": "run_release_scheduling_loader",
+            "rationale": (
+                "Applied bounded normalization to release scheduling output and reran strict supervisor decision validators."
+                if outcome == ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY
+                else "Refused release scheduling output normalization because bounded policy could not guarantee safe semantics."
+            ),
+            "evidence_paths": [str(path.resolve()) for path in raw_paths if path.exists()],
+            "risk_level": DecisionRiskLevel.MODERATE,
+            "raw_artifact_paths": [str(path.resolve()) for path in raw_paths if path.exists()],
+            "validation_errors": [
+                ModelOutputValidationError.model_validate(item).model_dump(mode="json")
+                for item in validation_errors
+            ],
+            "selected_action": selected_action.value,
+            "outcome": outcome.value,
+            "fallback_plan": "Keep deterministic scheduling selection behavior and require bounded rerun for invalid supervisor artifacts.",
+            "validators_to_rerun": ["ReleaseSchedulingDecision", "staleness_inputs", "selected_action"],
+            "normalized_artifact_path": str(normalized_artifact_path.resolve()) if normalized_artifact_path else None,
+            "refusal_reason": refusal_reason,
+        }
+    )
+    return write_supervisor_decision_artifact(release_bundle_path=release_root, decision=decision)
 
 
 def _completed_release_task_ids(

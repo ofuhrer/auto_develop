@@ -29,6 +29,7 @@ class SupervisorDecisionType(StrEnum):
     REVIEW_FINDING_ADJUDICATION = "review_finding_adjudication"
     SOFT_BUDGET_ACCEPTANCE = "soft_budget_acceptance"
     CONTRACT_NORMALIZATION = "contract_normalization"
+    MODEL_OUTPUT_NORMALIZATION = "model_output_normalization"
     ENVIRONMENT_REPAIR = "environment_repair"
 
 
@@ -283,6 +284,76 @@ class ContractNormalizationDecision(SupervisorDecisionBase):
         return self
 
 
+class ModelOutputNormalizationAction(StrEnum):
+    APPLY_NORMALIZATION = "apply_normalization"
+    REFUSE = "refuse"
+
+
+class ModelOutputNormalizationOutcome(StrEnum):
+    NORMALIZED_AND_RETRY = "normalized_and_retry"
+    REFUSED_AND_STOP = "refused_and_stop"
+
+
+class ModelOutputValidationError(StrictModel):
+    field: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    error_type: str = Field(min_length=1)
+
+
+class ModelOutputNormalizationDecision(SupervisorDecisionBase):
+    decision_type: Literal[SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION] = (
+        SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION
+    )
+    risk_level: DecisionRiskLevel
+    raw_artifact_paths: list[Path] = Field(default_factory=list)
+    validation_errors: list[ModelOutputValidationError] = Field(default_factory=list)
+    selected_action: ModelOutputNormalizationAction
+    outcome: ModelOutputNormalizationOutcome
+    fallback_plan: str = Field(min_length=1)
+    validators_to_rerun: list[str] = Field(default_factory=list)
+    normalized_artifact_path: Path | None = None
+    refusal_reason: str | None = None
+
+    @field_validator("raw_artifact_paths")
+    @classmethod
+    def raw_artifact_paths_must_not_be_empty(cls, values: list[Path]) -> list[Path]:
+        if not values:
+            raise ValueError("raw artifact paths must not be empty")
+        return values
+
+    @field_validator("validators_to_rerun")
+    @classmethod
+    def validators_to_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("validators to rerun must not include empty values")
+        return values
+
+    @model_validator(mode="after")
+    def selected_action_must_match_outcome(self) -> "ModelOutputNormalizationDecision":
+        outcome_by_action = {
+            ModelOutputNormalizationAction.APPLY_NORMALIZATION: ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
+            ModelOutputNormalizationAction.REFUSE: ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+        }
+        expected_outcome = outcome_by_action[self.selected_action]
+        if self.outcome != expected_outcome:
+            raise ValueError("selected_action must match outcome")
+        if self.outcome == ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY:
+            if not self.validation_errors:
+                raise ValueError("normalized_and_retry requires validation_errors")
+            if not self.validators_to_rerun:
+                raise ValueError("normalized_and_retry requires validators_to_rerun")
+            if self.normalized_artifact_path is None:
+                raise ValueError("normalized_and_retry requires normalized_artifact_path")
+            if self.refusal_reason is not None:
+                raise ValueError("normalized_and_retry must not include refusal_reason")
+        if self.outcome == ModelOutputNormalizationOutcome.REFUSED_AND_STOP:
+            if self.refusal_reason is None or not self.refusal_reason.strip():
+                raise ValueError("refused_and_stop requires refusal_reason")
+            if self.normalized_artifact_path is not None:
+                raise ValueError("refused_and_stop must not include normalized_artifact_path")
+        return self
+
+
 class EnvironmentRepairOutcome(StrEnum):
     APPLY_AND_RETRY = "apply_and_retry"
     CAPTURE_ONLY = "capture_only"
@@ -311,6 +382,7 @@ SupervisorDecisionRecord = Annotated[
         | ReviewFindingAdjudicationDecision
         | SoftBudgetAcceptanceDecision
         | ContractNormalizationDecision
+        | ModelOutputNormalizationDecision
         | EnvironmentRepairDecision
     ),
     Field(discriminator="decision_type"),
@@ -378,13 +450,14 @@ def load_supervisor_decision_artifact(path: Path) -> SupervisorDecisionRecord:
 
 def _validate_evidence_paths(*, decision: SupervisorDecisionRecord, artifact_path: Path) -> None:
     artifact_dir = artifact_path.parent.resolve()
+    artifact_bundle_dir = artifact_dir.parent
     for evidence_path in decision.evidence_paths:
-        candidate = evidence_path if evidence_path.is_absolute() else artifact_dir / evidence_path
+        candidate = evidence_path if evidence_path.is_absolute() else artifact_bundle_dir / evidence_path
         if not evidence_path.is_absolute():
             candidate_resolved = candidate.resolve()
-            if not candidate_resolved.is_relative_to(artifact_dir):
+            if not candidate_resolved.is_relative_to(artifact_bundle_dir):
                 raise ValueError(
-                    f"supervisor decision evidence path escapes artifact directory: {evidence_path}"
+                    f"supervisor decision evidence path escapes artifact bundle: {evidence_path}"
                 )
         if not candidate.exists():
             raise ValueError(
