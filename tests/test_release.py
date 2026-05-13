@@ -739,6 +739,14 @@ def test_run_release_writes_final_integration_verification_evidence(tmp_path) ->
     assert Path(command_result["stderr_path"]).exists()
     assert Path(evidence["verification_log_path"]).exists()
     assert Path(evidence["worktree_log_path"]).exists()
+    summary_verification = summary["final_integration_verification"]
+    assert summary_verification["integration_branch"] == "feature/v0.1.0"
+    assert summary_verification["integration_commit"] == evidence["integration_commit"]
+    assert Path(summary_verification["verification_log_path"]).exists()
+    assert Path(summary_verification["worktree_log_path"]).exists()
+    assert len(summary_verification["command_results"]) == 1
+    assert Path(summary_verification["command_results"][0]["stdout_path"]).exists()
+    assert Path(summary_verification["command_results"][0]["stderr_path"]).exists()
 
 
 def test_run_release_runs_final_integration_verification_without_reviewer_role(tmp_path) -> None:

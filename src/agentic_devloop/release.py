@@ -493,6 +493,7 @@ def run_release(
     if not integration_commit.strip():
         raise ValueError(f"failed to resolve integration commit for branch {feature_branch}")
     final_integration_verification_path: Path | None = None
+    final_integration_verification_summary: dict[str, object] | None = None
     merged_into_integration = any(
         result.finalize is not None and bool(result.finalize.merged)
         for result in task_results
@@ -511,6 +512,27 @@ def run_release(
         final_integration_verification = json.loads(
             final_integration_verification_path.read_text(encoding="utf-8")
         )
+        final_integration_verification_summary = {
+            "release_id": final_integration_verification.get("release_id"),
+            "integration_branch": final_integration_verification.get("integration_branch"),
+            "integration_commit": final_integration_verification.get("integration_commit"),
+            "verification_log_path": final_integration_verification.get("verification_log_path"),
+            "worktree_log_path": final_integration_verification.get("worktree_log_path"),
+            "success": bool(final_integration_verification.get("success")),
+            "command_results": [
+                {
+                    "command": result.get("command"),
+                    "exit_code": result.get("exit_code"),
+                    "stdout_path": result.get("stdout_path"),
+                    "stderr_path": result.get("stderr_path"),
+                    "duration_seconds": result.get("duration_seconds"),
+                    "timed_out": bool(result.get("timed_out")),
+                }
+                for result in final_integration_verification.get("command_results", [])
+                if isinstance(result, dict)
+            ],
+            "verified_at": final_integration_verification.get("verified_at"),
+        }
         if not bool(final_integration_verification.get("success")):
             decision = Decision.FAILED
             release_metrics["decision"] = decision
@@ -564,6 +586,7 @@ def run_release(
         feature_review_proposals=feature_review_proposals,
         finalization_gate=finalization_gate,
         final_integration_verification_path=final_integration_verification_path,
+        final_integration_verification=final_integration_verification_summary,
     )
     review_path = _write_release_review(
         runs_dir=runs_dir,
@@ -2682,6 +2705,7 @@ def _write_release_summary(
     feature_review_proposals: list[FeatureReviewProposalRecord],
     finalization_gate: dict[str, object],
     final_integration_verification_path: Path | None,
+    final_integration_verification: dict[str, object] | None,
 ) -> Path:
     summary_dir = runs_dir / run_id
     summary_dir.mkdir(parents=True, exist_ok=True)
@@ -2707,6 +2731,7 @@ def _write_release_summary(
         "final_integration_verification_path": (
             str(final_integration_verification_path) if final_integration_verification_path else None
         ),
+        "final_integration_verification": final_integration_verification,
         "finalization": {
             "merged": finalization.merged,
             "pushed": finalization.pushed,
