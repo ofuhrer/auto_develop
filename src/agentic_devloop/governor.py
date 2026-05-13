@@ -764,21 +764,23 @@ def _governor_cycle_continuation(
 
 
 def _load_feature_review_continuation(release: object) -> GovernorFeatureReviewContinuation | None:
-    summary_path = getattr(release, "summary_path", None)
-    if summary_path is None:
-        return None
-    path = Path(summary_path)
-    if not path.exists():
-        return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-
-    review_path_raw = payload.get("feature_review_path")
-    recheck_path_raw = payload.get("feature_review_recheck_path")
-    review_path = Path(review_path_raw) if isinstance(review_path_raw, str) and review_path_raw.strip() else None
-    recheck_path = Path(recheck_path_raw) if isinstance(recheck_path_raw, str) and recheck_path_raw.strip() else None
+    payload = _load_release_summary_payload(release)
+    summary_path = _release_summary_path(release)
+    release_dir = summary_path.parent if summary_path is not None else None
+    review_path = _release_artifact_path(
+        release=release,
+        attr_name="feature_review_path",
+        fallback_path=(release_dir / "feature_review.json") if release_dir is not None else None,
+        summary_key="feature_review_path",
+        summary_payload=payload,
+    )
+    recheck_path = _release_artifact_path(
+        release=release,
+        attr_name="feature_review_recheck_path",
+        fallback_path=(release_dir / "feature_review_recheck.json") if release_dir is not None else None,
+        summary_key="feature_review_recheck_path",
+        summary_payload=payload,
+    )
 
     accepted_risks: list[str] = []
     if review_path is not None and review_path.exists():
@@ -795,30 +797,22 @@ def _load_feature_review_continuation(release: object) -> GovernorFeatureReviewC
         except Exception:  # noqa: BLE001
             recheck_payload = None
 
-    proposal_payload = payload.get("feature_review_proposals", [])
-    proposals: list[FeatureReviewFollowUpProposal] = []
-    if isinstance(proposal_payload, list):
-        for item in proposal_payload:
-            try:
-                proposal = FeatureReviewFollowUpProposal.model_validate(item)
-            except Exception:  # noqa: BLE001
-                continue
-            if proposal.classification == "backlog_follow_up":
-                proposals.append(proposal)
+    proposals = _load_backlog_follow_up_proposals(release=release, summary_payload=payload)
+    finalization_gate = _release_finalization_gate(release=release, summary_payload=payload)
 
     if (
         review_path is None
         and recheck_path is None
         and recheck_payload is None
         and not proposals
-        and not payload.get("finalization_gate")
+        and finalization_gate is None
     ):
         return None
 
     return GovernorFeatureReviewContinuation(
         feature_review_path=review_path,
         feature_review_recheck_path=recheck_path,
-        finalization_gate=payload.get("finalization_gate"),
+        finalization_gate=finalization_gate,
         recheck_stop_reason=recheck_payload.stop_reason if recheck_payload is not None else None,
         unresolved_finding_ids=recheck_payload.unresolved_finding_ids if recheck_payload is not None else [],
         accepted_finding_ids=recheck_payload.accepted_finding_ids if recheck_payload is not None else [],
@@ -826,3 +820,78 @@ def _load_feature_review_continuation(release: object) -> GovernorFeatureReviewC
         accepted_risks=accepted_risks,
         backlog_follow_up_proposals=proposals,
     )
+
+
+def _release_summary_path(release: object) -> Path | None:
+    summary_path = getattr(release, "summary_path", None)
+    if summary_path is None:
+        return None
+    path = Path(summary_path)
+    if not path.exists():
+        return None
+    return path
+
+
+def _load_release_summary_payload(release: object) -> dict[str, object]:
+    path = _release_summary_path(release)
+    if path is None:
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _release_artifact_path(
+    *,
+    release: object,
+    attr_name: str,
+    fallback_path: Path | None,
+    summary_key: str,
+    summary_payload: dict[str, object],
+) -> Path | None:
+    attr_raw = getattr(release, attr_name, None)
+    if isinstance(attr_raw, (str, Path)) and str(attr_raw).strip():
+        return Path(attr_raw)
+    if fallback_path is not None and fallback_path.exists():
+        return fallback_path
+    summary_raw = summary_payload.get(summary_key)
+    if isinstance(summary_raw, str) and summary_raw.strip():
+        return Path(summary_raw)
+    return None
+
+
+def _release_finalization_gate(*, release: object, summary_payload: dict[str, object]) -> dict[str, object] | None:
+    gate = getattr(release, "finalization_gate", None)
+    if isinstance(gate, dict):
+        return gate
+    fallback = summary_payload.get("finalization_gate")
+    return fallback if isinstance(fallback, dict) else None
+
+
+def _load_backlog_follow_up_proposals(
+    *,
+    release: object,
+    summary_payload: dict[str, object],
+) -> list[FeatureReviewFollowUpProposal]:
+    raw_proposals = getattr(release, "feature_review_proposals", None)
+    if not isinstance(raw_proposals, list):
+        raw_proposals = summary_payload.get("feature_review_proposals", [])
+    if not isinstance(raw_proposals, list):
+        return []
+
+    proposals: list[FeatureReviewFollowUpProposal] = []
+    for item in raw_proposals:
+        if hasattr(item, "model_dump"):
+            try:
+                item = item.model_dump(mode="json")
+            except Exception:  # noqa: BLE001
+                continue
+        try:
+            proposal = FeatureReviewFollowUpProposal.model_validate(item)
+        except Exception:  # noqa: BLE001
+            continue
+        if proposal.classification == "backlog_follow_up":
+            proposals.append(proposal)
+    return proposals
