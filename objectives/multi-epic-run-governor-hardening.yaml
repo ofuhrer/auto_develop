@@ -1,0 +1,28 @@
+release_id: multi-epic-run-governor-hardening
+title: Harden the initial repeated-epic governor loop
+objective: Make the existing run-governor repeated-cycle shell credible for unattended
+  N-epic operation by adding richer state refresh, no-actionable-work detection, final-review
+  continuation handoff, policy-driven finalization and cleanup hooks, and precise
+  stop taxonomy across cycles.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- run-governor records a clear per-cycle state refresh summary before selecting each
+  epic, including branch/source status, recent release summaries, review artifacts,
+  metrics, tuning reports, unresolved findings, and tracked repo-state memory when
+  available.
+- run-governor distinguishes completed-count, no-actionable-work, planning-only, non-accepted-release,
+  unresolved-review, exhausted-repair-budget, missing-credentials, unsafe-policy-expansion,
+  stale-artifact, and finalization-policy stop reasons in machine-readable governor
+  artifacts.
+- Accepted child releases flow into a policy-aware finalization/cleanup stage or an
+  explicit typed blocked-finalization state before the next epic starts.
+- Release-local feature-review outcomes become continuation inputs for bounded repair,
+  accepted-with-rationale, backlog follow-up, or hard stop rather than ambiguous terminal
+  failures.
+- Parent governor artifacts link child backlog plans, objectives, contract plans,
+  release summaries, feature reviews, supervisor decisions, finalization results,
+  cleanup results, and repo-state update proposals.
+- Focused tests cover multi-cycle continuation, no-actionable-work stop, non-accepted
+  child stop, accepted child finalization handoff, state refresh artifact creation,
+  and stop-taxonomy serialization.
