@@ -5,8 +5,8 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   subsystem failures, normalizes useful model output before strict validation, and
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
-current_focus: governor-cockpit-v2
-active_epic: governor-cockpit-v2
+current_focus: soft-scope-budget-policy
+active_epic: soft-scope-budget-policy
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -30,66 +30,59 @@ completed_epics:
 - planner-normalization-generalization
 - governor-state-refresh
 - planner-admission-repair
+- governor-cockpit-v2
 blocked_epics: []
 candidate_epics:
-- id: governor-cockpit-v2
-  title: Expand governor cockpit logging for full N-epic runs.
-  rationale: Operators need one governor.log stream that links state review, backlog
-    selection, child releases, feature reviews, repair loops, final verification,
-    finalization, cleanup, state refresh, and next-epic selection across repeated
-    cycles.
-  priority: 1
-  next_release_id: governor-cockpit-v2
 - id: soft-scope-budget-policy
   title: Replace crude file-count hard stops with typed scope-risk decisions.
   rationale: Many-file mechanical changes can be safe while small changes can be risky.
     File and diff budgets should emit scope-risk findings for supervisor adjudication
     instead of acting as universal hard stops.
-  priority: 2
+  priority: 1
   next_release_id: soft-scope-budget-policy
 - id: review-convergence-adjudicator
   title: Stop reviewer churn with supervisor-owned final adjudication.
   rationale: Review agents can keep discovering adjacent findings after bounded repair
     waves. After configured attempts, the supervisor should run final verification
     and accept, defer, or block remaining findings with typed rationale.
-  priority: 3
+  priority: 2
   next_release_id: review-convergence-adjudicator
 - id: shared-verification-runtime
   title: Make isolated worktrees run tests through a configured shared runtime.
   rationale: Sub-agents repeatedly could not run pytest because task worktrees do
     not contain .venv; verification should use project runtime policy rather than
     worktree-local assumptions.
-  priority: 4
+  priority: 3
   next_release_id: shared-verification-runtime
 - id: environment-repair-actions
   title: Repair safe verification-environment drift autonomously.
   rationale: Stale editable installs, command-not-found errors, missing PYTHONPATH,
     and dependency runtime drift should become bounded repair actions when project
     policy declares a safe repair.
-  priority: 5
+  priority: 4
   next_release_id: environment-repair-actions
 - id: executor-liveness-supervision
   title: Classify active, stalled, hung, and environment-blocked executors.
   rationale: Long-running workers need process/output/file heartbeat evidence so the
     supervisor can wait, inspect, restart, or stop without human guessing.
-  priority: 6
+  priority: 5
   next_release_id: executor-liveness-supervision
 - id: target-artifact-ownership
   title: Store target development memory in the target repo or a durable control repo.
   rationale: Deleting and recloning the auto_develop controller should not lose target
     repo-state, objectives, contracts, completed-epic history, or next-epic planning
     context.
-  priority: 7
+  priority: 6
   next_release_id: target-artifact-ownership
 - id: onboarding-bootstrap
   title: Bootstrap a freshly cloned target repository from one or two onboarding prompts.
   rationale: The target operator experience is minimal setup followed by a high-level
     epic-count loop.
-  priority: 8
+  priority: 7
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
 active_epics:
-- epic_id: governor-cockpit-v2
+- epic_id: soft-scope-budget-policy
   next_recommendations: []
   retry_count: 0
   repair_count: 0
@@ -99,9 +92,38 @@ active_epics:
   state_review_snapshot_references: []
   metrics_snapshot_references: []
   tuning_report_references: []
-  updated_at: '2026-05-13T21:55:04.877306Z'
+  updated_at: '2026-05-13T22:40:00Z'
 reviewed_epics: []
 completed_epic_records:
+- epic_id: governor-cockpit-v2
+  status_reason: completed via feature/governor-cockpit-v2 after manual final-review
+    repair; parent governor cockpit events, typed event context, linked child artifact
+    manifests, stop-context rendering, docs, and smoke/full-suite coverage are implemented
+  next_recommendations: []
+  retry_count: 0
+  repair_count: 4
+  outcome_references:
+  - release_id: governor-cockpit-v2
+    outcome: accepted
+    run_summary_path: runs/governor-cockpit-v2-cycle/20260513T215731Z_governor-cockpit-v2_release/release_summary.json
+    recorded_at: '2026-05-13T22:40:00Z'
+  finalization_outcome_references: []
+  unresolved_finding_references:
+  - finding_id: review-convergence-adjudicator
+    summary: Release hit feature-review convergence limit after two repair waves;
+      final required findings were repaired manually and verified with the full suite.
+    severity: moderate
+    source_path: runs/governor-cockpit-v2-cycle/20260513T215731Z_governor-cockpit-v2_release/feature_review_recheck.json
+  state_review_snapshot_references: []
+  metrics_snapshot_references:
+  - metrics_path: runs/governor-cockpit-v2-cycle/20260513T215731Z_governor-cockpit-v2_release/release_metrics.json
+    recorded_at: '2026-05-13T22:40:00Z'
+    release_id: governor-cockpit-v2
+  tuning_report_references:
+  - tuning_report_path: runs/governor-cockpit-v2-cycle/20260513T215731Z_governor-cockpit-v2_release/release_tuning.md
+    recorded_at: '2026-05-13T22:40:00Z'
+    release_id: governor-cockpit-v2
+  updated_at: '2026-05-13T22:40:00Z'
 - epic_id: planner-admission-repair
   status_reason: completed via feature/planner-admission-repair; generated-contract
     admission failures now produce structured supervisor inputs, typed admission-repair
@@ -266,11 +288,11 @@ notes:
 - 'Dogfood finding: one-shot high-capability agents produced coherent implementations
   faster than over-decomposed contract batches. Prioritize supervisor-owned execution
   strategy and normalization before expanding multi-epic autonomy.'
-- 'Current top gap: one tail-able governor cockpit stream must cover planning, release
-  execution, feature review, repair loops, finalization, state refresh, and next-epic
-  selection across the full N-epic run.'
-- 'Next sequencing: governor-cockpit-v2, soft-scope-budget-policy, review-convergence-adjudicator,
-  shared-verification-runtime, then environment repair.'
+- 'Current top gap: hard file-count and diff-size budgets still stop or distort useful
+  broad-but-mechanical changes; they should become supervisor-adjudicated scope-risk
+  findings unless hard safety boundaries are crossed.'
+- 'Next sequencing: soft-scope-budget-policy, review-convergence-adjudicator,
+  shared-verification-runtime, environment repair, then executor liveness.'
 - Hard file-count and diff-size budgets should be treated as scope-risk signals for
   supervisor adjudication unless they cross configured hard-policy boundaries; broad
   mechanical changes require stronger verification, not automatic rejection.
