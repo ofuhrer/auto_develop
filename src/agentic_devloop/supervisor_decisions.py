@@ -393,6 +393,8 @@ class ModelOutputNormalizationDecision(SupervisorDecisionBase):
     @field_validator("validators_to_rerun")
     @classmethod
     def validators_to_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if not values:
+            raise ValueError("validators to rerun must not be empty")
         if any(not value.strip() for value in values):
             raise ValueError("validators to rerun must not include empty values")
         return values
