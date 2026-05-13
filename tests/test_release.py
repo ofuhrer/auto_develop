@@ -22,6 +22,7 @@ from agentic_devloop.release import (
     _completed_release_task_ids,
     _ensure_no_existing_task_branches,
     _ensure_no_existing_worktrees,
+    _command_with_env_prefixes,
     _multiplexed_progress,
     _release_dependency_map,
     _should_preserve_task_branch,
@@ -1817,6 +1818,17 @@ def test_run_release_feature_review_ignores_unknown_rerun_commands_and_uses_defa
     assert result.decision == Decision.ACCEPTED
     assert rerun.call_args.kwargs["commands"] == ["test -d docs", "test -f README.md"]
     assert "event=feature_review_verification_commands_ignored" in result.log_path.read_text(encoding="utf-8")
+
+
+def test_command_with_env_prefixes_wraps_leading_assignments() -> None:
+    assert _command_with_env_prefixes(["PYTHONPATH=src", "/tmp/python", "-m", "pytest"]) == [
+        "/usr/bin/env",
+        "PYTHONPATH=src",
+        "/tmp/python",
+        "-m",
+        "pytest",
+    ]
+    assert _command_with_env_prefixes(["git", "diff", "--check"]) == ["git", "diff", "--check"]
 
 
 def test_run_release_feature_review_optional_findings_are_accepted_not_resolved(tmp_path: Path) -> None:

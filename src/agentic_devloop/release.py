@@ -1436,7 +1436,7 @@ def _run_integration_verification_rerun(
 
     ok = True
     for command in commands:
-        parts = shlex.split(command)
+        parts = _command_with_env_prefixes(shlex.split(command))
         log_lines.append(f"$ {command}")
         result = run_process(
             parts,
@@ -1464,6 +1464,25 @@ def _run_integration_verification_rerun(
     log_path.write_text("\n".join(line for line in log_lines if line) + "\n", encoding="utf-8")
     _report(progress, f"event=feature_review_verification_completed ok={str(ok).lower()} log={log_path}")
     return ok
+
+
+def _command_with_env_prefixes(parts: list[str]) -> list[str]:
+    env_parts: list[str] = []
+    command_parts = list(parts)
+    while command_parts and _looks_like_env_assignment(command_parts[0]):
+        env_parts.append(command_parts.pop(0))
+    if not env_parts:
+        return parts
+    if not command_parts:
+        return parts
+    return ["/usr/bin/env", *env_parts, *command_parts]
+
+
+def _looks_like_env_assignment(value: str) -> bool:
+    if "=" not in value:
+        return False
+    name, _value = value.split("=", 1)
+    return bool(name) and all(character == "_" or character.isalnum() for character in name)
 
 
 def _load_release_plan(config_repo_path: Path, repo_state_path: Path | None) -> ReleasePlan | None:
