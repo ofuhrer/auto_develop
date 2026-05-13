@@ -5,8 +5,8 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   subsystem failures, normalizes useful model output before strict validation, and
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
-current_focus: planner-normalization-generalization
-active_epic: planner-normalization-generalization
+current_focus: governor-state-refresh
+active_epic: null
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -27,57 +27,74 @@ completed_epics:
 - multi-epic-run-governor-hardening
 - integration-review-evidence-handoff
 - autonomous-finalization-and-cleanup
+- planner-normalization-generalization
 blocked_epics: []
 candidate_epics:
-- id: planner-normalization-generalization
-  title: Generalize planner-output normalization behind typed supervisor decisions.
-  rationale: Recent cycles required reactive parser fixes for useful but schema-drifting
-    planner output. Move bounded repairs for wrapper fields, enum aliases, dependency
-    placement, JSON tail defects, evidence defaults, and verification runtime assumptions
-    behind a reusable supervisor normalization action with validator reruns.
-  priority: 3
-  next_release_id: planner-normalization-generalization
+- id: governor-state-refresh
+  title: Apply roadmap and repo-state updates after each epic.
+  rationale: Stale tracked state after successful merges can cause the governor to
+    reselect completed work. The top-level loop must compact release outcomes, finalization
+    decisions, review findings, metrics, and next recommendations before selecting
+    the next epic.
+  priority: 1
+  next_release_id: governor-state-refresh
+- id: planner-admission-repair
+  title: Repair generated-contract admission failures autonomously.
+  rationale: Semantically useful planner output can still fail deterministic admission
+    on file budgets, schema shape, dependencies, or verification runtime assumptions.
+    The supervisor should split, narrow, classify broad-but-mechanical work, replan,
+    or stop with evidence before rerunning admission.
+  priority: 2
+  next_release_id: planner-admission-repair
 - id: governor-cockpit-v2
   title: Expand governor cockpit logging for full N-epic runs.
   rationale: Operators need one governor.log stream that links state review, backlog
     selection, child releases, feature reviews, repair loops, final verification,
     finalization, cleanup, state refresh, and next-epic selection across repeated
     cycles.
-  priority: 4
+  priority: 3
   next_release_id: governor-cockpit-v2
+- id: soft-scope-budget-policy
+  title: Replace crude file-count hard stops with typed scope-risk decisions.
+  rationale: Many-file mechanical changes can be safe while small changes can be
+    risky. File and diff budgets should emit scope-risk findings for supervisor
+    adjudication instead of acting as universal hard stops.
+  priority: 4
+  next_release_id: soft-scope-budget-policy
+- id: review-convergence-adjudicator
+  title: Stop reviewer churn with supervisor-owned final adjudication.
+  rationale: Review agents can keep discovering adjacent findings after bounded repair
+    waves. After configured attempts, the supervisor should run final verification
+    and accept, defer, or block remaining findings with typed rationale.
+  priority: 5
+  next_release_id: review-convergence-adjudicator
 - id: shared-verification-runtime
   title: Make isolated worktrees run tests through a configured shared runtime.
   rationale: Sub-agents repeatedly could not run pytest because task worktrees do
     not contain .venv; verification should use project runtime policy rather than
     worktree-local assumptions.
-  priority: 5
+  priority: 6
   next_release_id: shared-verification-runtime
 - id: environment-repair-actions
   title: Repair safe verification-environment drift autonomously.
   rationale: Stale editable installs, command-not-found errors, missing PYTHONPATH,
     and dependency runtime drift should become bounded repair actions when project
     policy declares a safe repair.
-  priority: 6
+  priority: 7
   next_release_id: environment-repair-actions
 - id: executor-liveness-supervision
   title: Classify active, stalled, hung, and environment-blocked executors.
   rationale: Long-running workers need process/output/file heartbeat evidence so the
     supervisor can wait, inspect, restart, or stop without human guessing.
-  priority: 7
+  priority: 8
   next_release_id: executor-liveness-supervision
 - id: target-artifact-ownership
   title: Store target development memory in the target repo or a durable control repo.
   rationale: Deleting and recloning the auto_develop controller should not lose target
     repo-state, objectives, contracts, completed-epic history, or next-epic planning
     context.
-  priority: 8
-  next_release_id: target-artifact-ownership
-- id: governor-state-refresh
-  title: Apply roadmap and repo-state updates after each epic.
-  rationale: Ensures new learnings from artifacts, validation, metrics, review findings,
-    and documentation feed the next planning cycle.
   priority: 9
-  next_release_id: governor-state-refresh
+  next_release_id: target-artifact-ownership
 - id: onboarding-bootstrap
   title: Bootstrap a freshly cloned target repository from one or two onboarding prompts.
   rationale: The target operator experience is minimal setup followed by a high-level
@@ -85,17 +102,29 @@ candidate_epics:
   priority: 10
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
-active_epics:
-- epic_id: planner-normalization-generalization
-  retry_count: 0
-  repair_count: 0
-  outcome_references: []
-  finalization_outcome_references: []
-  unresolved_finding_references: []
-  state_review_snapshot_references: []
-  updated_at: '2026-05-13T19:50:31.822771Z'
+active_epics: []
 reviewed_epics: []
 completed_epic_records:
+- epic_id: planner-normalization-generalization
+  status_reason: completed via feature/planner-normalization-generalization and merged
+    into main; reusable typed planner-output normalization decision path, validator
+    rerun evidence, bounded repair behavior, docs, and tests are implemented
+  retry_count: 0
+  repair_count: 5
+  outcome_references:
+  - release_id: planner-normalization-generalization
+    outcome: needs_revision_then_manually_verified
+    run_summary_path: runs/20260513T195414Z_planner-normalization-generalization_release/release_summary.json
+    recorded_at: '2026-05-13T20:35:00Z'
+  finalization_outcome_references: []
+  unresolved_finding_references:
+  - finding_id: review-convergence-churn
+    summary: Release required manual final verification and test-alignment after reviewer
+      convergence limit, showing the need for supervisor-owned final adjudication.
+    severity: moderate
+    source_path: runs/20260513T195414Z_planner-normalization-generalization_release/feature_review_recheck.json
+  state_review_snapshot_references: []
+  updated_at: '2026-05-13T20:35:00Z'
 - epic_id: autonomous-finalization-and-cleanup
   status_reason: completed via feature/autonomous-finalization-and-cleanup and merged
     into main; finalization policy models, finalization decision artifacts, PR handoff
@@ -168,11 +197,18 @@ notes:
 - 'Dogfood finding: one-shot high-capability agents produced coherent implementations
   faster than over-decomposed contract batches. Prioritize supervisor-owned execution
   strategy and normalization before expanding multi-epic autonomy.'
-- 'Current top gap: planner-output normalization is now the shipped typed decision path,
-  while reviewer and supervisor output still need the same reusable typed normalization
-  seam before strict admission stops.'
-- 'Next sequencing: planner-normalization-generalization, then governor-cockpit-v2
-  and shared verification runtime.'
+- 'Current top gap: state refresh after accepted or manually merged epics must become
+  part of the top-level loop so stale repo-state cannot cause repeated or wrong next-epic
+  selection.'
+- 'Next sequencing: governor-state-refresh, planner-admission-repair, governor-cockpit-v2,
+  soft-scope-budget-policy, review-convergence-adjudicator, then shared verification
+  runtime.'
+- Hard file-count and diff-size budgets should be treated as scope-risk signals for
+  supervisor adjudication unless they cross configured hard-policy boundaries; broad
+  mechanical changes require stronger verification, not automatic rejection.
+- Review agents should stop after bounded repair waves. Remaining findings should
+  be accepted, deferred, or blocked by a supervisor decision after final integration
+  verification instead of letting reviewer churn expand indefinitely.
 - External targets should retain compact durable `.auto_develop/repo_state`, objectives,
   contracts, and outcome history in the target or control repo; raw runs remain local
   or archived evidence.

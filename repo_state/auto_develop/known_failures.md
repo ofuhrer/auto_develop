@@ -89,6 +89,39 @@
   own typed evidence-backed reviewer/supervisor decisions rather than
   accumulating procedural heuristics in `release.py`.
 
+## Dogfood learning: planner-normalization-generalization cycle
+
+- The `planner-normalization-generalization` cycle shipped the reusable typed
+  planner-output normalization path, but exposed failures in the top-level loop
+  around the release runner.
+- Tracked repo-state was stale after a manual merge and still listed a completed
+  epic as active. This can cause the governor to reselect completed work. The
+  governor must own state refresh after both autonomous finalization and manual
+  merges.
+- Self-development dirties the target checkout with generated objectives,
+  contracts, and repo-state before execution. This is expected when the
+  controller repo is also the target repo, but the governor should treat the
+  planning package commit as a normal policy-owned step. External targets should
+  keep durable `.auto_develop/` artifacts in the target repo or a control repo,
+  while raw runs remain local/audit-only.
+- The human still had to correlate `governor.log`, `release.log`, raw logs,
+  release summaries, and review artifacts. The product target is one
+  tail-able, human-facing `governor.log` cockpit for the full N-epic run, with
+  child release logs summarized into it.
+- The generated plan contained one contract over the hard file-count budget.
+  Hard file-count limits are too crude for legitimate mechanical many-file
+  changes. File/diff budgets should produce typed scope-risk findings that a
+  supervisor classifies as mechanical, cohesive, risky, or scope creep before
+  deterministic validators rerun.
+- The semantic reviewer produced multiple repair waves and then new adjacent
+  findings at the convergence limit. After bounded repair attempts, the
+  reviewer should stop; a supervisor should run final integration verification
+  and accept, defer, or block remaining findings with typed rationale.
+- A real missed integration issue was still caught by the final full suite
+  after the release stopped. The target design should keep full integration
+  verification as a hard gate, but move final finding adjudication from human
+  judgment into a typed supervisor decision.
+
 ## Closed-loop run learning: run-backlog autonomous loop
 
 - A full step-by-step dogfood run successfully merged the
