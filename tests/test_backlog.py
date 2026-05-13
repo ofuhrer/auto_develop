@@ -10,8 +10,14 @@ import yaml
 
 from agentic_devloop.backlog import BacklogPlannerBackendResult, parse_backlog_planner_output, plan_backlog
 from agentic_devloop.backlog import run_backlog
+from agentic_devloop.execution_strategy import (
+    ExecutionStrategyAction,
+    ExecutionStrategyReason,
+    ExecutionStrategySelection,
+)
 from agentic_devloop.governor import GovernorLoop
 from agentic_devloop.models import ExecutorResult
+from agentic_devloop.state_store import StateStore
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -757,6 +763,104 @@ def test_governor_loop_runs_one_epic_and_builds_evidence_manifest(tmp_path) -> N
     assert result.evidence_manifest.generated_objective_path == result.objective_path
     assert result.evidence_manifest.contract_plan_path == contract_plan_path
     assert result.evidence_manifest.release_summary_path == release_summary_path
+
+
+def test_governor_loop_marks_planning_only_strategy_as_reviewed_not_blocked(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    runs_dir = tmp_path / "runs"
+    objectives_dir = tmp_path / "objectives"
+    roadmap_path = tmp_path / "ROADMAP.md"
+    roadmap_path.write_text("# Roadmap\n", encoding="utf-8")
+
+    plan_path = runs_dir / "backlog_plan.json"
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text("{}", encoding="utf-8")
+    plan = parse_backlog_planner_output(
+        {
+            "project_id": "demo",
+            "goal": "Goal.",
+            "roadmap_path": str(roadmap_path),
+            "planner": "deterministic",
+            "selected_epic_id": "epic-0001",
+            "warnings": [],
+            "epics": [
+                {
+                    "epic_id": "epic-0001",
+                    "title": "One epic",
+                    "objective": "Do the epic.",
+                    "rationale": "Because.",
+                    "priority": 1,
+                    "source_refs": ["roadmap:1"],
+                    "acceptance_criteria": ["It works."],
+                    "suggested_release_id": "demo-one-epic",
+                }
+            ],
+        },
+        project_id="demo",
+    )
+
+    def fake_plan_backlog(**_kwargs):
+        return SimpleNamespace(plan_path=plan_path, plan=plan, objective_path=None)
+
+    contract_plan_path = runs_dir / "contract_plan.json"
+    contract_plan_path.write_text("{}", encoding="utf-8")
+    selection = ExecutionStrategySelection(
+        release_id="demo-one-epic",
+        selected_action=ExecutionStrategyAction.ONE_SHOT,
+        reason=ExecutionStrategyReason.COHESIVE_ONE_SHOT,
+    )
+
+    def fake_run_objective(**_kwargs):
+        return SimpleNamespace(
+            release_id="demo-one-epic",
+            planning=SimpleNamespace(
+                plan_path=contract_plan_path,
+                execution_strategy_selection=selection,
+                execution_strategy_selection_path=runs_dir / "execution_strategy_selection.json",
+                supervisor_decision_path=runs_dir / "supervisor_decision.json",
+                one_shot_execution_input_path=runs_dir / "one_shot_execution_input.json",
+            ),
+            release=None,
+        )
+
+    state_store = StateStore(tmp_path / "repo_state" / "demo" / "backlog_state.yaml")
+    GovernorLoop(
+        plan_backlog=fake_plan_backlog,
+        run_objective=fake_run_objective,
+        state_store=state_store,
+    ).run_one_epic(
+        project_id="demo",
+        goal="Run one epic.",
+        roadmap_path=roadmap_path,
+        selected_epic_id=None,
+        config_dir=tmp_path / "configs",
+        contracts_dir=tmp_path / "contracts",
+        runs_dir=runs_dir,
+        objectives_dir=objectives_dir,
+        mode="deterministic",
+        planner_backend=None,
+        objective_planner_backend=FakeObjectivePlannerBackend(),
+        executor=FakeExecutor(),
+        verification_timeout_seconds=60,
+        allow_dirty=True,
+        commit_on_accept=False,
+        merge_on_accept=False,
+        push_on_accept=False,
+        release_finalize="none",
+        integration_branch=None,
+        stop_on_failure=True,
+        execution_mode="sequential",
+        debug_keep_artifacts=False,
+        progress=None,
+        now=datetime(2026, 5, 12, 12, 0, tzinfo=UTC),
+    )
+
+    state = state_store.load()
+    assert state.blocked_epics == []
+    assert state.active_epic == "epic-0001"
+    assert [record.epic_id for record in state.reviewed_epics] == ["epic-0001"]
+    assert state.reviewed_epics[0].status_reason == "execution-strategy:one_shot"
 
 
 def _write_yaml(path: Path, data: dict[str, object]) -> None:

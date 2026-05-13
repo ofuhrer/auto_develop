@@ -202,6 +202,12 @@ class GovernorLoop:
         if self._state_store is not None:
             if release is not None and release.decision == "accepted":
                 self._state_store.mark_completed_epic(epic.epic_id)
+            elif release is None and getattr(objective_run.planning, "execution_strategy_selection", None) is not None:
+                selection = objective_run.planning.execution_strategy_selection
+                self._state_store.mark_reviewed_epic(
+                    epic.epic_id,
+                    status_reason=f"execution-strategy:{selection.selected_action.value}",
+                )
             else:
                 self._state_store.mark_blocked_epic(epic.epic_id)
 
