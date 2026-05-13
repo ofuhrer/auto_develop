@@ -7,7 +7,7 @@ current_tasks:
   - repair-budget-decision-records
   - docs-and-state-update
 next_steps:
-  - Keep the implemented runtime-supervisor, planner-normalization, one-epic governor logging behavior, and semantic feature-review loop aligned with docs.
+  - Keep the implemented runtime-supervisor, planner-normalization, one-epic governor logging behavior, typed supervisor decision records, and semantic feature-review loop aligned with docs.
   - Treat governor-state-review, agentic-feature-review-loop, and persistent-governor-memory as completed for the current cycle.
   - Implement supervisor-decision-records so scheduling, repair-loop continuation, finding adjudication, soft-budget acceptance, contract normalization, and environment repair can move out of procedural release-runner heuristics.
   - Preserve the implemented repair/resume seam while the broader N-epic governor loop remains planned until state review and feature review exist.

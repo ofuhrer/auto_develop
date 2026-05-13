@@ -73,6 +73,7 @@ candidate_epics:
 last_reviewed: 2026-05-13
 notes:
   - The governor-loop-service-boundaries epic has now extracted GovernorLoop, StateStore, and RepairPolicy seams for one-epic autonomous execution, state persistence, and repair classification.
+  - Typed supervisor decision records are the immediate seam for auditable scheduling, repair continuation, finding adjudication, contract normalization, and environment repair.
   - The runtime-supervisor-repair-loop epic is merged; the next planned increment should reduce brittle deterministic stops and improve environment/liveness supervision before the N-epic loop.
   - The supervisor should turn structured release events into typed repair actions for stale editable installs, planner contract normalization, overlap risk decisions, soft-budget accept/split decisions, long-running-worker inspection, shared-runtime environment repair, release resume, and repo-state updates.
   - "Code-reduction target: retire deterministic heuristics for backlog scoring, contract wording repair, failure classification, budget-tuning prose, exact-overlap rejection, hard rejection for small budget overages, and elapsed-time-only liveness decisions once equivalent supervisor actions rerun hard validators."
@@ -88,6 +89,7 @@ notes:
   - External target projects should keep durable `.auto_develop/repo_state`, objectives, contracts, and compact outcome history in the target repo or a dedicated control repo; raw runs remain local or archived evidence.
   - Planner-generated contracts that are semantically useful but miss required evidence or use worktree-local .venv commands should become bounded normalization inputs, not manual repair points.
   - Planner-output normalization and one-epic governor log artifacts are now implemented, but the N-epic cockpit still needs to link state review, feature review, repair loops, and next-epic selection across repeated cycles.
+  - The typed supervisor-decision seam is implemented for bounded soft decisions; the broader N-epic loop that would consume those decisions across repeated cycles remains planned.
   - Multi-epic execution needs one parent governor.log/governor.raw.log/events.jsonl stream that links child release logs and exposes selected epic, contract normalization, release execution, independent feature review, repair, finalization, state refresh, and next-epic selection.
   - The current release_review.md is not a PR-style semantic review; an independent reviewer agent should inspect the integrated feature branch and launch repair agents for findings before merge or PR.
   - Before selecting the next epic, the governor should refresh its state view from source/branch status, recent run artifacts, release reviews, metrics, tuning reports, unresolved findings, docs drift, and tracked repo-state memory.
