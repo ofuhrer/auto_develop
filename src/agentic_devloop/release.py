@@ -684,6 +684,19 @@ def _feature_review_source_contracts(
     return [by_task_id[task_id] for task_id in sorted(by_task_id)]
 
 
+def _release_objective_from_contracts(source_contracts: list[TaskContract]) -> str | None:
+    objectives = [
+        task.objective.strip()
+        for task in source_contracts
+        if isinstance(task.objective, str) and task.objective.strip()
+    ]
+    if not objectives:
+        return None
+    if len(set(objectives)) == 1:
+        return objectives[0]
+    return " / ".join(dict.fromkeys(objectives))
+
+
 def collect_release_planning_state_review_snapshot(
     *,
     config_repo_path: Path,
@@ -1376,6 +1389,7 @@ def _run_feature_review_and_repair_loop(
                 base_branch=branches_base,
                 integration_branch=integration_branch,
                 runs_dir=runs_dir,
+                release_objective=_release_objective_from_contracts(source_contracts),
             )
             prompt = render_feature_review_prompt(
                 context=context,
