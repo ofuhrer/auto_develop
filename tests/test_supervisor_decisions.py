@@ -160,6 +160,19 @@ def test_parse_environment_repair_decision() -> None:
     assert decision.outcome == EnvironmentRepairOutcome.APPLY_AND_RETRY
 
 
+def test_parse_supervisor_decision_rejects_unsupported_type() -> None:
+    payload = {
+        **BASE,
+        "decision_type": "not_a_real_decision_type",
+        "risk_level": DecisionRiskLevel.LOW,
+        "overlap_findings": [],
+        "outcome": SchedulingOutcome.PROCEED_PARALLEL,
+    }
+
+    with pytest.raises(ValidationError):
+        parse_supervisor_decision(payload)
+
+
 def test_invalid_schema_version_is_rejected() -> None:
     payload = {
         **BASE,

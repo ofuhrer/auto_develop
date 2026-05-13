@@ -72,6 +72,7 @@ candidate_epics:
     next_release_id: onboarding-bootstrap
 last_reviewed: 2026-05-13
 notes:
+  - supervisor-decision-records is now implemented with typed, versioned decision models, strict JSON artifact IO under supervisor_decisions directories, and a migrated task-level soft_budget_acceptance path that emits, reloads, and consumes the typed artifact without weakening hard gates.
   - The governor-loop-service-boundaries epic has now extracted GovernorLoop, StateStore, and RepairPolicy seams for one-epic autonomous execution, state persistence, and repair classification.
   - Typed supervisor decision records are the immediate seam for auditable scheduling, repair continuation, finding adjudication, contract normalization, and environment repair.
   - The runtime-supervisor-repair-loop epic is merged; the next planned increment should reduce brittle deterministic stops and improve environment/liveness supervision before the N-epic loop.

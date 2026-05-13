@@ -539,6 +539,8 @@ An agent override for a soft finding must persist:
 
 Current implementation persists task-level soft decisions in `runs/<run-id>/<task-id>/evidence/soft_gate_decision.json` and release-level budget exceptions in `runs/<run-id>/soft_gate_decisions.json`. Each record includes `finding_id`, `severity`, `risk`, `recommended_actions`, `evidence_paths`, `decision`, `rationale`, `fallback_plan`, and `validators_rerun`. Small budget overages that pass hard validation become soft findings instead of automatic failures, and normal source-file overlap is treated as a soft scheduling risk unless a configured unsafe overlap path, generated artifact, lockfile, migration, or out-of-scope file makes it a hard stop.
 
+Task-level soft-budget acceptance also emits a typed supervisor decision artifact under `runs/<run-id>/<task-id>/evidence/supervisor_decisions/soft_budget_acceptance__<id>.json`. That record is loaded strictly, and relative evidence paths may not escape the artifact directory. The supervisor decision layer exists to preserve auditable soft judgment without weakening deterministic hard gates.
+
 This keeps the system autonomous without letting model judgment bypass hard safety constraints.
 
 ### Finalization Locking

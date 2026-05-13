@@ -260,9 +260,15 @@ def load_supervisor_decision_artifact(path: Path) -> SupervisorDecisionRecord:
 
 
 def _validate_evidence_paths(*, decision: SupervisorDecisionRecord, artifact_path: Path) -> None:
-    artifact_dir = artifact_path.parent
+    artifact_dir = artifact_path.parent.resolve()
     for evidence_path in decision.evidence_paths:
         candidate = evidence_path if evidence_path.is_absolute() else artifact_dir / evidence_path
+        if not evidence_path.is_absolute():
+            candidate_resolved = candidate.resolve()
+            if not candidate_resolved.is_relative_to(artifact_dir):
+                raise ValueError(
+                    f"supervisor decision evidence path escapes artifact directory: {evidence_path}"
+                )
         if not candidate.exists():
             raise ValueError(
                 f"missing evidence path in supervisor decision artifact {artifact_path}: {evidence_path}"

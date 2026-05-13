@@ -1,20 +1,16 @@
-# Supervisor Decision Schemas
+# Supervisor Decision Records
 
-This document defines the typed, versioned supervisor decision records introduced for `supervisor-decision-records`.
+This document defines the typed supervisor decision records introduced by the
+`supervisor-decision-records` epic.
 
-Status: schema models and deterministic artifact IO are implemented. The runtime currently emits and reloads
-`soft_budget_acceptance` decision artifacts for task-level soft-budget exceptions. Other decision types are
-schema-ready but not yet wired into runtime control flow.
+The purpose of the record layer is narrow:
 
-## Versioning
+- expose judgment-heavy runtime choices as typed, auditable JSON artifacts;
+- keep deterministic hard gates authoritative;
+- allow soft decisions to be replayed, inspected, and tested without broad
+  procedural heuristics in the release runner.
 
-All decision records currently use:
-
-- `schema_version: "1.0"`
-
-The models reject unknown schema versions to keep downstream handling explicit and auditable.
-
-## Common Record Fields
+## Record Shape
 
 Every supervisor decision record includes:
 
@@ -25,48 +21,78 @@ Every supervisor decision record includes:
 - `decided_by`
 - `rationale`
 - `evidence_paths`
+- a discriminated `decision_type`
 
-These fields capture identity, timing, provenance, and evidence linkage for all decision classes.
+The current version is `1.0`.
 
-## Decision Types (v1)
+Implemented decision types:
 
-`decision_type` is the discriminator for the union schema.
+- `release_scheduling`
+- `repair_loop_continuation`
+- `review_finding_adjudication`
+- `soft_budget_acceptance`
+- `contract_normalization`
+- `environment_repair`
 
-1. `release_scheduling`
-- Purpose: choose scheduling posture after overlap/risk analysis.
-- Key fields: `risk_level`, `overlap_findings`, `outcome`.
-- Outcomes: parallel, sequential, stacked branches, replan, stop.
+Each decision type adds a small typed payload that matches the judgment being
+recorded. The discriminator allows strict parsing without guessing which model
+should be used.
 
-2. `repair_loop_continuation`
-- Purpose: choose whether repair/retry continues.
-- Key fields: `risk_level`, `attempt`, `max_attempts`, `outcome`.
-- Hard guard: `attempt` must be `<= max_attempts`.
+## Artifact Layout
 
-3. `review_finding_adjudication`
-- Purpose: adjudicate reviewer findings.
-- Key fields: `finding_id`, `severity`, `outcome`, `repair_task_ids`.
-- Outcomes: required repair, accepted risk, false positive, out-of-scope follow-up.
+Supervisor decision artifacts are persisted as JSON files under:
 
-4. `soft_budget_acceptance`
-- Purpose: decide handling for soft budget pressure.
-- Key fields: `budget_name`, `configured_limit`, `actual`, `outcome`.
-- Hard guard: `actual` must be `>= configured_limit`.
+```text
+runs/<run-id>/<task-id>/evidence/supervisor_decisions/
+runs/<run-id>/supervisor_decisions/
+```
 
-5. `contract_normalization`
-- Purpose: record normalization vs refusal decisions on generated contracts.
-- Key fields: `outcome`, `changed_fields`, `refusal_reasons`.
-- Hard guards:
-  - `normalize_and_retry` requires non-empty `changed_fields`.
-  - `refuse_and_stop` requires non-empty `refusal_reasons`.
+The filename format is:
 
-6. `environment_repair`
-- Purpose: record decisions for environment repair/capture actions.
-- Key fields: `outcome`, `capture_commands`.
-- Outcomes: apply-and-retry, capture-only, escalate, stop.
+```text
+<decision_type>__<decision_id>.json
+```
 
-## Design Constraints
+`decision_id` is sanitized to a stable filename token and rejected when it
+contains path separators or `..`. That keeps the artifact path inside the
+decision directory and prevents filename-based traversal.
 
-- Strict parsing is enabled (`extra="forbid"`) via shared `StrictModel` conventions.
-- Decision artifacts are written below `supervisor_decisions/` using sanitized filename tokens; path-like decision IDs are rejected.
-- Loading artifacts validates both schema shape and referenced evidence paths.
-- Deterministic hard validators remain authoritative; supervisor decisions record and bound soft judgment but do not override hard gates.
+## Loading Rules
+
+Loading is strict:
+
+- malformed JSON is rejected;
+- unsupported `decision_type` values are rejected;
+- schema validation failures are rejected;
+- referenced evidence paths must exist;
+- relative evidence paths may not escape the artifact directory.
+
+Evidence validation is deliberate. A supervisor record is only useful if the
+referenced files are still inspectable.
+
+## Relationship To Hard Gates
+
+Supervisor decisions do not bypass deterministic validators.
+
+The kernel still owns hard rejection for:
+
+- forbidden paths;
+- generated artifacts that are out of scope;
+- missing required evidence;
+- unsafe finalization;
+- destructive operations;
+- verification failures that were not repaired.
+
+The typed record only captures the supervisor's decision after hard gates have
+already been evaluated. The record can choose among soft outcomes such as
+accepting a small budget overage or retrying a bounded repair loop, but it does
+not override the deterministic admission checks.
+
+## Implemented Scope
+
+The `soft_budget_acceptance` path is currently the first runtime consumer of
+this record layer. It writes a typed supervisor decision, reloads it strictly,
+and consumes the parsed record while leaving hard gates unchanged.
+
+The broader multi-epic governor that would repeatedly consume these records is
+still planned.
