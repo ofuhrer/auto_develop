@@ -1064,17 +1064,23 @@ def main(argv: list[str] | None = None) -> int:
             cycles_for_output.append(cycle_for_output)
 
             if index < len(result.cycles):
+                next_cycle_index = index + 1
                 next_cycle = result.cycles[index]
+                next_cycle_release_id = (
+                    next_cycle.release.release_id if next_cycle.release is not None else next_cycle.release_id
+                )
                 next_manifest = getattr(next_cycle, "evidence_manifest", None)
-                next_backlog_plan_path = getattr(next_manifest, "backlog_plan_path", None) if next_manifest is not None else None
+                next_backlog_plan_path = (
+                    getattr(next_manifest, "backlog_plan_path", None) if next_manifest is not None else None
+                )
                 next_artifacts = _existing_paths([next_backlog_plan_path or getattr(next_cycle, "plan_path", None)])
                 write_cycle_event(
-                    cycle_index=index,
+                    cycle_index=next_cycle_index,
                     event_type=GovernorEventType.NEXT_EPIC_SELECTED,
-                    message=f"cycle={index} next_selected_epic_id={next_cycle.selected_epic_id}",
+                    message=f"cycle={next_cycle_index} selected_epic_id={next_cycle.selected_epic_id}",
                     artifacts=next_artifacts,
                     epic_id=next_cycle.selected_epic_id,
-                    release_id=cycle_release_id,
+                    release_id=next_cycle_release_id,
                 )
         stop_context = _governor_stop_context(result)
         governor_writer.write(
