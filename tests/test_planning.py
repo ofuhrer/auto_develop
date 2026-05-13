@@ -22,6 +22,10 @@ from agentic_devloop.planning import (
     write_generated_contracts,
 )
 from agentic_devloop.runtime_supervisor import RuntimeSupervisorApplierStopKind
+from agentic_devloop.supervisor_decisions import (
+    ExecutionStrategyDecision,
+    load_supervisor_decision_artifact,
+)
 from agentic_devloop.yaml_io import load_yaml_model
 
 
@@ -297,6 +301,72 @@ def test_one_shot_strategy_skips_planner_backend_and_contract_writes(tmp_path) -
     assert result.supervisor_decision_path.exists()
     assert result.one_shot_execution_input_path is not None
     assert result.one_shot_execution_input_path.exists()
+
+
+def test_execution_strategy_decision_uses_absolute_evidence_paths(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# demo\n", encoding="utf-8")
+    objective_path = tmp_path / "objective.yaml"
+    _write_yaml(
+        objective_path,
+        {
+            "release_id": "v1.0.2",
+            "title": "Cohesive objective",
+            "objective": "Implement a cohesive change.",
+            "acceptance_criteria": ["One-shot input exists."],
+        },
+    )
+    snapshot_path = tmp_path / "runs" / "state_review_snapshot.json"
+    snapshot_path.parent.mkdir()
+    snapshot_path.write_text("{}\n", encoding="utf-8")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "worker", "max_walltime_minutes": 5},
+            "model_roles": {
+                "planner": {"type": "codex_cli", "model": "gpt-5.5", "max_walltime_minutes": 5}
+            },
+            "model_routing": {"default_role": "planner"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 1,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    result = plan_release_contracts(
+        objective_path=objective_path,
+        contracts_dir=tmp_path / "contracts",
+        runs_dir=tmp_path / "runs",
+        mode="strong-model",
+        project_id="demo",
+        config_dir=config_dir,
+        planner_backend=None,
+        state_review_snapshot_path=snapshot_path,
+        execution_strategy_inputs={
+            "release_id": "v1.0.2",
+            "task_ids": ["v1-0-2-0001"],
+            "cohesive_scope": True,
+        },
+    )
+
+    assert result.supervisor_decision_path is not None
+    decision = load_supervisor_decision_artifact(result.supervisor_decision_path)
+    assert isinstance(decision, ExecutionStrategyDecision)
+    assert decision.evidence_paths == [
+        snapshot_path.resolve(),
+        result.execution_strategy_selection_path.resolve(),
+    ]
 
 
 def test_decomposition_strategy_still_runs_planner_backend_and_writes_contracts(tmp_path) -> None:

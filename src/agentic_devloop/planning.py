@@ -353,11 +353,11 @@ def _build_execution_strategy_decision(
     outcome = outcome_mapping[selected_action]
     evidence_paths: list[Path] = []
     if state_review_snapshot_path is not None and state_review_snapshot_path.exists():
-        evidence_paths.append(state_review_snapshot_path)
+        evidence_paths.append(state_review_snapshot_path.resolve())
     if plan_dir.exists():
         selection_path = plan_dir / "execution_strategy_selection.json"
         if selection_path.exists():
-            evidence_paths.append(selection_path.relative_to(plan_dir))
+            evidence_paths.append(selection_path.resolve())
 
     risk_level = DecisionRiskLevel.MODERATE
     if selection.selected_action == SelectorExecutionStrategyAction.REPLAN:
