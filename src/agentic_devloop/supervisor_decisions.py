@@ -42,6 +42,7 @@ class SupervisorDecisionType(StrEnum):
     MODEL_OUTPUT_NORMALIZATION = "model_output_normalization"
     ENVIRONMENT_REPAIR = "environment_repair"
     FEATURE_REVIEW_FINDING_CLASSIFICATION = "feature_review_finding_classification"
+    FINAL_REVIEW_FINDING_ADJUDICATION = "final_review_finding_adjudication"
     RELEASE_FINALIZATION = "release_finalization"
     SCOPE_RISK_BUDGET_POLICY = "scope_risk_budget_policy"
 
@@ -317,6 +318,85 @@ class FeatureReviewFindingClassificationDecision(SupervisorDecisionBase):
             and not self.evidence_paths
         ):
             raise ValueError("non-blocking accepted classification requires evidence_paths")
+        return self
+
+
+class FinalReviewFindingAdjudicationClassification(StrEnum):
+    BLOCKER = "blocker"
+    ACCEPTED_RISK = "accepted_risk"
+    BACKLOG_FOLLOW_UP = "backlog_follow_up"
+    DUPLICATE = "duplicate"
+    FALSE_POSITIVE = "false_positive"
+    SCOPE_EXPANSION = "scope_expansion"
+
+
+class FinalReviewFindingAdjudicationAction(StrEnum):
+    REPAIR = "repair"
+    ACCEPT = "accept"
+    DEFER = "defer"
+
+
+class FinalReviewFindingAdjudicationOutcome(StrEnum):
+    CONTINUE = "continue"
+    STOP_FINDING = "stop"
+    STOP = STOP_FINDING
+
+
+class FinalReviewFindingAdjudicationDecision(SupervisorDecisionBase):
+    decision_type: Literal[SupervisorDecisionType.FINAL_REVIEW_FINDING_ADJUDICATION] = (
+        SupervisorDecisionType.FINAL_REVIEW_FINDING_ADJUDICATION
+    )
+    finding_id: str = Field(min_length=1)
+    classification: FinalReviewFindingAdjudicationClassification
+    selected_action: FinalReviewFindingAdjudicationAction
+    outcome: FinalReviewFindingAdjudicationOutcome
+    fallback_plan: str = Field(min_length=1)
+    validators_to_rerun: list[str]
+
+    @field_validator("evidence_paths")
+    @classmethod
+    def evidence_paths_must_not_be_empty(cls, values: list[Path]) -> list[Path]:
+        if not values:
+            raise ValueError("evidence_paths must not be empty")
+        return values
+
+    @field_validator("validators_to_rerun")
+    @classmethod
+    def validators_to_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if not values or any(not value.strip() for value in values):
+            raise ValueError("validators to rerun must not be empty")
+        return values
+
+    @model_validator(mode="after")
+    def classification_rules_must_be_satisfied(self) -> "FinalReviewFindingAdjudicationDecision":
+        if self.selected_action in {FinalReviewFindingAdjudicationAction.REPAIR, FinalReviewFindingAdjudicationAction.ACCEPT}:
+            if self.outcome != FinalReviewFindingAdjudicationOutcome.CONTINUE:
+                raise ValueError("repair or accept requires continue outcome")
+        if (
+            self.selected_action == FinalReviewFindingAdjudicationAction.DEFER
+            and self.outcome != FinalReviewFindingAdjudicationOutcome.STOP_FINDING
+        ):
+            raise ValueError("defer requires stop outcome")
+        if (
+            self.classification == FinalReviewFindingAdjudicationClassification.BLOCKER
+            and self.selected_action == FinalReviewFindingAdjudicationAction.ACCEPT
+        ):
+            raise ValueError("blocker classification must not use accept action")
+        if (
+            self.classification == FinalReviewFindingAdjudicationClassification.DUPLICATE
+            and self.selected_action == FinalReviewFindingAdjudicationAction.ACCEPT
+        ):
+            raise ValueError("duplicate classification must not use accept action")
+        if (
+            self.classification == FinalReviewFindingAdjudicationClassification.SCOPE_EXPANSION
+            and self.selected_action == FinalReviewFindingAdjudicationAction.ACCEPT
+        ):
+            raise ValueError("scope_expansion classification must not use accept action")
+        if (
+            self.classification in {FinalReviewFindingAdjudicationClassification.ACCEPTED_RISK}
+            and self.selected_action != FinalReviewFindingAdjudicationAction.ACCEPT
+        ):
+            raise ValueError("accepted_risk classification requires accept action")
         return self
 
 
@@ -662,6 +742,7 @@ SupervisorDecisionRecord = Annotated[
         | ModelOutputNormalizationDecision
         | EnvironmentRepairDecision
         | FeatureReviewFindingClassificationDecision
+        | FinalReviewFindingAdjudicationDecision
         | ReleaseFinalizationDecision
         | ScopeRiskBudgetPolicyDecision
     ),
