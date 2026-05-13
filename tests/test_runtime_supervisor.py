@@ -366,7 +366,7 @@ def test_model_output_normalization_decision_produces_typed_proposal() -> None:
     assert result.applied is True
     assert result.stop_evidence is None
     assert result.proposal is not None
-    assert result.proposal.action_kind == RepairActionKind.PLANNER_CONTRACT_NORMALIZATION
+    assert result.proposal.action_kind == RepairActionKind.MODEL_OUTPUT_NORMALIZATION
     assert result.proposal.decision.outcome.value == "normalized_and_retry"
 
 

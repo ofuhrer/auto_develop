@@ -113,6 +113,7 @@ class RuntimeSupervisorApplierStopKind(StrEnum):
 class RepairActionKind(StrEnum):
     ENVIRONMENT_REPAIR = "environment_repair"
     PLANNER_CONTRACT_NORMALIZATION = "planner_contract_normalization"
+    MODEL_OUTPUT_NORMALIZATION = "model_output_normalization"
     TASK_SPLIT_OR_SCOPE_NARROWING = "task_split_or_scope_narrowing"
     RELEASE_RESUME = "release_resume"
     LONG_RUNNING_WORKER_INSPECTION = "long_running_worker_inspection"
@@ -263,7 +264,7 @@ class RepoStateUpdateProposal:
 class ModelOutputNormalizationDecisionProposal:
     decision: ModelOutputNormalizationDecision
     source_evidence_paths: tuple[Path, ...]
-    action_kind: RepairActionKind = RepairActionKind.PLANNER_CONTRACT_NORMALIZATION
+    action_kind: RepairActionKind = RepairActionKind.MODEL_OUTPUT_NORMALIZATION
 
 
 RepairProposal = (
@@ -605,7 +606,7 @@ class RuntimeSupervisor:
             action_payload=action_payload,
         )
         return RuntimeSupervisorApplierResult(
-            action_kind=RepairActionKind.PLANNER_CONTRACT_NORMALIZATION,
+            action_kind=RepairActionKind.MODEL_OUTPUT_NORMALIZATION,
             applied=True,
             proposal=ModelOutputNormalizationDecisionProposal(
                 decision=decision,
