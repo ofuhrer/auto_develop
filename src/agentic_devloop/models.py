@@ -572,6 +572,8 @@ class FeatureReviewFinding(StrictModel):
                 normalized.append(item)
                 continue
             normalized.append(value)
+        if not normalized:
+            raise ValueError("feature review evidence_paths must contain at least one non-empty path when provided")
         return normalized
 
     @model_validator(mode="after")
