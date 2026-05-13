@@ -218,6 +218,7 @@ Current implementation status:
 - The soft-gates dogfood run showed a planner-output normalization gap: the generated contracts were semantically usable but missed required `git diff`/changed-files evidence and used worktree-local `.venv` verification commands. Fully autonomous execution should repair those bounded defects, rerun deterministic contract admission, and continue without manual materialization.
 - The same run showed an observability gap for multi-epic operation: per-release `release.log` files are useful child artifacts, but operators need one top-level `governor.log` to watch backlog planning, objective/contract generation, contract normalization, release execution, repair, finalization, state refresh, and next-epic selection across the whole run.
 - The governor-log-and-contract-normalization run showed the next review gap: after worker integration, an independent semantic feature review should inspect the complete `main..feature` diff, docs, tests, evidence, and architecture constraints, then produce reviewer findings that repair agents address before merge or PR.
+- That feature-review/repair loop is still planned; the shipped artifact is the deterministic `release_review.md` evidence summary, not a PR-style semantic review.
 
 Prioritized Phase 4 epics:
 

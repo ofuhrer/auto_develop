@@ -18,3 +18,4 @@ next_steps:
   - Add bounded planner-output normalization before generated-contract admission stops for repairable issues such as missing required evidence or worktree-local verification commands.
   - Expand the top-level governor log stream so one file can be watched while state review, backlog planning, contract generation, release execution, feature review, repair, state refresh, and next-epic selection proceed.
   - Document shipped behavior while keeping unimplemented state-review, feature-review, and multi-epic loops explicitly planned.
+  - Keep `release_review.md` documented as a deterministic evidence summary until the planned feature-review/repair loop exists.
