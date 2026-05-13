@@ -119,6 +119,12 @@ decision, which can serialize the release when the supervisor selects
 unsupported or stale scheduling decisions fail deterministically instead of
 falling back silently.
 
+The implemented soft scope-risk policy uses the same record layer for
+changed-file and diff-size overages once the deterministic hard gates have
+passed. Those findings are supervisor-adjudicated rather than automatic stops,
+and they still carry evidence paths, rationale, fallback plan, and validator
+rerun metadata.
+
 ## Relationship To Hard Gates
 
 Supervisor decisions do not bypass deterministic validators.
@@ -127,6 +133,8 @@ The kernel still owns hard rejection for:
 
 - forbidden paths;
 - generated artifacts that are out of scope;
+- lockfiles, migrations, and other configured exclusive paths;
+- files outside task scope;
 - missing required evidence;
 - unsafe finalization;
 - destructive operations;

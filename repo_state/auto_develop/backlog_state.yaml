@@ -288,12 +288,13 @@ notes:
 - 'Dogfood finding: one-shot high-capability agents produced coherent implementations
   faster than over-decomposed contract batches. Prioritize supervisor-owned execution
   strategy and normalization before expanding multi-epic autonomy.'
-- 'Current top gap: hard file-count and diff-size budgets still stop or distort useful
-  broad-but-mechanical changes; they should become supervisor-adjudicated scope-risk
-  findings unless hard safety boundaries are crossed.'
+- 'Current top gap has been addressed in the implementation path: hard file-count
+  and diff-size budgets now produce supervisor-adjudicated scope-risk findings
+  after hard gates pass, so broad-but-mechanical changes are no longer stopped
+  automatically unless they cross a hard safety boundary.'
 - 'Next sequencing: soft-scope-budget-policy, review-convergence-adjudicator, shared-verification-runtime,
   environment repair, then executor liveness.'
-- Hard file-count and diff-size budgets should be treated as scope-risk signals for
+- Hard file-count and diff-size budgets are implemented as scope-risk signals for
   supervisor adjudication unless they cross configured hard-policy boundaries; broad
   mechanical changes require stronger verification, not automatic rejection.
 - Review agents should stop after bounded repair waves. Remaining findings should

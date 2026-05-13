@@ -16,7 +16,7 @@ Current flow:
 10. Accepted work is finalized according to configured autonomous finalization policy.
 11. A runtime supervisor diagnoses recoverable failures from structured events, evidence, raw logs, budgets, tuning signals, and backlog-state references.
 12. The supervisor applies bounded repair actions such as environment repair, planner output normalization, task splitting or scope narrowing, release resume, long-running worker inspection, model escalation, and repo-state update proposals. Reviewer and supervisor output normalization remain planned extensions on the same seam.
-13. A reviewer/supervisor agent should decide soft findings such as modest budget overage, normal source-file overlap, retry strategy, environment repair, model escalation, and task splitting; deterministic code remains authoritative for hard invariants.
+13. A reviewer/supervisor agent should decide soft findings such as modest budget overage, normal source-file overlap, changed-file overage, diff-size overage, retry strategy, environment repair, model escalation, and task splitting; deterministic code remains authoritative for hard invariants.
 14. Release planning can persist a deterministic `state_review_snapshot.json` artifact and pass its path via `state_review_snapshot_path` in contract-plan payloads.
 
 Target additions:
@@ -59,10 +59,11 @@ Code-reduction direction:
    budget tuning, long-running-worker interpretation, and repo-state updates.
 3. Retain old deterministic heuristics only as test scaffolding or fallback
    behavior once typed supervisor actions exist.
-4. Reclassify exact source overlap and small budget overages as soft findings
-   for agent judgment; keep hard stops for forbidden paths, generated artifacts,
-   configured exclusive paths, missing evidence, unsafe finalization, and
-   unrepaired verification/runtime failures.
+4. Reclassify exact source overlap and scope-risk overages such as changed-file
+   and diff-size pressure as soft findings for agent judgment; keep hard stops
+   for forbidden paths, generated artifacts, configured exclusive paths,
+   missing evidence, unsafe finalization, and unrepaired verification/runtime
+   failures.
 
 Target flow:
 
