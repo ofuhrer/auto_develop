@@ -55,6 +55,8 @@ The deterministic kernel must remain strict about invariants: no skipped verific
 
 Planner and reviewer output repair is part of the autonomous path. If a planner emits a useful but admission-invalid contract package, or a reviewer emits semantically useful findings with minor schema defects, the system should not stop immediately. The supervisor should receive the raw output, validation errors, objective or review context, config, schema, and repository policy, then apply bounded normalization that does not change meaning: add required evidence such as `git diff` and changed-files lists, normalize worktree-local `.venv` verification commands to the configured shared runtime, repair schema spelling/shape drift, fill derivable evidence paths from the review context, and preserve objective, allowed scope, forbidden changes, stop conditions, and finding intent. The repaired artifact must then pass deterministic validation before execution continues. If normalization would broaden scope or change intent, the supervisor must stop with evidence.
 
+For repeated-cycle governor serialization, stop taxonomy is machine-readable and stable. The top-level `run-governor` result always includes `stop_reason`; when it is `blocked_finalization`, the last cycle must also carry both `blocked_finalization` details and a typed `governor_cycle_continuation` record so finalization-policy stops are linked to explicit continuation metadata.
+
 Autonomy should reduce code where the code is only approximating judgment. The
 kernel should expose facts and enforce invariants; the runtime supervisor should
 own reasoning-heavy choices such as whether planner output is repairable, how to

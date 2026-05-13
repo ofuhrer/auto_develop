@@ -217,6 +217,10 @@ class GovernorLoop:
                 stop_reason = GovernorStopReason.PLANNING_ONLY_STRATEGY
                 break
             if result.blocked_finalization is not None:
+                if result.governor_cycle_continuation is None:
+                    raise ValueError(
+                        "blocked finalization cycle missing governor_cycle_continuation"
+                    )
                 stop_reason = GovernorStopReason.BLOCKED_FINALIZATION
                 break
             if not _release_was_accepted(result.release):

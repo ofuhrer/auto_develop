@@ -858,6 +858,12 @@ Current boundary:
 - It stops by default when a cycle produces no executable release or a release is not accepted.
 - Autonomous final-review repair continuation, policy-driven branch deletion, and full pre-epic state-review decisioning remain planned.
 
+JSON output contract for stop metadata:
+
+- `run-governor` always emits a top-level `stop_reason` from the fixed governor taxonomy.
+- When top-level `stop_reason` is `blocked_finalization`, `cycles[-1].blocked_finalization` and `cycles[-1].governor_cycle_continuation` are required.
+- For other stop reasons, `blocked_finalization` and `governor_cycle_continuation` are cycle-scoped optional fields and may be omitted when not applicable.
+
 `run-release` writes a deterministic `release_review.md` evidence summary. If the project config also defines `model_roles.reviewer`, it invokes a separate reviewer agent over `base..feature`, writes `feature_review.json`, generates bounded repair contracts for required findings, reruns verification using validated reviewer-requested commands or the default verification profile, writes `feature_review_recheck.json`, and blocks PR/merge/push finalization while unresolved required findings remain.
 
 Reviewer backend assumptions (implemented today):

@@ -72,6 +72,21 @@ class BacklogMultiRunResult:
     cycles: list[BacklogRunResult]
     stop_reason: GovernorStopReason
 
+    def __post_init__(self) -> None:
+        if self.stop_reason != GovernorStopReason.BLOCKED_FINALIZATION:
+            return
+        if not self.cycles:
+            raise ValueError("blocked_finalization stop_reason requires at least one cycle")
+        last_cycle = self.cycles[-1]
+        if last_cycle.blocked_finalization is None:
+            raise ValueError(
+                "blocked_finalization stop_reason requires cycles[-1].blocked_finalization"
+            )
+        if last_cycle.governor_cycle_continuation is None:
+            raise ValueError(
+                "blocked_finalization stop_reason requires cycles[-1].governor_cycle_continuation"
+            )
+
 
 @dataclass(frozen=True)
 class BacklogPlannerBackendResult:
