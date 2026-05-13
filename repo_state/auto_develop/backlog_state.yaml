@@ -96,6 +96,7 @@ notes:
   - The typed supervisor-decision seam is implemented for bounded soft decisions; the broader N-epic loop that would consume those decisions across repeated cycles remains planned.
   - Multi-epic execution needs one parent governor.log/governor.raw.log/events.jsonl stream that links child release logs and exposes selected epic, contract normalization, release execution, release-local feature review, repair, finalization, state refresh, and next-epic selection.
   - The release-local semantic review loop is implemented; the remaining gap is convergence policy and composition into the broader multi-epic governor.
+  - The model-output-normalization release is now implemented with typed normalization artifacts, validator-rerun metadata, and refusal boundaries that reject scope-broadening repairs; the broader N-epic governor loop remains planned.
   - Before selecting the next epic, the governor should refresh its state view from source/branch status, recent run artifacts, release reviews, metrics, tuning reports, unresolved findings, docs drift, and tracked repo-state memory.
   - The governor-state-review cycle was merged on 2026-05-13 and implemented deterministic state-review snapshot capture plus backlog-planning evidence linkage.
   - Completed objectives and historical contracts have been removed from the controller repo after merge; current releases should generate fresh objective/contract artifacts instead of reusing stale landed packages.
