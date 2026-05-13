@@ -1,0 +1,54 @@
+task_id: supervisor-execution-strategy-0004
+release_id: supervisor-execution-strategy
+title: Wire strategy decisions through backlog and CLI execution
+task_type: code_only
+budget_class: L
+objective: Update backlog/governor and CLI result serialization to pass available
+  state-review snapshot, roadmap/repo-state memory, prior metrics, release outcomes,
+  reviewer/repair evidence paths into objective strategy selection when present, include
+  strategy decision and one-shot input paths in backlog/objective evidence manifests
+  and CLI JSON, and add focused wiring tests.
+allowed_files:
+- src/agentic_devloop/backlog.py
+- src/agentic_devloop/governor.py
+- src/agentic_devloop/cli.py
+- tests/test_backlog.py
+- tests/test_cli.py
+forbidden_changes:
+- Do not change run-release task execution semantics or finalization policy in this
+  task.
+- Do not broaden CLI execution modes beyond the typed strategy decisions shipped in
+  this release.
+- Do not remove existing governor event logging or backlog evidence fields; only add
+  strategy-related fields compatibly.
+- Do not edit supervisor model definitions, strategy selector rules, planning internals,
+  docs, configs, lockfiles, generated artifacts, or runtime evidence.
+required_evidence:
+- git diff
+- pytest output for backlog and CLI wiring tests
+- CLI JSON fixture or assertion showing strategy decision artifact paths are present
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_backlog.py tests/test_cli.py tests/test_objective.py
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop
+    --help
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop
+    run-objective --help
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if CLI/backlog wiring requires changing release finalization behavior or bypassing
+  existing hard gates.
+- Stop if strategy artifact paths cannot be surfaced without breaking existing JSON
+  consumers in tests.
+- Stop if available prior evidence inputs cannot be passed through without broad refactors
+  outside the allowed files.
+non_goals: []
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- supervisor-execution-strategy-0003

@@ -1,0 +1,29 @@
+release_id: supervisor-execution-strategy
+title: Supervisor-owned execution strategy before contract generation
+objective: Add a typed supervisor decision before objective-to-contract planning that
+  chooses one-shot implementation, sequential contracts, parallel contracts, stacked
+  branches, patch handoff, or replanning based on epic cohesion, risk, coupling, verification
+  needs, policy constraints, and prior run evidence.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- A strict, versioned supervisor execution-strategy decision model is added with allowed
+  actions for one-shot, sequential contracts, parallel contracts, stacked branches,
+  patch handoff, and replanning.
+- Backlog/objective execution records the strategy decision as an auditable supervisor
+  artifact with evidence paths, rationale, selected action, fallback plan, and validators
+  to rerun.
+- Contract generation is gated so it only runs for strategies that require decomposition;
+  one-shot strategy produces a bounded implementation prompt or equivalent execution
+  input with objective, scope, non-goals, verification, evidence, budgets, and stop
+  conditions.
+- Deterministic hard gates remain authoritative for forbidden paths, generated artifacts,
+  lockfiles, migrations, unsafe policy expansion, missing evidence, verification failure,
+  and finalization policy.
+- Strategy selection consumes available state-review snapshot, roadmap/repo-state
+  memory, prior metrics, release outcomes, and reviewer/repair evidence when present.
+- Focused tests cover at least cohesive one-shot selection, independent parallel/sequential
+  decomposition selection, replanning/stop behavior for unsafe scope, artifact persistence/reload
+  validation, and CLI or service wiring.
+- Documentation and repo-state notes are updated to describe the shipped one-epic
+  strategy decision seam while keeping the broader N-epic governor explicitly planned.
