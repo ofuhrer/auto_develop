@@ -1177,6 +1177,32 @@ def _run_feature_review_and_repair_loop(
     feature_review_recheck: FeatureReviewRecheckRecord | None = None
     outstanding_required_finding_ids: set[str] = set()
 
+    def allowed_verification_commands() -> list[str]:
+        commands: list[str] = []
+        for profile in config.verification_profiles.values():
+            commands.extend(profile.commands)
+        results = all_task_results or task_results
+        for result in results:
+            run_state = _read_json_object(result.bundle_path / "run_state.json")
+            verification_results = run_state.get("verification_results", [])
+            if not isinstance(verification_results, list):
+                continue
+            for item in verification_results:
+                if not isinstance(item, dict):
+                    continue
+                command = item.get("command")
+                if isinstance(command, str) and command.strip():
+                    commands.append(command.strip())
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for command in commands:
+            normalized = str(command).strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            ordered.append(normalized)
+        return ordered
+
     def run_review(attempt: int) -> FeatureReviewDecision:
         nonlocal feature_review_path
         nonlocal feature_review_decision
@@ -1225,8 +1251,8 @@ def _run_feature_review_and_repair_loop(
         rerun_dir = output_root / f"verification_rerun_{attempt:02d}"
         rerun_dir.mkdir(parents=True, exist_ok=True)
         commands = list(config.verification_profiles["default"].commands)
+        allowed = set(allowed_verification_commands())
         if decision.rerun_verification_commands:
-            allowed = set(commands)
             unknown = [cmd for cmd in decision.rerun_verification_commands if cmd not in allowed]
             if unknown:
                 _report(
