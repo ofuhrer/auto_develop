@@ -49,6 +49,17 @@ should be used.
   report hash, base-branch commit, execution mode, and release-input hash used
   to detect stale scheduling artifacts.
 
+`repair_loop_continuation` and `review_finding_adjudication` are the decision
+types that carry release-local review convergence behavior:
+
+- `repair_loop_continuation` records whether a bounded repair pass should keep
+  going, stop, or split after a reviewer pass or repair attempt;
+- `review_finding_adjudication` records how a finding is classified for the
+  release-local gate, including blocker, soft finding, duplicate, false
+  positive, scope expansion, or backlog follow-up handling; and
+- both decision types should retain evidence paths, rationale, fallback plan,
+  and validator rerun metadata so the review trail remains inspectable.
+
 ## Artifact Layout
 
 Supervisor decision artifacts are persisted as JSON files under:

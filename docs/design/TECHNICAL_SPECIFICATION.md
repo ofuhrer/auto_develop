@@ -645,6 +645,16 @@ The existing `release_review.md` is a deterministic release evidence summary. Wh
 
 This review loop is intentionally agentic. Deterministic code should assemble evidence, enforce hard invariants, validate review schemas, and rerun verification; it should not try to encode semantic architecture review as brittle heuristics.
 
+### Review-Loop Convergence Policy
+
+The release-local reviewer loop needs explicit convergence behavior so repeated findings do not churn the retry budget without adding signal.
+
+- Required findings remain blockers until they are resolved, explicitly accepted with rationale, or stopped by retry budget, hard gates, missing policy/credentials, or configured human escalation.
+- Duplicate or false-positive findings may be accepted only with evidence and rationale; the acceptance trail belongs in `feature_review.json.accepted_risks`, `feature_review_recheck.json`, and the typed supervisor decision record used for the adjudication.
+- Soft findings are retained as auditable decisions with evidence paths, rationale, fallback plan, and validator rerun metadata.
+- Findings that expand scope or imply follow-up work should be recorded as proposals for the next planning cycle rather than being folded into the current release objective.
+- The broader multi-epic governor that would apply this policy across repeated epics remains planned, even though the release-local review loop itself is implemented.
+
 ### Domain Validation Evidence
 
 For benchmark and domain-validation tasks, deterministic review records:
