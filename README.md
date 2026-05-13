@@ -48,7 +48,7 @@ Run tests:
 
 For external target repositories, keep durable target development memory with the target, not with the `auto_develop` implementation checkout. A good default is `<target>/.auto_develop/repo_state`, `<target>/.auto_develop/objectives`, and `<target>/.auto_develop/contracts` for tracked state, with raw runs ignored or externally archived.
 
-Planned governor behavior includes one parent `governor.log` for watching a full N-epic run, a pre-epic state-review pass that refreshes backlog memory from source/release artifacts before selection, and broader multi-epic orchestration after the reviewer and memory layers are in place. The shipped feature-review pass remains release-local rather than a full multi-epic governor. Bounded contract normalization is now part of the planning path for useful planner output that fails deterministic admission for repairable issues such as missing required evidence or worktree-local verification commands.
+Planned governor behavior includes one parent `governor.log` for watching a full N-epic run, a pre-epic state-review pass that refreshes backlog memory from source/release artifacts before selection, and broader multi-epic orchestration after the reviewer and memory layers are in place. The shipped feature-review pass runs only when `model_roles.reviewer` is configured and remains release-local rather than a full multi-epic governor. Bounded contract normalization is now part of the planning path for useful planner output that fails deterministic admission for repairable issues such as missing required evidence or worktree-local verification commands.
 
 Example:
 

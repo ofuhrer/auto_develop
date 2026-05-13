@@ -1082,7 +1082,7 @@ Current important limits:
 - Fully dynamic model-driven orchestration is still evolving.
 - The broader multi-epic governor loop remains planned.
 - Full agent-driven pre-epic state-review decisioning before backlog selection remains planned.
-- Independent reviewer-agent plus reviewer-finding repair loop beyond the current release remains planned for broader multi-epic operation.
+- Multi-epic orchestration of reviewer-agent findings and repair-agent loops remains planned; the currently shipped reviewer/repair loop runs only when `model_roles.reviewer` is configured and is release-local to one `run-release` execution.
 - Pull request creation is not yet automated by the CLI.
 - Remote execution adapters, such as cluster or SLURM execution, are still project-specific work.
 - Human review is still recommended before merging significant work into `main`.
