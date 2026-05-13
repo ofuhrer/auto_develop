@@ -10,7 +10,7 @@ This directory contains user, maintainer, and design documentation for `agentic-
 
 ## Project Summary
 
-`agentic-devloop` is an autonomous-first orchestration layer around coding agents. The current governor path is split into a one-epic `GovernorLoop` service, a typed `StateStore` persistence seam, a `RepairPolicy` decision seam, and implemented runtime-supervisor repair/resume seams for structured release failures. Those seams support roadmap/backlog analysis for the current epic, state persistence, bounded repair decisions, contract normalization, and governor-level logging. The target architecture still needs two explicit agentic loops: a pre-epic state-review governor that refreshes backlog memory from source state, branches, docs, recent runs, metrics, and artifacts before choosing work, and an independent feature-review/repair loop where a reviewer agent inspects the integrated feature branch and repair agents address reviewer findings before finalization. The broader multi-epic governor loop and fully automated state refresh remain planned. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, and configured Git finalization. Coding agents own implementation inside narrow task contracts.
+`agentic-devloop` is an autonomous-first orchestration layer around coding agents. The current governor path is split into a one-epic `GovernorLoop` service, a typed `StateStore` persistence seam, a `RepairPolicy` decision seam, and implemented runtime-supervisor repair/resume seams for structured release failures. Those seams support roadmap/backlog analysis for the current epic, state persistence, bounded repair decisions, contract normalization, governor-level logging, and deterministic state-review snapshot capture (`state_review_snapshot.json`) with contract-plan plumbing through `state_review_snapshot_path`. The target architecture still needs two explicit agentic loops: full pre-epic state-review decisioning that drives epic selection from live repository evidence, and an independent feature-review/repair loop where a reviewer agent inspects the integrated feature branch and repair agents address reviewer findings before finalization. The broader multi-epic governor loop and fully automated state refresh remain planned. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, and configured Git finalization. Coding agents own implementation inside narrow task contracts.
 
 The project prioritizes:
 
@@ -59,7 +59,7 @@ Implemented capabilities include:
 Important remaining gaps:
 
 - multi-epic governor looping beyond the current one-epic service boundary;
-- pre-epic repository state-review pass that inspects source state, branches, docs, repo-state memory, recent runs, metrics, and artifacts before selecting the next epic;
+- full pre-epic repository state-review decision pass over source state, branches, docs, repo-state memory, recent runs, metrics, and artifacts before selecting the next epic;
 - independent agentic feature-review pass over `main..feature/<release>` plus a reviewer-comment repair loop before PR, merge, or autonomous finalization;
 - top-level governor log stream for monitoring an N-epic run across backlog planning, contract generation, release execution, repair, review, finalization, and state refresh;
 - always-on state refresh across repeated epic cycles;

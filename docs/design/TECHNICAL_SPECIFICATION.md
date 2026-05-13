@@ -626,7 +626,7 @@ For `environment_blocked`, the preferred repair is policy-driven command/runtime
 
 The output objective is intended to feed `run-objective`. This keeps the high-level roadmap-governor agent separate from contract generation and execution while preserving an auditable handoff through `backlog_planner_prompt.md`, planner stdout/stderr/metadata, and `backlog_plan.json`. The highest-level loop should later apply the governor's roadmap and repo-state updates after each epic so new validation findings, benchmark evidence, and implementation learnings feed the next planning cycle.
 
-Current limitation: the implemented backlog planner reads bounded documentation, roadmap, repo-state files, and the explicit goal. It does not yet perform a full live state-review pass over source layout, dirty state, open branches, recent release diffs, unresolved reviewer findings, compact release history, and artifact summaries before choosing the next epic. The target governor must make that state-review pass explicit and persist the resulting state snapshot so backlog prioritization is based on current evidence rather than a stale roadmap alone.
+Current limitation: the implemented control plane now supports deterministic state-review snapshot capture (`state_review_snapshot.json`) and carries `state_review_snapshot_path` in contract-plan payloads, but backlog selection still primarily reads bounded documentation, roadmap, repo-state files, and the explicit goal. It does not yet run full agent-driven pre-epic state-review decisioning over source layout, dirty state, open branches, recent release diffs, unresolved reviewer findings, compact release history, and artifact summaries before choosing the next epic.
 
 ### Feature Review and Repair Flow
 

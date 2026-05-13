@@ -27,14 +27,14 @@ The main risk is unbounded autonomy, not autonomy itself. The system should be a
 - The implementation now exposes a one-epic `GovernorLoop` boundary, a typed `StateStore` seam, a `RepairPolicy` seam, planner-output normalization, and one-epic governor logging, but the broader multi-epic governor still has to prove those boundaries across repeated cycles.
 - The soft-gate implementation now records accepted exceptions as evidence-backed artifacts, but the broader multi-epic governor automation that would consume them across repeated cycles remains planned.
 - The current state model is still intentionally narrow. The typed `StateStore` seam improves persistence discipline, but the longer-running backlog memory for active epics, completed epics, retry counts, blocked work, and governor decisions still needs the full multi-epic loop.
-- The system now has runtime-supervisor repair/resume seams, but it still lacks a pre-epic state-review governor and an independent feature-review loop. The deterministic kernel can execute and summarize releases, but it does not yet make backlog selection from a fresh source/branch/artifact state snapshot or review the integrated feature branch as a coherent PR-style change set.
+- The system now has runtime-supervisor repair/resume seams plus deterministic state-review snapshot capture and contract-plan snapshot-path plumbing. It still lacks full agent-driven pre-epic state-review decisioning and an independent feature-review loop. The deterministic kernel can execute and summarize releases, but it does not yet make backlog selection from a complete live source/branch/artifact state decision pass or review the integrated feature branch as a coherent PR-style change set.
 - The CLI is not a thin boundary. It wires backend construction and workflow-specific behavior that should move into application services as the command set grows.
 
 ## Architectural Refactoring Priorities
 
 High-priority seams:
 
-- Add a state-review governor service before backlog selection. It should collect branch/source/doc/run/review/metric/tuning evidence, persist a state snapshot, and pass that snapshot into backlog planning.
+- Expand the state-review governor service before backlog selection from snapshot capture into full decisioning. It should collect branch/source/doc/run/review/metric/tuning evidence, persist snapshots, and drive epic selection from that live state.
 - Add an independent feature-review service after feature-branch integration. It should assemble a review packet, call a reviewer agent, validate structured findings, create bounded repair contracts, rerun verification, and re-check unresolved findings.
 - Extend the `StateStore` API over repo-state files, run summaries, active releases, completed/blocked epics, and known learnings into authoritative multi-epic state.
 - Extend the `GovernorLoop` from the current one-epic service boundary to a multi-epic "run the next N epics" loop with stopping criteria, retry policy, runtime supervision, feature review, and state refresh.
