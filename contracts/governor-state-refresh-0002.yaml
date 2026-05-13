@@ -1,0 +1,54 @@
+task_id: governor-state-refresh-0002
+release_id: governor-state-refresh
+title: Post-cycle refresh payload and artifact builder
+task_type: code_only
+budget_class: medium
+objective: Implement a small refresh module or equivalent bounded functions that build
+  and write a post-cycle state-refresh artifact from `BacklogRunResult`, including
+  accepted/finalized, failed, blocked, and manually merged/completed outcomes. The
+  artifact must include lifecycle status, precise status reason, release summary path,
+  finalization outcome path/details, review finding summaries, metrics/tuning paths,
+  unresolved finding references, retry/repair counts when available, and next recommendations.
+allowed_files:
+- src/agentic_devloop/state_refresh.py
+- src/agentic_devloop/models.py
+- src/agentic_devloop/state_store.py
+- tests/test_backlog.py
+- tests/test_state_store.py
+forbidden_changes:
+- Do not change `run-release` task execution semantics.
+- Do not change finalization policy names or credential checks.
+- Do not alter feature-review adjudication behavior.
+- Do not broaden `BacklogRunResult` beyond fields needed to reference refresh evidence.
+required_evidence:
+- Focused pytest output for new accepted, blocked, failed, and manual-merge refresh
+  builder cases.
+- Artifact JSON schema validation through existing Pydantic models or explicit model
+  validation.
+- Test evidence that unresolved findings are represented by IDs plus source paths/summaries
+  where available.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_state_store.py
+    tests/test_backlog.py -k 'state_refresh or refresh or finalization_memory or manual'
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if refresh extraction requires parsing arbitrary human prose from logs instead
+  of structured release summary/review/metrics artifacts.
+- Stop if manual-merge/completed outcome cannot be represented without inventing a
+  new finalization policy value.
+- Stop if artifact writing would silently continue after a validation failure.
+non_goals:
+- Do not run the refresh automatically after every cycle yet.
+- Do not implement next-epic exclusion in this task.
+- Do not update user documentation in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- governor-state-refresh-0001

@@ -1,0 +1,46 @@
+task_id: governor-state-refresh-0001
+release_id: governor-state-refresh
+title: Durable state refresh model and helpers
+task_type: code_only
+budget_class: medium
+objective: Update `StateStore` and its tests so backlog state has typed, idempotent
+  helpers for applying one epic refresh outcome, including release/finalization/review/metrics/tuning
+  references, unresolved findings, retry/repair counts, lifecycle state, status reason,
+  and next recommendations.
+allowed_files:
+- src/agentic_devloop/state_store.py
+- tests/test_state_store.py
+forbidden_changes:
+- Do not change governor execution flow in `src/agentic_devloop/governor.py`.
+- Do not modify CLI behavior or command-line flags.
+- Do not write runtime evidence under `runs/` or durable project state under `repo_state/`.
+- Do not remove legacy backlog-state normalization support for string-based epic records.
+required_evidence:
+- Focused pytest output for `tests/test_state_store.py`.
+- Assertions proving duplicate refresh applications for the same epic/release do not
+  create duplicate references.
+- Assertions proving legacy backlog state still loads.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_state_store.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if the existing `BacklogState` YAML compatibility tests fail in a way that
+  requires removing legacy field support.
+- Stop if the refresh helper cannot be implemented without touching governor orchestration
+  files.
+- Stop if the proposed state shape would require raw `runs/` artifacts as the only
+  source of completed-epic memory.
+non_goals:
+- Do not integrate refresh into `GovernorLoop` in this task.
+- Do not implement agent-driven state-review decisioning.
+- Do not update documentation in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

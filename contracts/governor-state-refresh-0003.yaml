@@ -1,0 +1,59 @@
+task_id: governor-state-refresh-0003
+release_id: governor-state-refresh
+title: Governor post-cycle refresh wiring
+task_type: code_only
+budget_class: medium
+objective: Integrate the refresh builder and `StateStore` helper into `GovernorLoop`
+  so every accepted, finalized, failed, blocked, no-actionable, or manually completed
+  cycle writes refresh evidence and applies durable state before the next `run_one_epic`
+  planning call. Ensure next-epic filtering uses refreshed `completed_epics`, `blocked_epics`,
+  skipped/reviewed/active records, and prevents stale duplicate selection without
+  depending on raw `runs/` directories.
+allowed_files:
+- src/agentic_devloop/governor.py
+- src/agentic_devloop/state_refresh.py
+- src/agentic_devloop/state_store.py
+- tests/test_backlog.py
+forbidden_changes:
+- Do not remove the existing in-memory repeated-epic guard; durable state should augment
+  it.
+- Do not change task execution, merge, push, or finalization mechanics.
+- Do not change planner prompt content except to pass existing state-refresh references
+  already supported by models.
+- Do not add broad sleeps, polling, or nondeterministic timing to governor tests.
+required_evidence:
+- Focused tests proving accepted release refresh completes an epic before the next
+  cycle selects backlog work.
+- Focused tests proving blocked release refresh marks the epic blocked with a precise
+  reason before the next selection.
+- Focused tests proving manual-merge/completed refresh records completed status and
+  finalization references.
+- Focused tests proving stale duplicate prevention works from durable state even when
+  raw run artifacts remain.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_backlog.py
+    -k 'governor_loop and (refresh or completed or blocked or repeated or manual)'
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if applying refresh after a cycle would happen after the next backlog planning
+  call.
+- Stop if duplicate prevention can only be proven through `seen_epic_ids` and not
+  through `StateStore`.
+- Stop if existing no-actionable-work behavior regresses.
+- Stop if scope or verification cannot remain within the generated contract.
+non_goals:
+- Do not implement full pre-epic supervisor state review.
+- Do not change backlog planner scoring heuristics except for consuming existing durable
+  state.
+- Do not update docs in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- governor-state-refresh-0002

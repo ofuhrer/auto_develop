@@ -1,0 +1,50 @@
+task_id: governor-state-refresh-0005
+release_id: governor-state-refresh
+title: State-refresh documentation update
+task_type: documentation
+budget_class: small
+objective: Update docs to explain that after each governor cycle the system writes
+  refresh evidence and applies compact durable state before selecting the next epic.
+  Document accepted/finalized, failed/blocked, and manual-merge outcomes; failure
+  artifacts and stop behavior; and explicitly state that full pre-epic agent-driven
+  state-review decisioning remains planned unless separately implemented.
+allowed_files:
+- README.md
+- docs/README.md
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/design/ARCHITECTURE.md
+- docs/design/ROADMAP_AND_BACKLOG.md
+forbidden_changes:
+- Do not claim autonomous pre-epic agent-driven state-review decisioning is shipped.
+- Do not update CLI examples unless the command behavior actually changed.
+- Do not edit code or tests in this documentation task.
+- Do not remove existing warnings about raw `runs/` artifacts not being durable state.
+required_evidence:
+- Documentation diff showing shipped behavior and planned behavior are separated.
+- Documentation references to refresh evidence artifacts and durable `repo_state`
+  fields.
+- Help smoke output remains unchanged or compatible.
+verification:
+  commands:
+  - PYTHONPATH=src .venv/bin/python -m agentic_devloop --help
+  - PYTHONPATH=src .venv/bin/python -m agentic_devloop run-governor --help
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if implementation contracts 0001-0004 have not landed or behavior is still
+  ambiguous.
+- Stop if docs would need to describe aspirational behavior as shipped.
+- Stop if documentation changes require adding or committing runtime evidence.
+- Stop if scope or verification cannot remain within the generated contract.
+non_goals:
+- Do not implement code changes.
+- Do not alter objective or contract examples unless needed to avoid false documentation.
+- Do not rewrite broad architecture sections unrelated to governor state refresh.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- governor-state-refresh-0004

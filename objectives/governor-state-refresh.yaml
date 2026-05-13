@@ -1,0 +1,24 @@
+release_id: governor-state-refresh
+title: Apply durable roadmap and repo-state refresh after each epic
+objective: Implement the state-refresh step that runs after finalized, accepted, failed,
+  or manually merged epics so the governor compacts release outcomes, finalization
+  decisions, review findings, metrics, tuning reports, unresolved findings, completed/active
+  epic state, and next recommendations before selecting the next epic.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- After every accepted/finalized release cycle, durable repo-state records completed
+  epic status, release summary references, finalization outcome references, review
+  finding summaries, metrics/tuning references, and updated recommendations before
+  the next backlog selection.
+- After failed, blocked, or manually merged cycles, state refresh records a precise
+  status reason, unresolved finding references, retry/repair counts, and whether the
+  epic remains active, completed, blocked, or skipped.
+- The governor's next-epic selection excludes completed epics using refreshed durable
+  state and does not depend solely on raw runs artifacts.
+- State-refresh failures produce first-class evidence artifacts and typed stop/continuation
+  metadata instead of silently leaving partial state.
+- Focused tests cover accepted release refresh, blocked release refresh, manual-merge/completed-epic
+  refresh, stale-state duplicate prevention, and failure-artifact creation.
+- Documentation distinguishes shipped state-refresh behavior from still-planned full
+  pre-epic agent-driven state-review decisioning.

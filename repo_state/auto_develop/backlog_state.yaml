@@ -6,7 +6,7 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
 current_focus: governor-state-refresh
-active_epic: null
+active_epic: governor-state-refresh
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -56,9 +56,9 @@ candidate_epics:
   next_release_id: governor-cockpit-v2
 - id: soft-scope-budget-policy
   title: Replace crude file-count hard stops with typed scope-risk decisions.
-  rationale: Many-file mechanical changes can be safe while small changes can be
-    risky. File and diff budgets should emit scope-risk findings for supervisor
-    adjudication instead of acting as universal hard stops.
+  rationale: Many-file mechanical changes can be safe while small changes can be risky.
+    File and diff budgets should emit scope-risk findings for supervisor adjudication
+    instead of acting as universal hard stops.
   priority: 4
   next_release_id: soft-scope-budget-policy
 - id: review-convergence-adjudicator
@@ -102,7 +102,15 @@ candidate_epics:
   priority: 10
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
-active_epics: []
+active_epics:
+- epic_id: governor-state-refresh
+  retry_count: 0
+  repair_count: 0
+  outcome_references: []
+  finalization_outcome_references: []
+  unresolved_finding_references: []
+  state_review_snapshot_references: []
+  updated_at: '2026-05-13T20:41:57.460172Z'
 reviewed_epics: []
 completed_epic_records:
 - epic_id: planner-normalization-generalization

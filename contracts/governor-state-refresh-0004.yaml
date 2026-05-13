@@ -1,0 +1,56 @@
+task_id: governor-state-refresh-0004
+release_id: governor-state-refresh
+title: State-refresh failure artifacts and continuation metadata
+task_type: code_only
+budget_class: medium
+objective: Add failure handling around post-cycle state refresh so exceptions produce
+  a `state_refresh_error.json` or equivalent artifact with phase, error type, message,
+  release/epic IDs, paths written before failure, and recommended continuation. Surface
+  the artifact through `BacklogEvidenceManifest`/`BacklogRunResult` or existing governor
+  continuation metadata, and stop the repeated governor before selecting another epic
+  when durable state cannot be trusted.
+allowed_files:
+- src/agentic_devloop/models.py
+- src/agentic_devloop/governor.py
+- src/agentic_devloop/state_refresh.py
+- tests/test_backlog.py
+forbidden_changes:
+- Do not swallow refresh exceptions without an evidence artifact.
+- Do not continue to the next epic after a failed durable-state application.
+- Do not convert unrelated release failures into state-refresh failures.
+- Do not weaken existing validation for supervisor decision artifacts or release summaries.
+required_evidence:
+- Focused pytest proving an injected refresh write/apply failure creates a failure
+  artifact.
+- Focused pytest proving the governor returns typed stop/continuation metadata and
+  does not plan the next epic after refresh failure.
+- Focused pytest proving pre-selection state-review snapshot failure behavior remains
+  intact.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_backlog.py
+    -k 'state_refresh and (failure or error or continuation)'
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop
+    run-governor --help
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if failure metadata cannot be represented without broad changes to release
+  execution models.
+- Stop if the implementation would permit partially applied durable state to be treated
+  as successful.
+- Stop if tests require depending on the developer's real Git state instead of temp
+  repositories.
+non_goals:
+- Do not add automated repair for refresh failures.
+- Do not add branch cleanup or finalization cleanup behavior.
+- Do not update user documentation in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- governor-state-refresh-0003
