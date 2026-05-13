@@ -838,6 +838,7 @@ class FinalReviewContinuationDecision(StrictModel):
     feature_review_recheck_path: Path | None = None
     final_integration_verification_path: Path | None = None
     finding_ids: list[str] = Field(default_factory=list)
+    finding_adjudication_paths: list[Path] = Field(default_factory=list)
     rerun_validator_evidence_paths: list[Path] = Field(default_factory=list)
     generated_repair_contract_paths: list[Path] = Field(default_factory=list)
     backlog_follow_up_proposal_paths: list[Path] = Field(default_factory=list)
