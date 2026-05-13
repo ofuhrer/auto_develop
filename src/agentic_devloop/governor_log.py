@@ -42,7 +42,8 @@ class GovernorEventType(StrEnum):
 
 @dataclass(frozen=True)
 class GovernorEventContext:
-    phase: str
+    phase: GovernorEventType | str
+    subphase: str | None = None
     release_id: str | None = None
     epic_id: str | None = None
     task_id: str | None = None
@@ -53,8 +54,20 @@ class GovernorEventContext:
     artifact_count: int | None = None
     details: dict[str, str | int | float | bool] | None = None
 
+    def __post_init__(self) -> None:
+        if isinstance(self.phase, str):
+            try:
+                normalized_phase = GovernorEventType(self.phase)
+            except ValueError as error:
+                raise ValueError(
+                    f"context.phase must be a GovernorEventType value; got {self.phase!r}"
+                ) from error
+            object.__setattr__(self, "phase", normalized_phase)
+
     def to_json(self) -> dict[str, object]:
-        payload: dict[str, object] = {"phase": self.phase}
+        payload: dict[str, object] = {"phase": self.phase.value}
+        if self.subphase is not None:
+            payload["subphase"] = self.subphase
         if self.release_id is not None:
             payload["release_id"] = self.release_id
         if self.epic_id is not None:
@@ -76,7 +89,9 @@ class GovernorEventContext:
         return payload
 
     def to_compact_log(self) -> str:
-        parts = [f"phase={self.phase}"]
+        parts = [f"phase={self.phase.value}"]
+        if self.subphase is not None:
+            parts.append(f"subphase={self.subphase}")
         if self.release_id is not None:
             parts.append(f"release_id={self.release_id}")
         if self.epic_id is not None:
@@ -133,7 +148,12 @@ class GovernorEventLogWriter:
     ) -> GovernorEvent:
         timestamp = datetime.now(UTC).isoformat()
         artifact_links = tuple(str(path) for path in artifacts)
-        event_context = context or GovernorEventContext(phase=event_type.value, artifact_count=len(artifact_links))
+        event_context = context or GovernorEventContext(phase=event_type, artifact_count=len(artifact_links))
+        if event_context.phase != event_type:
+            raise ValueError(
+                "context.phase must match event_type; "
+                f"got phase={event_context.phase.value!r} and event_type={event_type.value!r}"
+            )
         event = GovernorEvent(
             timestamp=timestamp,
             event_type=event_type,

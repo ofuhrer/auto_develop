@@ -71,7 +71,8 @@ def test_governor_writer_emits_typed_context_and_readable_compact_logs(tmp_path:
         event_type=GovernorEventType.FINAL_VERIFICATION_COMPLETED,
         message="Final verification passed.",
         context=GovernorEventContext(
-            phase="final_verification",
+            phase=GovernorEventType.FINAL_VERIFICATION_COMPLETED,
+            subphase="final_verification",
             release_id="rel-123",
             epic_id="governor-cockpit-v2",
             decision="continue",
@@ -86,19 +87,46 @@ def test_governor_writer_emits_typed_context_and_readable_compact_logs(tmp_path:
     event_line = writer.paths.events_path.read_text(encoding="utf-8").splitlines()[0]
     record = json.loads(event_line)
 
-    assert "context=phase=final_verification" in raw_text
+    assert "context=phase=final_verification_completed subphase=final_verification" in raw_text
     assert "release_id=rel-123" in raw_text
     assert "decision=continue" in raw_text
-    assert "(phase=final_verification release_id=rel-123" in human_text
+    assert "(phase=final_verification_completed subphase=final_verification release_id=rel-123" in human_text
     assert record["context"] == {
         "cycle_index": 2,
         "decision": "continue",
         "details": {"duration_s": 42, "tests_passed": True},
         "epic_id": "governor-cockpit-v2",
         "outcome": "accepted",
-        "phase": "final_verification",
+        "phase": "final_verification_completed",
         "release_id": "rel-123",
+        "subphase": "final_verification",
     }
+
+
+def test_governor_writer_rejects_non_enum_or_mismatched_context_phase(tmp_path: Path) -> None:
+    writer = build_governor_event_log_writer(runs_dir=tmp_path / "runs", run_id="run-1")
+
+    try:
+        writer.write(
+            event_type=GovernorEventType.FINAL_VERIFICATION_COMPLETED,
+            message="Invalid custom phase.",
+            context=GovernorEventContext(phase="final_verification"),
+        )
+    except ValueError as error:
+        assert "context.phase must be a GovernorEventType value" in str(error)
+    else:
+        raise AssertionError("Expected ValueError for non-enum context phase.")
+
+    try:
+        writer.write(
+            event_type=GovernorEventType.FINAL_VERIFICATION_COMPLETED,
+            message="Mismatched phase.",
+            context=GovernorEventContext(phase=GovernorEventType.RELEASE_COMPLETED),
+        )
+    except ValueError as error:
+        assert "context.phase must match event_type" in str(error)
+    else:
+        raise AssertionError("Expected ValueError for mismatched context phase.")
 
 
 def test_governor_event_type_includes_required_cockpit_events() -> None:
