@@ -7,7 +7,9 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
+
+from pydantic import Field, field_validator, model_validator
 
 from agentic_devloop.artifacts import cleanup_task_artifacts
 from agentic_devloop.budget import build_budget_ledger, build_tuning_report
@@ -47,6 +49,7 @@ from agentic_devloop.models import (
     SoftGateDecisionOutcome,
     SoftGateFinding,
     SoftGateSeverity,
+    StrictModel,
     TaskSoftGateDecisionRecord,
     TaskContract,
 )
@@ -104,6 +107,54 @@ class FeatureReviewLoopResult:
 
 _RELEASE_BUDGET_SOFT_OVERAGE_RATIO = 0.2
 _FEATURE_REVIEW_MAX_REPAIR_LOOPS = 2
+
+
+class ReleaseFinalizationGate(StrictModel):
+    allowed: bool
+    reason: Literal[
+        "allowed",
+        "unresolved_required_findings",
+        "release_decision_not_accepted",
+    ]
+    unresolved_required_finding_ids: list[str] = Field(default_factory=list)
+    decision: Decision
+
+    @field_validator("unresolved_required_finding_ids")
+    @classmethod
+    def unresolved_required_finding_ids_must_be_sorted_unique_and_non_empty(
+        cls, values: list[str]
+    ) -> list[str]:
+        cleaned: list[str] = []
+        for value in values:
+            if not value.strip():
+                raise ValueError("unresolved_required_finding_ids must not contain empty strings")
+            cleaned.append(value)
+        if cleaned != sorted(cleaned):
+            raise ValueError("unresolved_required_finding_ids must be sorted")
+        if len(cleaned) != len(set(cleaned)):
+            raise ValueError("unresolved_required_finding_ids must not contain duplicates")
+        return cleaned
+
+    @model_validator(mode="after")
+    def gate_invariants(self) -> "ReleaseFinalizationGate":
+        if self.allowed:
+            if self.reason != "allowed":
+                raise ValueError("finalization gate allowed=true requires reason='allowed'")
+            if self.unresolved_required_finding_ids:
+                raise ValueError("finalization gate allowed=true requires no unresolved required finding ids")
+            if self.decision != Decision.ACCEPTED:
+                raise ValueError("finalization gate allowed=true requires decision='accepted'")
+            return self
+
+        if self.reason == "unresolved_required_findings" and not self.unresolved_required_finding_ids:
+            raise ValueError(
+                "finalization gate reason='unresolved_required_findings' requires unresolved_required_finding_ids"
+            )
+        if self.reason == "release_decision_not_accepted" and self.decision == Decision.ACCEPTED:
+            raise ValueError(
+                "finalization gate reason='release_decision_not_accepted' requires decision != 'accepted'"
+            )
+        return self
 
 
 def make_release_run_id(release_id: str, now: datetime | None = None) -> str:
@@ -1819,25 +1870,28 @@ def _build_release_finalization_gate(
         # carries explicit required findings but the loop still ended in a blocked state.
         unresolved_required_finding_ids = sorted(unresolved_finding_ids.difference(optional_finding_ids_from_decision))
     if unresolved_required_finding_ids:
-        return {
-            "allowed": False,
-            "reason": "unresolved_required_findings",
-            "unresolved_required_finding_ids": unresolved_required_finding_ids,
-            "decision": decision,
-        }
+        gate = ReleaseFinalizationGate(
+            allowed=False,
+            reason="unresolved_required_findings",
+            unresolved_required_finding_ids=unresolved_required_finding_ids,
+            decision=decision,
+        )
+        return gate.model_dump(mode="json")
     if decision != Decision.ACCEPTED:
-        return {
-            "allowed": False,
-            "reason": "release_decision_not_accepted",
-            "unresolved_required_finding_ids": [],
-            "decision": decision,
-        }
-    return {
-        "allowed": True,
-        "reason": "allowed",
-        "unresolved_required_finding_ids": [],
-        "decision": decision,
-    }
+        gate = ReleaseFinalizationGate(
+            allowed=False,
+            reason="release_decision_not_accepted",
+            unresolved_required_finding_ids=[],
+            decision=decision,
+        )
+        return gate.model_dump(mode="json")
+    gate = ReleaseFinalizationGate(
+        allowed=True,
+        reason="allowed",
+        unresolved_required_finding_ids=[],
+        decision=decision,
+    )
+    return gate.model_dump(mode="json")
 
 
 def _build_release_metrics(
