@@ -3656,7 +3656,7 @@ def test_run_release_feature_review_accepts_verification_only_required_finding_a
     assert isinstance(loaded, FeatureReviewFindingClassificationDecision)
     assert loaded.classification.value == "false_positive"
     assert loaded.selected_action.value == "accept"
-    assert any("verification.log" in path for path in loaded.evidence_paths)
+    assert any("verification.log" in str(path) for path in loaded.evidence_paths)
 
 
 def test_release_finalization_gate_only_counts_required_findings() -> None:
