@@ -413,6 +413,17 @@ class EvidenceBundle(StrictModel):
     soft_gate_decision_path: Path | None = None
 
 
+class FinalIntegrationVerificationEvidence(StrictModel):
+    release_id: str = Field(min_length=1)
+    integration_branch: str = Field(min_length=1)
+    integration_commit: str = Field(min_length=1)
+    verification_log_path: Path
+    worktree_log_path: Path
+    command_results: list[CommandResult] = Field(default_factory=list)
+    success: bool
+    verified_at: datetime
+
+
 class FailureDiagnosisInput(StrictModel):
     name: str = Field(min_length=1)
     value: str = Field(min_length=1)

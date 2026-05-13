@@ -693,6 +693,7 @@ def test_run_release_writes_metrics_and_final_log_summary(tmp_path) -> None:
     assert summary["metrics_path"] == str(result.metrics_path)
     assert summary["budget_path"] == str(result.budget_path)
     assert summary["tuning_path"] == str(result.tuning_path)
+    assert summary["final_integration_verification_path"] is not None
     assert str(result.budget_path) in review
     assert str(result.tuning_path) in review
     assert "🧾 Release Summary" in log
@@ -701,6 +702,71 @@ def test_run_release_writes_metrics_and_final_log_summary(tmp_path) -> None:
     assert str(result.budget_path) in log
     assert str(result.tuning_path) in log
     assert "Good luck, future humans. 🧑‍🚀🛠️🍀" in log
+
+
+def test_run_release_writes_final_integration_verification_evidence(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FakeExecutor(),
+        merge_on_accept=True,
+    )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    final_verification_path = Path(summary["final_integration_verification_path"])
+    assert final_verification_path.exists()
+    evidence = json.loads(final_verification_path.read_text(encoding="utf-8"))
+    assert evidence["release_id"] == "v0.1.0"
+    assert evidence["integration_branch"] == "feature/v0.1.0"
+    assert evidence["integration_commit"] == _git_output(repo, "rev-parse", "feature/v0.1.0").strip()
+    assert evidence["success"] is True
+    assert len(evidence["command_results"]) == 1
+    command_result = evidence["command_results"][0]
+    assert command_result["command"] == "test -d docs"
+    assert Path(command_result["stdout_path"]).exists()
+    assert Path(command_result["stderr_path"]).exists()
+    assert Path(evidence["verification_log_path"]).exists()
+    assert Path(evidence["worktree_log_path"]).exists()
+
+
+def test_run_release_runs_final_integration_verification_without_reviewer_role(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer") as reviewer:
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=FakeExecutor(),
+            merge_on_accept=True,
+        )
+
+    reviewer.assert_not_called()
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    final_verification_path = Path(summary["final_integration_verification_path"])
+    evidence = json.loads(final_verification_path.read_text(encoding="utf-8"))
+    assert evidence["success"] is True
 
 
 def test_run_release_supervisor_repairs_verification_and_resumes(tmp_path) -> None:

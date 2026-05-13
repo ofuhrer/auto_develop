@@ -16,6 +16,7 @@ from agentic_devloop.artifacts import cleanup_task_artifacts
 from agentic_devloop.budget import build_budget_ledger, build_tuning_report
 from agentic_devloop.config import load_project_config
 from agentic_devloop.evidence import (
+    write_final_integration_verification_evidence,
     write_feature_review_decision,
     write_feature_review_recheck,
     write_release_soft_gate_decisions,
@@ -44,6 +45,7 @@ from agentic_devloop.models import (
     FeatureReviewDecision,
     FeatureReviewRecommendation,
     FeatureReviewRecheckRecord,
+    FinalIntegrationVerificationEvidence,
     OverlapFinding,
     ReleaseOverlapReport,
     ReleasePlan,
@@ -57,6 +59,7 @@ from agentic_devloop.models import (
     TaskSoftGateDecisionRecord,
     TaskContract,
 )
+from agentic_devloop.verification import VerificationRunner
 from agentic_devloop.orchestrator import ExecutorProtocol, TaskRunResult, branch_name, run_task
 from agentic_devloop.process import run_process
 from agentic_devloop.runtime_supervisor import (
@@ -486,6 +489,37 @@ def run_release(
         release_metrics["decision"] = decision
         metrics_path = _write_release_metrics(runs_dir=runs_dir, run_id=run_id, metrics=release_metrics)
         _report(progress, "event=release_budget_exceeded violations=" + json.dumps(budget_violations, sort_keys=True))
+    integration_commit = _git_rev_parse(config.repo_path, feature_branch)
+    if not integration_commit.strip():
+        raise ValueError(f"failed to resolve integration commit for branch {feature_branch}")
+    final_integration_verification_path: Path | None = None
+    merged_into_integration = any(
+        result.finalize is not None and bool(result.finalize.merged)
+        for result in task_results
+    )
+    if decision == Decision.ACCEPTED and merged_into_integration:
+        final_integration_verification_path = _run_final_integration_verification(
+            release_id=release_id,
+            release_root=release_root,
+            repo_path=config.repo_path,
+            integration_branch=feature_branch,
+            integration_commit=integration_commit,
+            commands=list(config.verification_profiles["default"].commands),
+            timeout_seconds=verification_timeout_seconds,
+            progress=progress,
+        )
+        final_integration_verification = json.loads(
+            final_integration_verification_path.read_text(encoding="utf-8")
+        )
+        if not bool(final_integration_verification.get("success")):
+            decision = Decision.FAILED
+            release_metrics["decision"] = decision
+            metrics_path = _write_release_metrics(runs_dir=runs_dir, run_id=run_id, metrics=release_metrics)
+            _report(
+                progress,
+                "event=release_final_integration_verification_failed path="
+                + str(final_integration_verification_path),
+            )
     finalization_gate = _build_release_finalization_gate(
         decision=decision,
         feature_review_decision=feature_review_decision,
@@ -518,7 +552,7 @@ def run_release(
         log_path=log_path,
         raw_log_path=raw_log_path,
         integration_branch=feature_branch,
-        integration_commit=_git_rev_parse(config.repo_path, feature_branch),
+        integration_commit=integration_commit,
         finalization=finalization,
         budget_path=budget_path,
         tuning_path=tuning_path,
@@ -529,6 +563,7 @@ def run_release(
         feature_review_recheck_path=feature_review_recheck_path,
         feature_review_proposals=feature_review_proposals,
         finalization_gate=finalization_gate,
+        final_integration_verification_path=final_integration_verification_path,
     )
     review_path = _write_release_review(
         runs_dir=runs_dir,
@@ -549,6 +584,7 @@ def run_release(
         feature_review_recheck=feature_review_recheck,
         feature_review_recheck_path=feature_review_recheck_path,
         finalization_gate=finalization_gate,
+        final_integration_verification_path=final_integration_verification_path,
     )
     _report(progress, f"event=release_decision decision={decision}")
     _report(progress, f"event=release_review path={review_path}")
@@ -2408,6 +2444,97 @@ def _assert_safe_feature_review_rerun_worktree(worktree_path: Path, cleanup_root
     )
 
 
+def _run_final_integration_verification(
+    *,
+    release_id: str,
+    release_root: Path,
+    repo_path: Path,
+    integration_branch: str,
+    integration_commit: str,
+    commands: list[str],
+    timeout_seconds: int,
+    progress: Callable[[str], None] | None,
+) -> Path:
+    output_dir = release_root / "final_integration_verification"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    worktree_path = output_dir / "worktree"
+    worktree_log_path = output_dir / "worktree.log"
+    cleanup_root = output_dir.resolve()
+    _assert_safe_feature_review_rerun_worktree(worktree_path.resolve(), cleanup_root)
+    worktree_log_lines = [f"integration_branch={integration_branch}", f"integration_commit={integration_commit}"]
+
+    if worktree_path.exists():
+        run_process(
+            ["git", "worktree", "remove", "--force", str(worktree_path)],
+            cwd=repo_path,
+            timeout_seconds=120,
+        )
+    add = run_process(
+        ["git", "worktree", "add", "--detach", str(worktree_path), integration_commit],
+        cwd=repo_path,
+        timeout_seconds=120,
+    )
+    worktree_log_lines.append(f"$ git worktree add --detach {worktree_path} {integration_commit}")
+    worktree_log_lines.append(add.stdout.rstrip())
+    worktree_log_lines.append(add.stderr.rstrip())
+    if add.exit_code != 0:
+        worktree_log_path.write_text(
+            "\n".join(line for line in worktree_log_lines if line) + "\n",
+            encoding="utf-8",
+        )
+        raise ValueError(
+            "failed to create final integration verification worktree: "
+            + (add.stderr.strip() or add.stdout.strip())
+        )
+
+    runner = VerificationRunner(timeout_seconds=timeout_seconds)
+    try:
+        command_results = runner.run(
+            commands=commands,
+            worktree_path=worktree_path,
+            output_dir=output_dir,
+            stop_on_failure=True,
+        )
+    finally:
+        remove = run_process(
+            ["git", "worktree", "remove", "--force", str(worktree_path)],
+            cwd=repo_path,
+            timeout_seconds=120,
+        )
+        worktree_log_lines.append(f"$ git worktree remove --force {worktree_path}")
+        worktree_log_lines.append(remove.stdout.rstrip())
+        worktree_log_lines.append(remove.stderr.rstrip())
+        if remove.exit_code != 0:
+            _report(
+                progress,
+                "event=final_integration_verification_worktree_cleanup_failed error="
+                + (remove.stderr.strip() or remove.stdout.strip()),
+            )
+        worktree_log_path.write_text(
+            "\n".join(line for line in worktree_log_lines if line) + "\n",
+            encoding="utf-8",
+        )
+
+    success = bool(command_results) and all(result.exit_code == 0 for result in command_results)
+    evidence = FinalIntegrationVerificationEvidence(
+        release_id=release_id,
+        integration_branch=integration_branch,
+        integration_commit=integration_commit,
+        verification_log_path=output_dir / "verification.log",
+        worktree_log_path=worktree_log_path,
+        command_results=command_results,
+        success=success,
+        verified_at=datetime.now(UTC),
+    )
+    evidence_path = write_final_integration_verification_evidence(release_root, evidence)
+    _report(
+        progress,
+        "event=final_integration_verification_completed "
+        + f"success={str(success).lower()} path={evidence_path}",
+    )
+    return evidence_path
+
+
 def _command_with_env_prefixes(parts: list[str]) -> list[str]:
     env_parts: list[str] = []
     command_parts = list(parts)
@@ -2554,6 +2681,7 @@ def _write_release_summary(
     feature_review_recheck_path: Path | None,
     feature_review_proposals: list[FeatureReviewProposalRecord],
     finalization_gate: dict[str, object],
+    final_integration_verification_path: Path | None,
 ) -> Path:
     summary_dir = runs_dir / run_id
     summary_dir.mkdir(parents=True, exist_ok=True)
@@ -2576,6 +2704,9 @@ def _write_release_summary(
         "finalization_gate": finalization_gate,
         "integration_branch": integration_branch,
         "integration_commit": integration_commit,
+        "final_integration_verification_path": (
+            str(final_integration_verification_path) if final_integration_verification_path else None
+        ),
         "finalization": {
             "merged": finalization.merged,
             "pushed": finalization.pushed,
@@ -2633,6 +2764,7 @@ def _write_release_review(
     feature_review_recheck: FeatureReviewRecheckRecord | None,
     feature_review_recheck_path: Path | None,
     finalization_gate: dict[str, object],
+    final_integration_verification_path: Path | None,
 ) -> Path:
     review_path = runs_dir / run_id / "release_review.md"
     lines = [
@@ -2644,6 +2776,7 @@ def _write_release_review(
         f"- Metrics: `{metrics_path}`",
         f"- Budget: `{budget_path}`",
         f"- Tuning: `{tuning_path}`",
+        f"- Final integration verification: `{final_integration_verification_path or 'not_run'}`",
         "",
         "## Budget",
         "",
