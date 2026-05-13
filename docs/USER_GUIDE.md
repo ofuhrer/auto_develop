@@ -885,6 +885,7 @@ Current boundary:
 JSON output contract for stop metadata:
 
 - `run-governor` always emits a top-level `stop_reason` from the fixed governor taxonomy.
+- `stop_context.cycle_index`, when present, is a 1-based governor cycle number and matches the cycle numbering used in `events.jsonl`. It maps to the JSON `cycles` array via `cycles[stop_context.cycle_index - 1]`.
 - When top-level `stop_reason` is `blocked_finalization`, `cycles[-1].blocked_finalization` and `cycles[-1].governor_cycle_continuation` are required.
 - For other stop reasons, `blocked_finalization` and `governor_cycle_continuation` are cycle-scoped optional fields and may be omitted when not applicable.
 

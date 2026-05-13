@@ -1373,7 +1373,8 @@ def _governor_stop_context(result) -> GovernorStopContext:
     release_id: str | None = None
     evidence_paths: list[Path] = []
     if result.cycles:
-        cycle_index = len(result.cycles)
+        attempted = getattr(result, "attempted_epic_count", None)
+        cycle_index = attempted if isinstance(attempted, int) and attempted > 0 else len(result.cycles)
         last_cycle = result.cycles[-1]
         epic_id = getattr(last_cycle, "selected_epic_id", None)
         cycle_release = getattr(last_cycle, "release", None)

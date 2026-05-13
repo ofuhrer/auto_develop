@@ -266,7 +266,14 @@ class GovernorStopCategory(StrEnum):
 class GovernorStopContext(StrictModel):
     reason: str = Field(min_length=1)
     category: GovernorStopCategory
-    cycle_index: int | None = Field(default=None, ge=1)
+    cycle_index: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "1-based governor cycle number most directly associated with the stop. "
+            "When present, it can be mapped to the `cycles` array via `cycles[cycle_index - 1]`."
+        ),
+    )
     epic_id: str | None = None
     release_id: str | None = None
     evidence_artifact_paths: list[Path] = Field(default_factory=list)
