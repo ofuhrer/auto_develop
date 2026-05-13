@@ -577,6 +577,13 @@ class FeatureReviewRecheckRecord(StrictModel):
     accepted_finding_ids: list[str] = Field(default_factory=list)
     stop_reason: FeatureReviewRecheckStopReason | None = None
 
+    @field_validator("stop_reason", mode="before")
+    @classmethod
+    def normalize_legacy_stop_reason(cls, value: object) -> object:
+        if value == "blocked_by":
+            return FeatureReviewRecheckStopReason.BLOCKED_BY_HARD_GATE
+        return value
+
     @field_validator("unresolved_finding_ids", "resolved_finding_ids", "accepted_finding_ids")
     @classmethod
     def finding_id_items_must_not_be_empty(cls, values: list[str]) -> list[str]:

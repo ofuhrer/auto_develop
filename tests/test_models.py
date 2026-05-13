@@ -330,6 +330,20 @@ def test_feature_review_models_validate() -> None:
     assert recheck.stop_reason == "blocked_by_hard_gate"
 
 
+def test_feature_review_recheck_normalizes_legacy_blocked_by_stop_reason() -> None:
+    recheck = FeatureReviewRecheckRecord.model_validate(
+        {
+            "release_id": "release-001",
+            "unresolved_finding_ids": ["feature-001"],
+            "resolved_finding_ids": [],
+            "accepted_finding_ids": [],
+            "stop_reason": "blocked_by",
+        }
+    )
+
+    assert recheck.stop_reason == "blocked_by_hard_gate"
+
+
 def test_feature_review_models_reject_unknown_fields() -> None:
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         FeatureReviewFinding.model_validate(
