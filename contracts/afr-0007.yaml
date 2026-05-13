@@ -1,0 +1,43 @@
+task_id: afr-0007
+release_id: agentic-feature-review-loop
+title: Run focused end-to-end release review regression
+task_type: code_only
+budget_class: M
+objective: Add a focused release-level regression for the complete feature-review,
+  repair, recheck, and finalization gate flow.
+allowed_files:
+- tests/test_release.py
+- tests/test_cli.py
+- tests/fixtures/configs/**
+forbidden_changes:
+- Do not modify production source code in this regression-only task.
+- Do not rely on the developer local Git state; use temporary repositories only.
+- Do not require network access or external agent services in tests.
+- Do not make tests depend on .venv inside isolated worktrees.
+required_evidence:
+- git diff
+- pytest output for tests/test_release.py and tests/test_cli.py
+- full pytest output if runtime remains practical
+- git diff --check output
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_release.py
+    tests/test_cli.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if the end-to-end scenario requires broad fixture rewrites or production code
+  changes.
+- Stop if the regression cannot run deterministically in a temporary repository.
+- Stop if test setup would create or delete real branches, worktrees, or runs outside
+  tmp_path.
+non_goals: []
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- afr-0004
+- afr-0005

@@ -1,0 +1,47 @@
+task_id: afr-0005
+release_id: agentic-feature-review-loop
+title: Gate finalization on unresolved required findings
+task_type: code_only
+budget_class: M
+objective: Add release finalization gating based on feature-review required finding
+  status and expose gate evidence in CLI and release artifacts.
+allowed_files:
+- src/agentic_devloop/release.py
+- src/agentic_devloop/cli.py
+- tests/test_release.py
+- tests/test_cli.py
+forbidden_changes:
+- Do not change supported --release-finalize mode names except to document or report
+  the new gate.
+- Do not bypass existing hard gates for verification, stale branches, forbidden paths,
+  or generated artifacts.
+- Do not remove existing CLI JSON keys.
+- Do not make finalization fail silently; blocked finalization must be visible in
+  structured output.
+required_evidence:
+- git diff
+- pytest output for tests/test_release.py and tests/test_cli.py
+- CLI JSON assertion or fixture showing unresolved required findings block finalization
+- git diff --check output
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_release.py
+    tests/test_cli.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if finalization can still proceed with unresolved required findings in any
+  supported mode.
+- Stop if blocked finalization does not preserve the integrated feature branch and
+  evidence paths for inspection.
+- Stop if CLI output becomes non-machine-readable for existing commands.
+- Stop if scope or verification cannot remain within the generated contract.
+non_goals: []
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- afr-0004

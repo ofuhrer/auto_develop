@@ -1,0 +1,41 @@
+task_id: afr-0002
+release_id: agentic-feature-review-loop
+title: Build feature review context and reviewer invocation
+task_type: code_only
+budget_class: L
+objective: Create feature-review context assembly and backend invocation helpers that
+  emit the structured evidence schema from afr-0001.
+allowed_files:
+- src/agentic_devloop/feature_review.py
+- src/agentic_devloop/process.py
+- tests/test_feature_review.py
+forbidden_changes:
+- Do not wire feature review into run-release finalization yet.
+- Do not change task execution, task review, cleanup, or Git finalization behavior.
+- Do not read files outside the configured repository root, runs directory, contracts,
+  and docs/design paths needed for review context.
+- Do not introduce non-deterministic artifact paths.
+required_evidence:
+- git diff
+- pytest output for tests/test_feature_review.py
+- git diff --check output
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_feature_review.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if reviewer context cannot identify the configured base branch and integrated
+  feature branch deterministically.
+- Stop if backend failures are not represented as structured blocked review evidence.
+- Stop if the implementation would require broad allowed-file access beyond the listed
+  module and tests.
+non_goals: []
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- afr-0001

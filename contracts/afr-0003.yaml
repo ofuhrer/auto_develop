@@ -1,0 +1,44 @@
+task_id: afr-0003
+release_id: agentic-feature-review-loop
+title: Convert required findings into bounded repair contracts
+task_type: code_only
+budget_class: M
+objective: Add repair-contract generation for required feature-review findings with
+  strict scope preservation and validation.
+allowed_files:
+- src/agentic_devloop/feature_review.py
+- tests/test_feature_review.py
+- tests/test_contract_normalization.py
+forbidden_changes:
+- Do not allow repair contracts to introduce allowed_files outside the union of affected
+  original contracts and reviewer suggested repair scope.
+- Do not weaken forbidden_changes from source contracts.
+- Do not generate repair contracts for optional findings unless explicitly requested
+  by policy.
+- Do not bypass existing TaskContract validation.
+required_evidence:
+- git diff
+- pytest output for tests/test_feature_review.py and tests/test_contract_normalization.py
+- git diff --check output
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_feature_review.py
+    tests/test_contract_normalization.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if a finding references files that cannot be mapped to an existing contract
+  allowed_files pattern or an explicitly safe release-level file.
+- Stop if preserving forbidden_changes produces an unexecutable repair contract.
+- Stop if multiple findings require overlapping unsafe paths such as lockfiles, generated
+  artifacts, migrations, or forbidden paths.
+non_goals: []
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- afr-0001
+- afr-0002
