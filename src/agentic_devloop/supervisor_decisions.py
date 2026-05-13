@@ -100,7 +100,7 @@ class ReleaseSchedulingDecision(SupervisorDecisionBase):
     selected_action: ReleaseSchedulingAction
     outcome: SchedulingOutcome
     fallback_plan: str = Field(min_length=1)
-    validators_to_rerun: list[str] = Field(default_factory=list)
+    validators_to_rerun: list[str]
     staleness_inputs: ReleaseSchedulingStalenessInputs
 
     @field_validator("overlap_findings")
@@ -156,7 +156,7 @@ class ExecutionStrategyDecision(SupervisorDecisionBase):
     selected_action: ExecutionStrategyAction
     outcome: ExecutionStrategyOutcome
     fallback_plan: str = Field(min_length=1)
-    validators_to_rerun: list[str] = Field(default_factory=list)
+    validators_to_rerun: list[str]
 
     @field_validator("validators_to_rerun")
     @classmethod
@@ -264,7 +264,7 @@ class FeatureReviewFindingClassificationDecision(SupervisorDecisionBase):
     selected_action: FeatureReviewFindingAction
     outcome: FeatureReviewFindingOutcome
     fallback_plan: str = Field(min_length=1)
-    validators_to_rerun: list[str] = Field(default_factory=list)
+    validators_to_rerun: list[str]
 
     @field_validator("validators_to_rerun")
     @classmethod
@@ -370,7 +370,7 @@ class ModelOutputNormalizationDecision(SupervisorDecisionBase):
     selected_action: ModelOutputNormalizationAction
     outcome: ModelOutputNormalizationOutcome
     fallback_plan: str = Field(min_length=1)
-    validators_to_rerun: list[str] = Field(default_factory=list)
+    validators_to_rerun: list[str]
     normalized_artifact_path: Path | None = None
     refusal_reason: str | None = None
 

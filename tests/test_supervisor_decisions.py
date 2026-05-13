@@ -137,6 +137,18 @@ def test_execution_strategy_requires_fallback_and_validators() -> None:
             }
         )
 
+    with pytest.raises(ValidationError, match="Field required"):
+        ExecutionStrategyDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.EXECUTION_STRATEGY,
+                "risk_level": DecisionRiskLevel.MODERATE,
+                "selected_action": ExecutionStrategyAction.REPLAN,
+                "outcome": ExecutionStrategyOutcome.REPLAN,
+                "fallback_plan": "Escalate to replanning.",
+            }
+        )
+
 
 def test_repair_loop_attempt_must_not_exceed_max_attempts() -> None:
     with pytest.raises(ValidationError, match="attempt must be less than or equal"):
@@ -326,6 +338,21 @@ def test_feature_review_finding_classification_non_blocking_accept_requires_evid
                 "fallback_plan": "Escalate to stop if blocker cannot be repaired safely.",
                 "validators_to_rerun": ["verification"],
                 "evidence_paths": ["runs/release/release_review.md"],
+            }
+        )
+
+
+def test_feature_review_finding_classification_requires_validators_to_rerun_field() -> None:
+    with pytest.raises(ValidationError, match="Field required"):
+        FeatureReviewFindingClassificationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+                "finding_id": "fr-321",
+                "classification": FeatureReviewFindingClassification.BLOCKER,
+                "selected_action": FeatureReviewFindingAction.REPAIR,
+                "outcome": FeatureReviewFindingOutcome.CONTINUE,
+                "fallback_plan": "Escalate if repair cannot be scoped safely.",
             }
         )
 
