@@ -31,6 +31,7 @@ class SupervisorDecisionType(StrEnum):
     CONTRACT_NORMALIZATION = "contract_normalization"
     MODEL_OUTPUT_NORMALIZATION = "model_output_normalization"
     ENVIRONMENT_REPAIR = "environment_repair"
+    FEATURE_REVIEW_FINDING_CLASSIFICATION = "feature_review_finding_classification"
 
 
 class SupervisorDecisionBase(StrictModel):
@@ -234,6 +235,65 @@ class ReviewFindingAdjudicationDecision(SupervisorDecisionBase):
         return values
 
 
+class FeatureReviewFindingClassification(StrEnum):
+    BLOCKER = "blocker"
+    SOFT_FINDING = "soft_finding"
+    DUPLICATE = "duplicate"
+    FALSE_POSITIVE = "false_positive"
+    SCOPE_EXPANSION = "scope_expansion"
+    BACKLOG_FOLLOW_UP = "backlog_follow_up"
+
+
+class FeatureReviewFindingAction(StrEnum):
+    REPAIR = "repair"
+    ACCEPT = "accept"
+    DEFER = "defer"
+
+
+class FeatureReviewFindingOutcome(StrEnum):
+    CONTINUE = "continue"
+    STOP = "stop"
+
+
+class FeatureReviewFindingClassificationDecision(SupervisorDecisionBase):
+    decision_type: Literal[SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION] = (
+        SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION
+    )
+    finding_id: str = Field(min_length=1)
+    classification: FeatureReviewFindingClassification
+    selected_action: FeatureReviewFindingAction
+    outcome: FeatureReviewFindingOutcome
+    fallback_plan: str = Field(min_length=1)
+    validators_to_rerun: list[str] = Field(default_factory=list)
+
+    @field_validator("validators_to_rerun")
+    @classmethod
+    def validators_to_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if not values or any(not value.strip() for value in values):
+            raise ValueError("validators to rerun must not be empty")
+        return values
+
+    @model_validator(mode="after")
+    def classification_rules_must_be_satisfied(self) -> "FeatureReviewFindingClassificationDecision":
+        if self.selected_action in {FeatureReviewFindingAction.REPAIR, FeatureReviewFindingAction.ACCEPT}:
+            if self.outcome != FeatureReviewFindingOutcome.CONTINUE:
+                raise ValueError("repair or accept requires continue outcome")
+        if self.selected_action == FeatureReviewFindingAction.DEFER and self.outcome != FeatureReviewFindingOutcome.STOP:
+            raise ValueError("defer requires stop outcome")
+        if (
+            self.classification == FeatureReviewFindingClassification.BLOCKER
+            and self.selected_action == FeatureReviewFindingAction.ACCEPT
+        ):
+            raise ValueError("blocker classification must not use accept action")
+        if (
+            self.classification != FeatureReviewFindingClassification.BLOCKER
+            and self.selected_action == FeatureReviewFindingAction.ACCEPT
+            and not self.evidence_paths
+        ):
+            raise ValueError("non-blocking accepted classification requires evidence_paths")
+        return self
+
+
 class BudgetAcceptanceOutcome(StrEnum):
     ACCEPT_OVERAGE = "accept_overage"
     SPLIT_TASK = "split_task"
@@ -384,6 +444,7 @@ SupervisorDecisionRecord = Annotated[
         | ContractNormalizationDecision
         | ModelOutputNormalizationDecision
         | EnvironmentRepairDecision
+        | FeatureReviewFindingClassificationDecision
     ),
     Field(discriminator="decision_type"),
 ]

@@ -13,6 +13,10 @@ from agentic_devloop.supervisor_decisions import (
     ExecutionStrategyAction,
     ExecutionStrategyDecision,
     ExecutionStrategyOutcome,
+    FeatureReviewFindingAction,
+    FeatureReviewFindingClassification,
+    FeatureReviewFindingClassificationDecision,
+    FeatureReviewFindingOutcome,
     ModelOutputNormalizationAction,
     ModelOutputNormalizationDecision,
     ModelOutputNormalizationOutcome,
@@ -101,6 +105,29 @@ def _model_output_normalization_decision(*, evidence_paths: list[Path]) -> Model
             "fallback_plan": "Refuse and stop if normalized output fails validation.",
             "validators_to_rerun": ["review_findings_schema", "release_review_gate"],
             "normalized_artifact_path": Path("feature_review.normalized.json"),
+        }
+    )
+
+
+def _feature_review_finding_classification_decision(
+    *, evidence_paths: list[Path]
+) -> FeatureReviewFindingClassificationDecision:
+    return FeatureReviewFindingClassificationDecision.model_validate(
+        {
+            "schema_version": SCHEMA_VERSION_V1,
+            "decision_id": "finding-classification-001",
+            "release_id": "review-loop-convergence-policy",
+            "decided_at": datetime(2026, 5, 13, 8, 0, 0),
+            "decided_by": "supervisor-agent",
+            "rationale": "Finding is duplicate and accepted with bounded follow-up checks.",
+            "evidence_paths": evidence_paths,
+            "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+            "finding_id": "fr-321",
+            "classification": FeatureReviewFindingClassification.DUPLICATE,
+            "selected_action": FeatureReviewFindingAction.ACCEPT,
+            "outcome": FeatureReviewFindingOutcome.CONTINUE,
+            "fallback_plan": "Re-open as repair if duplicate trace cannot be verified on recheck.",
+            "validators_to_rerun": ["review_findings_schema", "release_review_gate"],
         }
     )
 
@@ -194,6 +221,21 @@ def test_write_and_load_model_output_normalization_artifact_round_trip(tmp_path:
     decision = _model_output_normalization_decision(
         evidence_paths=[evidence_file, raw_artifact, normalized_artifact]
     )
+
+    artifact_path = write_supervisor_decision_artifact(
+        release_bundle_path=tmp_path,
+        decision=decision,
+    )
+    loaded = load_supervisor_decision_artifact(artifact_path)
+
+    assert artifact_path.exists()
+    assert loaded == decision
+
+
+def test_write_and_load_feature_review_finding_classification_artifact_round_trip(tmp_path: Path) -> None:
+    evidence_file = tmp_path / "finding-classification-evidence.log"
+    evidence_file.write_text("duplicate accepted with evidence\n", encoding="utf-8")
+    decision = _feature_review_finding_classification_decision(evidence_paths=[evidence_file])
 
     artifact_path = write_supervisor_decision_artifact(
         release_bundle_path=tmp_path,

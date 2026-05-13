@@ -15,6 +15,10 @@ from agentic_devloop.supervisor_decisions import (
     ExecutionStrategyAction,
     ExecutionStrategyDecision,
     ExecutionStrategyOutcome,
+    FeatureReviewFindingAction,
+    FeatureReviewFindingClassification,
+    FeatureReviewFindingClassificationDecision,
+    FeatureReviewFindingOutcome,
     FindingAdjudicationOutcome,
     FindingSeverity,
     ModelOutputNormalizationAction,
@@ -241,6 +245,89 @@ def test_parse_environment_repair_decision() -> None:
 
     assert isinstance(decision, EnvironmentRepairDecision)
     assert decision.outcome == EnvironmentRepairOutcome.APPLY_AND_RETRY
+
+
+def test_parse_feature_review_finding_classification_decision() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+        "finding_id": "fr-321",
+        "classification": FeatureReviewFindingClassification.SOFT_FINDING,
+        "selected_action": FeatureReviewFindingAction.ACCEPT,
+        "outcome": FeatureReviewFindingOutcome.CONTINUE,
+        "fallback_plan": "Re-open as repair if related verification regresses.",
+        "validators_to_rerun": ["review_findings_schema", "release_review_gate"],
+        "evidence_paths": ["runs/release/release_review.md"],
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, FeatureReviewFindingClassificationDecision)
+    assert decision.decision_type == SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION
+    assert decision.classification == FeatureReviewFindingClassification.SOFT_FINDING
+    assert decision.selected_action == FeatureReviewFindingAction.ACCEPT
+
+
+def test_feature_review_finding_classification_requires_expected_action_outcome_mapping() -> None:
+    with pytest.raises(ValidationError, match="repair or accept requires continue outcome"):
+        FeatureReviewFindingClassificationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+                "finding_id": "fr-321",
+                "classification": FeatureReviewFindingClassification.BLOCKER,
+                "selected_action": FeatureReviewFindingAction.REPAIR,
+                "outcome": FeatureReviewFindingOutcome.STOP,
+                "fallback_plan": "Escalate to hard stop if repair cannot be scoped safely.",
+                "validators_to_rerun": ["verification"],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="defer requires stop outcome"):
+        FeatureReviewFindingClassificationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+                "finding_id": "fr-321",
+                "classification": FeatureReviewFindingClassification.BACKLOG_FOLLOW_UP,
+                "selected_action": FeatureReviewFindingAction.DEFER,
+                "outcome": FeatureReviewFindingOutcome.CONTINUE,
+                "fallback_plan": "Track follow-up in backlog before next cycle.",
+                "validators_to_rerun": ["review_findings_schema"],
+            }
+        )
+
+
+def test_feature_review_finding_classification_non_blocking_accept_requires_evidence() -> None:
+    with pytest.raises(ValidationError, match="requires evidence_paths"):
+        FeatureReviewFindingClassificationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+                "finding_id": "fr-321",
+                "classification": FeatureReviewFindingClassification.DUPLICATE,
+                "selected_action": FeatureReviewFindingAction.ACCEPT,
+                "outcome": FeatureReviewFindingOutcome.CONTINUE,
+                "fallback_plan": "Re-open if duplicate linkage cannot be verified.",
+                "validators_to_rerun": ["review_findings_schema", "release_review_gate"],
+                "evidence_paths": [],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="must not use accept action"):
+        FeatureReviewFindingClassificationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+                "finding_id": "fr-321",
+                "classification": FeatureReviewFindingClassification.BLOCKER,
+                "selected_action": FeatureReviewFindingAction.ACCEPT,
+                "outcome": FeatureReviewFindingOutcome.CONTINUE,
+                "fallback_plan": "Escalate to stop if blocker cannot be repaired safely.",
+                "validators_to_rerun": ["verification"],
+                "evidence_paths": ["runs/release/release_review.md"],
+            }
+        )
 
 
 def test_parse_model_output_normalization_decision() -> None:
