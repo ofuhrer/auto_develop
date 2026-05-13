@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,8 @@ from agentic_devloop.runtime_supervisor import (
     ReleaseSummaryReference,
     TuningReportPaths,
 )
-from agentic_devloop.models import TaskContract
+from agentic_devloop.models import ModelOutputNormalizationActionPayload, TaskContract
+from agentic_devloop.supervisor_decisions import DecisionRiskLevel
 
 
 def _input(classification: RepairDecisionClassification, *, attempt: int, max_retries: int) -> RuntimeSupervisorInput:
@@ -325,3 +327,43 @@ def test_planner_contract_normalization_produces_typed_proposal() -> None:
     assert result.applied is True
     assert result.proposal is not None
     assert result.proposal.action_kind == RepairActionKind.PLANNER_CONTRACT_NORMALIZATION
+
+
+def test_model_output_normalization_decision_produces_typed_proposal() -> None:
+    supervisor = RuntimeSupervisor()
+    source_paths = _input(
+        RepairDecisionClassification.PLANNER_CONTRACT_NON_NORMALIZED,
+        attempt=1,
+        max_retries=3,
+    ).source_evidence_paths
+    action_payload = ModelOutputNormalizationActionPayload.model_validate(
+        {
+            "raw_artifact_paths": [Path("planner.raw.json")],
+            "validation_errors": [
+                {"field": "generated_contracts[0].task_id", "message": "Field required", "error_type": "missing"}
+            ],
+            "selected_action": "apply_normalization",
+            "outcome": "normalized_and_retry",
+            "rationale": "Output is useful but missing required fields.",
+            "fallback_plan": "Refuse and stop if normalized output does not validate.",
+            "validators_to_rerun": ["contract_plan", "verification"],
+            "normalized_artifact_path": Path("planner.normalized.json"),
+        }
+    )
+
+    result = supervisor.apply_model_output_normalization_decision(
+        source_evidence_paths=source_paths,
+        decision_id="normalization-typed-001",
+        release_id="planner-normalization-generalization",
+        decided_by="supervisor-agent",
+        risk_level=DecisionRiskLevel.MODERATE,
+        evidence_paths=[Path("normalization-evidence.log")],
+        action_payload=action_payload,
+        decided_at=datetime(2026, 5, 13, 9, 0, 0),
+    )
+
+    assert result.applied is True
+    assert result.stop_evidence is None
+    assert result.proposal is not None
+    assert result.proposal.action_kind == RepairActionKind.PLANNER_CONTRACT_NORMALIZATION
+    assert result.proposal.decision.outcome.value == "normalized_and_retry"

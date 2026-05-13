@@ -927,6 +927,71 @@ class ContractNormalizationOutcome(StrictModel):
     refusal_reasons: list[ContractNormalizationRefusalReason] = Field(default_factory=list)
     artifact_paths: ContractNormalizationArtifactPaths = Field(default_factory=ContractNormalizationArtifactPaths)
 
+
+class ModelOutputNormalizationAction(StrEnum):
+    APPLY_NORMALIZATION = "apply_normalization"
+    REFUSE = "refuse"
+
+
+class ModelOutputNormalizationOutcome(StrEnum):
+    NORMALIZED_AND_RETRY = "normalized_and_retry"
+    REFUSED_AND_STOP = "refused_and_stop"
+
+
+class ModelOutputValidationError(StrictModel):
+    field: str = Field(min_length=1)
+    message: str = Field(min_length=1)
+    error_type: str = Field(min_length=1)
+
+
+class ModelOutputNormalizationActionPayload(StrictModel):
+    raw_artifact_paths: list[Path] = Field(default_factory=list)
+    validation_errors: list[ModelOutputValidationError] = Field(default_factory=list)
+    selected_action: ModelOutputNormalizationAction
+    outcome: ModelOutputNormalizationOutcome
+    rationale: str = Field(min_length=1)
+    fallback_plan: str = Field(min_length=1)
+    validators_to_rerun: list[str]
+    normalized_artifact_path: Path | None = None
+    refusal_reason: str | None = None
+
+    @field_validator("raw_artifact_paths")
+    @classmethod
+    def raw_artifact_paths_must_not_be_empty(cls, values: list[Path]) -> list[Path]:
+        if not values:
+            raise ValueError("raw artifact paths must not be empty")
+        return values
+
+    @field_validator("validators_to_rerun")
+    @classmethod
+    def validators_to_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("validators to rerun must not include empty values")
+        return values
+
+    @model_validator(mode="after")
+    def selected_action_must_match_outcome(self) -> "ModelOutputNormalizationActionPayload":
+        outcome_by_action = {
+            ModelOutputNormalizationAction.APPLY_NORMALIZATION: ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
+            ModelOutputNormalizationAction.REFUSE: ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+        }
+        expected_outcome = outcome_by_action[self.selected_action]
+        if self.outcome != expected_outcome:
+            raise ValueError("selected_action must match outcome")
+        if self.outcome == ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY:
+            if not self.validation_errors:
+                raise ValueError("normalized_and_retry requires validation_errors")
+            if self.normalized_artifact_path is None:
+                raise ValueError("normalized_and_retry requires normalized_artifact_path")
+            if self.refusal_reason is not None:
+                raise ValueError("normalized_and_retry must not include refusal_reason")
+        if self.outcome == ModelOutputNormalizationOutcome.REFUSED_AND_STOP:
+            if self.refusal_reason is None or not self.refusal_reason.strip():
+                raise ValueError("refused_and_stop requires refusal_reason")
+            if self.normalized_artifact_path is not None:
+                raise ValueError("refused_and_stop must not include normalized_artifact_path")
+        return self
+
 class OverlapFinding(StrictModel):
     first_task_id: str = Field(min_length=1)
     second_task_id: str = Field(min_length=1)

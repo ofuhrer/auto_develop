@@ -2,13 +2,23 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
-from agentic_devloop.models import ContractPlan, TaskContract
+from agentic_devloop.models import (
+    ContractPlan,
+    ModelOutputNormalizationActionPayload,
+    TaskContract,
+)
+from agentic_devloop.supervisor_decisions import (
+    DecisionRiskLevel,
+    ModelOutputNormalizationDecision,
+    build_model_output_normalization_decision,
+)
 
 
 class ReleaseEventKind(StrEnum):
@@ -248,6 +258,13 @@ class RepoStateUpdateProposal:
     action_kind: RepairActionKind = RepairActionKind.REPO_STATE_UPDATE_PROPOSAL
 
 
+@dataclass(frozen=True)
+class ModelOutputNormalizationDecisionProposal:
+    decision: ModelOutputNormalizationDecision
+    source_evidence_paths: tuple[Path, ...]
+    action_kind: RepairActionKind = RepairActionKind.PLANNER_CONTRACT_NORMALIZATION
+
+
 RepairProposal = (
     PlannerContractNormalizationProposal
     | TaskSplitOrScopeNarrowingProposal
@@ -256,6 +273,7 @@ RepairProposal = (
     | LongRunningWorkerInspectionSummary
     | ModelEscalationRecommendation
     | RepoStateUpdateProposal
+    | ModelOutputNormalizationDecisionProposal
 )
 
 
@@ -553,6 +571,36 @@ class RuntimeSupervisor:
             proposal=RepoStateUpdateProposal(
                 update_summary=update_summary,
                 proposed_changes=tuple(proposed_changes),
+                source_evidence_paths=source_evidence_paths,
+            ),
+        )
+
+    def apply_model_output_normalization_decision(
+        self,
+        *,
+        source_evidence_paths: tuple[Path, ...],
+        decision_id: str,
+        release_id: str,
+        decided_by: str,
+        risk_level: DecisionRiskLevel,
+        evidence_paths: list[Path],
+        action_payload: ModelOutputNormalizationActionPayload,
+        decided_at: datetime | None = None,
+    ) -> RuntimeSupervisorApplierResult:
+        decision = build_model_output_normalization_decision(
+            decision_id=decision_id,
+            release_id=release_id,
+            decided_at=decided_at or datetime.now(),
+            decided_by=decided_by,
+            risk_level=risk_level,
+            evidence_paths=evidence_paths,
+            action_payload=action_payload,
+        )
+        return RuntimeSupervisorApplierResult(
+            action_kind=RepairActionKind.PLANNER_CONTRACT_NORMALIZATION,
+            applied=True,
+            proposal=ModelOutputNormalizationDecisionProposal(
+                decision=decision,
                 source_evidence_paths=source_evidence_paths,
             ),
         )

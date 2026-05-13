@@ -12,6 +12,10 @@ from pydantic import Field, TypeAdapter, field_validator, model_validator
 
 from agentic_devloop.models import (
     ContractNormalizationRefusalReason,
+    ModelOutputNormalizationAction,
+    ModelOutputNormalizationActionPayload,
+    ModelOutputNormalizationOutcome,
+    ModelOutputValidationError,
     ReleaseFinalizationPolicyName,
     StrictModel,
 )
@@ -365,22 +369,6 @@ class ContractNormalizationDecision(SupervisorDecisionBase):
         return self
 
 
-class ModelOutputNormalizationAction(StrEnum):
-    APPLY_NORMALIZATION = "apply_normalization"
-    REFUSE = "refuse"
-
-
-class ModelOutputNormalizationOutcome(StrEnum):
-    NORMALIZED_AND_RETRY = "normalized_and_retry"
-    REFUSED_AND_STOP = "refused_and_stop"
-
-
-class ModelOutputValidationError(StrictModel):
-    field: str = Field(min_length=1)
-    message: str = Field(min_length=1)
-    error_type: str = Field(min_length=1)
-
-
 class ModelOutputNormalizationDecision(SupervisorDecisionBase):
     decision_type: Literal[SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION] = (
         SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION
@@ -411,31 +399,59 @@ class ModelOutputNormalizationDecision(SupervisorDecisionBase):
 
     @model_validator(mode="after")
     def selected_action_must_match_outcome(self) -> "ModelOutputNormalizationDecision":
-        outcome_by_action = {
-            ModelOutputNormalizationAction.APPLY_NORMALIZATION: ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
-            ModelOutputNormalizationAction.REFUSE: ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
-        }
-        expected_outcome = outcome_by_action[self.selected_action]
-        if self.outcome != expected_outcome:
-            raise ValueError("selected_action must match outcome")
+        ModelOutputNormalizationActionPayload.model_validate(
+            {
+                "raw_artifact_paths": self.raw_artifact_paths,
+                "validation_errors": self.validation_errors,
+                "selected_action": self.selected_action,
+                "outcome": self.outcome,
+                "rationale": self.rationale,
+                "fallback_plan": self.fallback_plan,
+                "validators_to_rerun": self.validators_to_rerun,
+                "normalized_artifact_path": self.normalized_artifact_path,
+                "refusal_reason": self.refusal_reason,
+            }
+        )
         if self.outcome == ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY:
-            if not self.validation_errors:
-                raise ValueError("normalized_and_retry requires validation_errors")
             if not effective_validators_to_rerun(self.validators_to_rerun):
                 raise ValueError(
                     "normalized_and_retry requires explicit validators_to_rerun; "
                     "legacy_schema_v1_validators_unspecified is not runnable"
                 )
-            if self.normalized_artifact_path is None:
-                raise ValueError("normalized_and_retry requires normalized_artifact_path")
-            if self.refusal_reason is not None:
-                raise ValueError("normalized_and_retry must not include refusal_reason")
-        if self.outcome == ModelOutputNormalizationOutcome.REFUSED_AND_STOP:
-            if self.refusal_reason is None or not self.refusal_reason.strip():
-                raise ValueError("refused_and_stop requires refusal_reason")
-            if self.normalized_artifact_path is not None:
-                raise ValueError("refused_and_stop must not include normalized_artifact_path")
         return self
+
+
+def build_model_output_normalization_decision(
+    *,
+    decision_id: str,
+    release_id: str,
+    decided_at: datetime,
+    decided_by: str,
+    risk_level: DecisionRiskLevel,
+    evidence_paths: list[Path],
+    action_payload: ModelOutputNormalizationActionPayload,
+) -> ModelOutputNormalizationDecision:
+    return ModelOutputNormalizationDecision.model_validate(
+        {
+            "schema_version": SCHEMA_VERSION_V1,
+            "decision_id": decision_id,
+            "release_id": release_id,
+            "decided_at": decided_at,
+            "decided_by": decided_by,
+            "rationale": action_payload.rationale,
+            "evidence_paths": evidence_paths,
+            "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+            "risk_level": risk_level,
+            "raw_artifact_paths": action_payload.raw_artifact_paths,
+            "validation_errors": action_payload.validation_errors,
+            "selected_action": action_payload.selected_action,
+            "outcome": action_payload.outcome,
+            "fallback_plan": action_payload.fallback_plan,
+            "validators_to_rerun": action_payload.validators_to_rerun,
+            "normalized_artifact_path": action_payload.normalized_artifact_path,
+            "refusal_reason": action_payload.refusal_reason,
+        }
+    )
 
 
 class EnvironmentRepairOutcome(StrEnum):
