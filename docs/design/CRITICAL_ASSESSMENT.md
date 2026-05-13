@@ -94,6 +94,16 @@ Refactor toward runtime-supervisor decisions:
   supervisor execute bounded environment-repair recipes before declaring a
   release blocked.
 
+Recent dogfood runs make this refactor urgent. Deterministic overlap gates
+blocked a usable release package because multiple contracts touched
+`release.py`; a human then made the obvious scheduling decision to run slices
+sequentially. That judgment should be a typed supervisor decision, not a manual
+escape hatch and not more scheduler branches. Likewise, the feature-review loop
+can find valuable repairs across several rounds, but without convergence policy
+it can also keep expanding scope until retry budget exhaustion. The supervisor
+needs explicit authority to continue, stop, accept with rationale, or defer to
+backlog based on finding class and verification evidence.
+
 The target shape is a smaller deterministic kernel plus explicit agent-facing
 tools. The kernel emits facts and enforces invariants; the runtime supervisor
 interprets facts, proposes repairs, applies approved bounded actions, and reruns

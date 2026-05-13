@@ -136,6 +136,21 @@
 
 - `release.py`, `orchestrator.py`, `backlog.py`, `cli.py`, and `models.py` are
   carrying too many responsibilities for the intended multi-epic governor.
+- Recent dogfood runs showed two concrete places where deterministic code is
+  still doing too much judgment. First, generated contracts for
+  `persistent-governor-memory` were blocked before execution because several
+  tasks touched `src/agentic_devloop/release.py`; in autonomous mode the
+  supervisor should receive an overlap-risk report and choose serialization,
+  stacking, re-slicing, or stopping for a true exclusive-path violation.
+  Second, release-local feature review can produce multiple useful repair
+  passes, but it also risks review churn: new adjacent findings appear after
+  previous findings are fixed. The supervisor should classify findings as
+  hard blockers, soft findings, duplicates, false positives, scope expansion,
+  or backlog follow-ups and stop extending the loop when findings are no longer
+  release-blocking.
+- Code-reduction goal: do not keep adding Python heuristics for these choices.
+  Add typed supervisor decision records instead, then delete or shrink the
+  procedural judgment paths after hard validators can consume those decisions.
 - The service boundaries now split out the single-epic governor path:
   - `GovernorLoop` for one-epic execution, stopping criteria, and repo-state
     refresh.
