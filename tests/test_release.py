@@ -1287,6 +1287,38 @@ def test_state_review_snapshot_collector_writes_deterministic_artifact(tmp_path)
         "20260512T000000Z_demo_release",
         "20260511T000000Z_demo_release",
     ]
+    assert payload["repo_state_path"] == str(repo_state.resolve())
+    assert payload["repo_state_files"] == {
+        "architecture_summary": str((repo_state / "architecture_summary.md").resolve()),
+        "active_constraints": str((repo_state / "active_constraints.yaml").resolve()),
+        "backlog_state": str((repo_state / "backlog_state.yaml").resolve()),
+        "release_plan": str((repo_state / "release_plan.yaml").resolve()),
+        "benchmark_status": str((repo_state / "benchmark_status.json").resolve()),
+    }
+
+
+def test_state_review_snapshot_collector_handles_missing_repo_state_path(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    artifacts_dir = tmp_path / "planning_artifacts"
+    artifacts_dir.mkdir(parents=True)
+
+    artifact_path = collect_release_planning_state_review_snapshot(
+        config_repo_path=repo,
+        repo_state_path=None,
+        runs_dir=tmp_path / "runs",
+        planning_artifacts_dir=artifacts_dir,
+        now=datetime(2026, 5, 13, 0, 0, tzinfo=UTC),
+    )
+
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert payload["repo_state_path"] is None
+    assert payload["repo_state_files"] == {
+        "architecture_summary": None,
+        "active_constraints": None,
+        "backlog_state": None,
+        "release_plan": None,
+        "benchmark_status": None,
+    }
 
 
 def test_state_review_snapshot_collector_requires_existing_planning_artifacts_dir(tmp_path) -> None:
