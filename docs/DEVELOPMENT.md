@@ -104,6 +104,8 @@ Feature review backend notes (implemented today):
 
 Soft-gate exceptions are recorded in the evidence bundle or release root, not hidden in logs. Task-level findings live at `runs/<run-id>/<task-id>/evidence/soft_gate_decision.json`; release-level budget exceptions live at `runs/<run-id>/soft_gate_decisions.json`. Each record includes the finding identifier, severity, risk, recommended actions, evidence paths, decision, rationale, fallback plan, and `validators_rerun`. The rerun list is the reviewer/supervisor checklist for repeating or re-reading the relevant validators before the soft exception is treated as durable. Hard validation still comes first, and the reviewer loop remains bounded to one integrated feature branch per release.
 
+Supervisor decision artifacts are persisted as deterministic JSON files under `runs/<run-id>/supervisor_decisions/` with filenames `<decision_type>__<decision_id>.json`. Loading these artifacts is strict: schema validation failures and missing referenced evidence paths are hard errors, not warning-only conditions.
+
 ## Documentation Rules
 
 Update documentation when behavior changes:

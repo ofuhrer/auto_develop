@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -202,3 +203,53 @@ _SUPERVISOR_DECISION_ADAPTER = TypeAdapter(SupervisorDecisionRecord)
 
 def parse_supervisor_decision(payload: object) -> SupervisorDecisionRecord:
     return _SUPERVISOR_DECISION_ADAPTER.validate_python(payload)
+
+
+def supervisor_decision_artifact_path(
+    *,
+    release_bundle_path: Path,
+    decision_type: SupervisorDecisionType,
+    decision_id: str,
+) -> Path:
+    normalized_decision_id = decision_id.strip()
+    if not normalized_decision_id:
+        raise ValueError("decision_id must not be empty")
+    filename = f"{decision_type.value}__{normalized_decision_id}.json"
+    return release_bundle_path / "supervisor_decisions" / filename
+
+
+def write_supervisor_decision_artifact(
+    *,
+    release_bundle_path: Path,
+    decision: SupervisorDecisionRecord,
+) -> Path:
+    artifact_path = supervisor_decision_artifact_path(
+        release_bundle_path=release_bundle_path,
+        decision_type=decision.decision_type,
+        decision_id=decision.decision_id,
+    )
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(
+        json.dumps(decision.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return artifact_path
+
+
+def load_supervisor_decision_artifact(path: Path) -> SupervisorDecisionRecord:
+    if not path.exists():
+        raise FileNotFoundError(f"supervisor decision artifact does not exist: {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    decision = parse_supervisor_decision(payload)
+    _validate_evidence_paths(decision=decision, artifact_path=path)
+    return decision
+
+
+def _validate_evidence_paths(*, decision: SupervisorDecisionRecord, artifact_path: Path) -> None:
+    artifact_dir = artifact_path.parent
+    for evidence_path in decision.evidence_paths:
+        candidate = evidence_path if evidence_path.is_absolute() else artifact_dir / evidence_path
+        if not candidate.exists():
+            raise ValueError(
+                f"missing evidence path in supervisor decision artifact {artifact_path}: {evidence_path}"
+            )
