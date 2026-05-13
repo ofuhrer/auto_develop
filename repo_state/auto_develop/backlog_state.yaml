@@ -5,8 +5,7 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   subsystem failures, normalizes useful model output before strict validation, and
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
-current_focus: integration-review-evidence-handoff
-active_epic: integration-review-evidence-handoff
+current_focus: autonomous-finalization-and-cleanup
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -25,18 +24,9 @@ completed_epics:
 - review-loop-convergence-policy
 - multi-epic-run-governor-initial-loop
 - multi-epic-run-governor-hardening
+- integration-review-evidence-handoff
 blocked_epics: []
 candidate_epics:
-- id: integration-review-evidence-handoff
-  title: Package final integration review evidence and continuation decisions.
-  rationale: The multi-epic governor hardening cycle showed that implementation and
-    bounded repair can complete autonomously, but final review still escalated when
-    the reviewer lacked complete branch context and final verification evidence. The
-    governor should run final verification on the feature branch, package full diff/context,
-    capture reviewer limitations, and decide blocker versus accepted risk versus backlog
-    follow-up.
-  priority: 1
-  next_release_id: integration-review-evidence-handoff
 - id: autonomous-finalization-and-cleanup
   title: Land accepted feature branches and clean branches/worktrees by policy.
   rationale: Successful feature branches still need a policy-owned merge or PR, push,
@@ -100,16 +90,24 @@ candidate_epics:
   priority: 10
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
-active_epics:
-- epic_id: integration-review-evidence-handoff
-  retry_count: 0
-  repair_count: 0
-  outcome_references: []
-  unresolved_finding_references: []
-  state_review_snapshot_references: []
-  updated_at: '2026-05-13T18:11:09.026787Z'
+active_epics: []
 reviewed_epics: []
 completed_epic_records:
+- epic_id: integration-review-evidence-handoff
+  status_reason: completed via feature/integration-review-evidence-handoff and merged
+    into main; final verification evidence, review-context handoff, reviewer limitation
+    normalization, continuation-decision artifacts, and artifact-summary links are
+    implemented
+  retry_count: 0
+  repair_count: 1
+  outcome_references:
+  - release_id: integration-review-evidence-handoff
+    outcome: accepted
+    run_summary_path: runs/20260513T182346Z_integration-review-evidence-handoff_release/release_summary.json
+    recorded_at: '2026-05-13T19:05:00Z'
+  unresolved_finding_references: []
+  state_review_snapshot_references: []
+  updated_at: '2026-05-13T19:05:00Z'
 - epic_id: multi-epic-run-governor-hardening
   status_reason: completed via feature/multi-epic-run-governor-hardening; implementation
     and repair waves completed, final integration evidence was manually verified before
@@ -138,10 +136,9 @@ notes:
   release-local feature review, review-loop convergence, state-review snapshots, and
   the repeated `run-governor --epic-count N` shell.'
 - 'Architecture pivot: deterministic code owns Git/worktrees, verification, evidence,
-  metrics, typed persistence, configured finalization mechanics, and hard gates.
-  High-level supervisor agents should own judgment-heavy execution strategy, reviewer
-  normalization, finding adjudication, retry/split/replan, soft-budget, and roadmap
-  update decisions.'
+  metrics, typed persistence, configured finalization mechanics, and hard gates. High-level
+  supervisor agents should own judgment-heavy execution strategy, reviewer normalization,
+  finding adjudication, retry/split/replan, soft-budget, and roadmap update decisions.'
 - Hard gates remain for forbidden paths, generated artifacts, missing required evidence,
   unsafe finalization, credentials/network policy, destructive operations, and unrepaired
   verification failures. Routine schema drift, worker failures, flaky tests, stale
@@ -149,12 +146,10 @@ notes:
 - 'Dogfood finding: one-shot high-capability agents produced coherent implementations
   faster than over-decomposed contract batches. Prioritize supervisor-owned execution
   strategy and normalization before expanding multi-epic autonomy.'
-- 'Current top gap: final integration acceptance needs first-class evidence handoff.
-  The governor must run final verification on the exact feature branch, package diff/context,
-  capture reviewer limitations, and classify remaining findings before finalization.'
-- 'Next sequencing: integration-review-evidence-handoff, then autonomous-finalization-and-cleanup,
-  then planner-normalization-generalization, then governor-cockpit-v2 and shared
-  verification runtime.'
+- 'Current top gap: accepted feature branches still require policy-owned merge/push/cleanup
+  and durable state-memory finalization before unattended multi-epic operation is credible.'
+- 'Next sequencing: autonomous-finalization-and-cleanup, then planner-normalization-generalization,
+  then governor-cockpit-v2 and shared verification runtime.'
 - External targets should retain compact durable `.auto_develop/repo_state`, objectives,
   contracts, and outcome history in the target or control repo; raw runs remain local
   or archived evidence.
