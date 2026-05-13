@@ -322,12 +322,12 @@ def test_feature_review_models_validate() -> None:
         unresolved_finding_ids=["feature-001"],
         resolved_finding_ids=[],
         accepted_finding_ids=[],
-        stop_reason="verification_failed",
+        stop_reason="blocked_by_hard_gate",
     )
 
     assert decision.findings[0].severity == FeatureReviewSeverity.HIGH
     assert decision.recommendation == FeatureReviewRecommendation.APPROVE_WITH_REPAIRS
-    assert recheck.stop_reason == "verification_failed"
+    assert recheck.stop_reason == "blocked_by_hard_gate"
 
 
 def test_feature_review_models_reject_unknown_fields() -> None:

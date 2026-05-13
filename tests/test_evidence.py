@@ -323,7 +323,7 @@ def test_write_feature_review_recheck_writes_stable_json(tmp_path) -> None:
         unresolved_finding_ids=["feature-001"],
         resolved_finding_ids=["feature-002"],
         accepted_finding_ids=["feature-003"],
-        stop_reason="retry_budget_exhausted",
+        stop_reason="blocked_by_retry_budget",
     )
 
     path = write_feature_review_recheck(release_bundle_path, record)
@@ -334,7 +334,7 @@ def test_write_feature_review_recheck_writes_stable_json(tmp_path) -> None:
     assert payload["unresolved_finding_ids"] == ["feature-001"]
     assert payload["resolved_finding_ids"] == ["feature-002"]
     assert payload["accepted_finding_ids"] == ["feature-003"]
-    assert payload["stop_reason"] == "retry_budget_exhausted"
+    assert payload["stop_reason"] == "blocked_by_retry_budget"
 
 
 def task_budget():

@@ -839,6 +839,8 @@ Implemented `feature_review_recheck.json` stop reasons:
 - `blocked_by_retry_budget`: required findings remained after bounded repair retries.
 - `blocked_by_hard_gate`: reviewer escalation, repair-contract generation failure, repair-task failure, or verification rerun failure blocked progression.
 
+`feature_review_recheck.json.stop_reason` is validated against exactly this fixed taxonomy.
+
 Finalization gating treats unresolved required findings from the reviewer decision as authoritative, and also treats unresolved blocked-state recheck findings as required unless the same finding IDs are explicitly optional in the latest reviewer decision. That keeps the reviewer loop bounded to the integrated feature branch while leaving broader multi-epic review orchestration, persistent memory, and pre-epic state refresh as planned work.
 
 The planned multi-epic governor should expose one parent log stream:

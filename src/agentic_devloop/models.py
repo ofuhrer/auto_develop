@@ -563,12 +563,19 @@ class FeatureReviewDecision(StrictModel):
         return values
 
 
+class FeatureReviewRecheckStopReason(StrEnum):
+    RESOLVED = "resolved"
+    ACCEPTED_WITH_RATIONALE = "accepted_with_rationale"
+    BLOCKED_BY_RETRY_BUDGET = "blocked_by_retry_budget"
+    BLOCKED_BY_HARD_GATE = "blocked_by_hard_gate"
+
+
 class FeatureReviewRecheckRecord(StrictModel):
     release_id: str = Field(min_length=1)
     unresolved_finding_ids: list[str] = Field(default_factory=list)
     resolved_finding_ids: list[str] = Field(default_factory=list)
     accepted_finding_ids: list[str] = Field(default_factory=list)
-    stop_reason: str | None = None
+    stop_reason: FeatureReviewRecheckStopReason | None = None
 
     @field_validator("unresolved_finding_ids", "resolved_finding_ids", "accepted_finding_ids")
     @classmethod
