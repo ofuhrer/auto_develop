@@ -239,6 +239,14 @@ Completed: `governor-state-review` added deterministic pre-epic state-review sna
 10. `governor-state-refresh`: teach the governor to apply or commit policy-compliant roadmap/backlog/repo-state updates after each epic with outcome, metrics, lessons, review findings, and next recommendations.
 11. `onboarding-bootstrap`: add a bootstrap/onboarding command or checklist that turns a freshly cloned target repo plus one or two prompts into the required config, repo-state memory, objective/backlog directories, and initial doctor checks.
 
+Current priority rationale:
+
+1. `supervisor-execution-strategy` comes first because the one-shot comparison showed fixed decomposition can reduce coherence and increase overhead for medium architectural work. Without this seam, the N-epic governor will repeatedly over-decompose work and spend budget on unnecessary orchestration.
+2. `model-output-normalization` comes second because useful model output currently can become a hard stop before the supervisor has a chance to repair it. Planner and reviewer output should be normalized into strict typed artifacts before deterministic gates decide whether to stop.
+3. `review-loop-convergence-policy` follows because feature review is valuable but can produce adjacent findings indefinitely unless the supervisor can classify blockers, accepted risks, false positives, duplicates, and backlog follow-ups.
+4. `multi-epic-run-governor` should wait until strategy selection, normalization, and review convergence are in place; otherwise the system will amplify the exact dogfood failures seen in single-epic runs.
+5. `governor-cockpit-v2`, shared runtime, environment repair, liveness, artifact ownership, state refresh, and onboarding then harden operations for repeated unattended runs.
+
 Important dependency order:
 
 1. Implement state review and feature review before N-epic looping.

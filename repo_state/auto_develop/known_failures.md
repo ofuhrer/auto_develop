@@ -1,5 +1,29 @@
 # Known Failures
 
+## Experiment learning: one-shot versus decomposed execution
+
+- The `supervisor-owned-release-scheduling` experiment compared a frozen
+  auto_develop-generated five-contract package with a one-shot high-capability
+  Codex implementation from the same base commit.
+- The one-shot branch changed the same 13 files, passed the same full test
+  suite, and produced a more coherent scheduling schema with explicit action
+  enums, structured staleness inputs, and action/outcome consistency checks.
+- The auto_develop run accepted all five worker tasks with no retries and
+  cleaned worktrees/agent branches correctly, but finalization was blocked
+  because useful semantic reviewer output failed strict schema validation on
+  empty `evidence_paths`.
+- Architectural consequence: the governor must choose execution strategy before
+  contract generation. One-shot implementation is the right default for
+  cohesive medium architectural work; decomposed contracts are useful when work
+  is independent, risky, needs isolation, or benefits from parallelism.
+- Raw planner/reviewer output should be normalized or repaired before strict
+  typed validation hard-stops execution. Strict schemas remain valuable after
+  normalization.
+- This finding does not justify a rewrite. Keep the deterministic kernel for
+  Git/worktrees, hard gates, verification, evidence, metrics, typed artifact
+  persistence, and finalization. Move judgment-heavy orchestration behind a
+  supervisor/governor boundary.
+
 ## Closed-loop run learning: unsupported primary worker
 
 - The first full release run showed that `gpt-5.3-codex-spark` is not

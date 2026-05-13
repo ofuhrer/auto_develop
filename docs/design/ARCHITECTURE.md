@@ -11,7 +11,7 @@ The target operating model is intentionally terse for the human:
 1. Provide one or two onboarding prompts for a freshly cloned `auto_develop` repo and the target repository.
 2. Configure the target repository goal, repository instructions, credentials, and hard policy boundaries.
 3. Invoke a high-level development loop with the number of epics to implement.
-4. Let the governor and runtime supervisor select epics, decompose work, run workers, repair subsystem failures, update state, and continue.
+4. Let the governor and runtime supervisor select epics, choose one-shot or decomposed execution, run the selected strategy, repair subsystem failures, update state, and continue.
 5. Stop only for major problems: exhausted autonomous repair, missing credentials, unsafe policy expansion, destructive operations not explicitly delegated, or no actionable work remaining.
 
 ## Target Use Case
@@ -110,7 +110,7 @@ Rules:
 
 ## Agent Drift Controls
 
-Agents must not receive broad release objectives directly.
+Agents must not receive broad unbounded release objectives directly. A one-shot implementation agent may receive a cohesive epic only when the supervisor has explicitly selected one-shot strategy and the prompt still carries bounded objective, non-goals, allowed scope, verification commands, reporting requirements, and hard stop conditions.
 
 Bad:
 
