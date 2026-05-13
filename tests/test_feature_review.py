@@ -11,6 +11,7 @@ from agentic_devloop.feature_review import (
     MAX_FEATURE_REVIEW_DIFF_CHARS,
     FeatureReviewClassificationError,
     FeatureReviewContext,
+    _collect_changed_file_excerpts,
     assemble_feature_review_context,
     classify_feature_review_findings_for_convergence,
     generate_repair_contracts_for_required_findings,
@@ -265,6 +266,29 @@ def test_render_feature_review_prompt_truncates_diff_summaries_and_changed_file_
     assert "feature review context truncated: git diff --stat exceeded" in prompt
     assert "feature review context truncated: git diff --numstat exceeded" in prompt
     assert "feature review context truncated: excerpt src/agentic_devloop/feature_review.py exceeded" in prompt
+
+
+def test_changed_file_excerpts_omit_sensitive_paths(tmp_path: Path) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _git(repo_path, "init")
+    _git(repo_path, "config", "user.email", "test@example.com")
+    _git(repo_path, "config", "user.name", "Test User")
+    (repo_path / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+    (repo_path / "src").mkdir()
+    (repo_path / "src" / "app.py").write_text("print('ok')\n", encoding="utf-8")
+    _git(repo_path, "add", ".")
+    _git(repo_path, "commit", "-m", "initial")
+    _git(repo_path, "checkout", "-b", "feature/demo")
+
+    excerpts = _collect_changed_file_excerpts(
+        repo_path=repo_path,
+        integration_branch="feature/demo",
+        changed_files=[".env", "src/app.py"],
+    )
+
+    assert (".env", "excerpt omitted: path may contain secrets or credentials") in excerpts
+    assert any(path == "src/app.py" and "print('ok')" in excerpt for path, excerpt in excerpts)
 
 
 def test_invoke_feature_reviewer_parses_decision_and_writes_artifacts(monkeypatch, tmp_path: Path) -> None:

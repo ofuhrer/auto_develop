@@ -2659,16 +2659,20 @@ def _run_final_integration_verification(
     output_dir.mkdir(parents=True, exist_ok=True)
     worktree_path = output_dir / "worktree"
     worktree_log_path = output_dir / "worktree.log"
-    cleanup_root = output_dir.resolve()
-    _assert_safe_feature_review_rerun_worktree(worktree_path.resolve(), cleanup_root)
+    _assert_safe_final_integration_verification_worktree(worktree_path.resolve(), output_dir.resolve())
     worktree_log_lines = [f"integration_branch={integration_branch}", f"integration_commit={integration_commit}"]
 
     if worktree_path.exists():
-        run_process(
-            ["git", "worktree", "remove", "--force", str(worktree_path)],
-            cwd=repo_path,
-            timeout_seconds=120,
+        worktree_log_lines.append(f"refusing to remove pre-existing final verification worktree: {worktree_path}")
+        worktree_log_path.write_text(
+            "\n".join(line for line in worktree_log_lines if line) + "\n",
+            encoding="utf-8",
         )
+        raise ValueError(
+            "final integration verification worktree already exists; refusing forced cleanup "
+            f"before this run successfully added it: {worktree_path}"
+        )
+    added_worktree = False
     add = run_process(
         ["git", "worktree", "add", "--detach", str(worktree_path), integration_commit],
         cwd=repo_path,
@@ -2686,6 +2690,7 @@ def _run_final_integration_verification(
             "failed to create final integration verification worktree: "
             + (add.stderr.strip() or add.stdout.strip())
         )
+    added_worktree = True
 
     runner = VerificationRunner(timeout_seconds=timeout_seconds)
     try:
@@ -2696,20 +2701,21 @@ def _run_final_integration_verification(
             stop_on_failure=True,
         )
     finally:
-        remove = run_process(
-            ["git", "worktree", "remove", "--force", str(worktree_path)],
-            cwd=repo_path,
-            timeout_seconds=120,
-        )
-        worktree_log_lines.append(f"$ git worktree remove --force {worktree_path}")
-        worktree_log_lines.append(remove.stdout.rstrip())
-        worktree_log_lines.append(remove.stderr.rstrip())
-        if remove.exit_code != 0:
-            _report(
-                progress,
-                "event=final_integration_verification_worktree_cleanup_failed error="
-                + (remove.stderr.strip() or remove.stdout.strip()),
+        if added_worktree:
+            remove = run_process(
+                ["git", "worktree", "remove", "--force", str(worktree_path)],
+                cwd=repo_path,
+                timeout_seconds=120,
             )
+            worktree_log_lines.append(f"$ git worktree remove --force {worktree_path}")
+            worktree_log_lines.append(remove.stdout.rstrip())
+            worktree_log_lines.append(remove.stderr.rstrip())
+            if remove.exit_code != 0:
+                _report(
+                    progress,
+                    "event=final_integration_verification_worktree_cleanup_failed error="
+                    + (remove.stderr.strip() or remove.stdout.strip()),
+                )
         worktree_log_path.write_text(
             "\n".join(line for line in worktree_log_lines if line) + "\n",
             encoding="utf-8",
@@ -2733,6 +2739,16 @@ def _run_final_integration_verification(
         + f"success={str(success).lower()} path={evidence_path}",
     )
     return evidence_path
+
+
+def _assert_safe_final_integration_verification_worktree(worktree_path: Path, output_dir: Path) -> None:
+    expected = (output_dir / "worktree").resolve()
+    if worktree_path.resolve() == expected and output_dir.resolve() in worktree_path.resolve().parents:
+        return
+    raise ValueError(
+        "final integration verification worktree must be exactly under the release "
+        f"final_integration_verification directory: worktree={worktree_path} output_dir={output_dir}"
+    )
 
 
 def _command_with_env_prefixes(parts: list[str]) -> list[str]:
@@ -2875,6 +2891,24 @@ def _write_final_review_continuation_decision(
     unresolved_required = [
         str(item) for item in finalization_gate.get("unresolved_required_finding_ids", []) if str(item).strip()
     ]
+    if not unresolved_required and feature_review_decision is not None and not bool(finalization_gate.get("allowed")):
+        unresolved_required = [
+            finding.finding_id
+            for finding in feature_review_decision.findings
+            if finding.required_repairs
+        ]
+    if not unresolved_required and feature_review_path is not None and feature_review_path.exists() and not bool(finalization_gate.get("allowed")):
+        try:
+            persisted_review = FeatureReviewDecision.model_validate(
+                json.loads(feature_review_path.read_text(encoding="utf-8"))
+            )
+            unresolved_required = [
+                finding.finding_id
+                for finding in persisted_review.findings
+                if finding.required_repairs
+            ]
+        except (OSError, json.JSONDecodeError, ValueError):
+            unresolved_required = []
     accepted_risks = feature_review_decision.accepted_risks if feature_review_decision is not None else []
     accepted_findings = feature_review_recheck.accepted_finding_ids if feature_review_recheck is not None else []
     deferred_findings = feature_review_recheck.deferred_finding_ids if feature_review_recheck is not None else []

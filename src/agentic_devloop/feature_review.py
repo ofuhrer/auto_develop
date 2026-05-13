@@ -846,6 +846,9 @@ def _collect_changed_file_excerpts(
 ) -> list[tuple[str, str]]:
     excerpts: list[tuple[str, str]] = []
     for relative_path in changed_files[:MAX_FEATURE_REVIEW_CHANGED_FILE_EXCERPTS]:
+        if _should_omit_changed_file_excerpt(relative_path):
+            excerpts.append((relative_path, "excerpt omitted: path may contain secrets or credentials"))
+            continue
         content = _git_show_file(repo_path, integration_branch=integration_branch, relative_path=relative_path)
         if content is None:
             continue
@@ -857,6 +860,14 @@ def _collect_changed_file_excerpts(
         )
         excerpts.append((relative_path, bounded))
     return excerpts
+
+
+def _should_omit_changed_file_excerpt(relative_path: str) -> bool:
+    normalized = relative_path.strip().lower()
+    name = Path(normalized).name
+    sensitive_suffixes = (".env", ".pem", ".key", ".p12", ".pfx")
+    sensitive_terms = ("secret", "credential", "credentials", "private_key", "apikey", "api_key")
+    return name.endswith(sensitive_suffixes) or any(term in normalized for term in sensitive_terms)
 
 
 def _git_show_file(repo_path: Path, *, integration_branch: str, relative_path: str) -> str | None:

@@ -25,6 +25,7 @@ from agentic_devloop.models import FeatureReviewDecision, FeatureReviewRecheckRe
 from agentic_devloop.orchestrator import TaskRunResult, executor_config_for_task, executor_configs_for_task
 from agentic_devloop.release import (
     collect_release_planning_state_review_snapshot,
+    _assert_safe_final_integration_verification_worktree,
     _assert_safe_feature_review_rerun_worktree,
     _build_release_finalization_gate,
     _completed_release_task_ids,
@@ -37,6 +38,7 @@ from agentic_devloop.release import (
     _release_dependency_map,
     _should_preserve_task_branch,
     _should_preserve_task_worktree,
+    _write_final_review_continuation_decision,
     analyze_contract_overlaps,
     run_release,
 )
@@ -753,6 +755,19 @@ def test_run_release_writes_final_integration_verification_evidence(tmp_path) ->
     assert len(summary_verification["command_results"]) == 1
     assert Path(summary_verification["command_results"][0]["stdout_path"]).exists()
     assert Path(summary_verification["command_results"][0]["stderr_path"]).exists()
+
+
+def test_final_integration_verification_worktree_guard_requires_exact_child(tmp_path: Path) -> None:
+    output_dir = tmp_path / "release" / "final_integration_verification"
+    output_dir.mkdir(parents=True)
+
+    _assert_safe_final_integration_verification_worktree(output_dir / "worktree", output_dir)
+
+    with pytest.raises(ValueError, match="final integration verification worktree"):
+        _assert_safe_final_integration_verification_worktree(output_dir / "other", output_dir)
+
+    with pytest.raises(ValueError, match="final integration verification worktree"):
+        _assert_safe_final_integration_verification_worktree(tmp_path / "worktree", output_dir)
 
 
 def test_run_release_runs_final_integration_verification_without_reviewer_role(tmp_path) -> None:
@@ -4155,6 +4170,47 @@ def test_run_release_persists_final_review_continuation_decision_artifact(tmp_pa
     assert continuation["hard_stop_reason"]
     assert Path(summary["final_integration_verification_path"]).exists()
     assert "final_review_continuation_decision_path" in summary
+
+
+def test_final_review_continuation_hard_stop_keeps_unresolved_required_finding_ids(tmp_path: Path) -> None:
+    review = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "v0.1.0",
+            "reviewer": "strong_model",
+            "summary": "Required repair cannot be mapped.",
+            "recommendation": "require_repairs",
+            "findings": [
+                {
+                    "finding_id": "finding-required-1",
+                    "severity": "high",
+                    "summary": "Fix required in file outside allowed contract scope.",
+                    "affected_files": ["src/outside_scope.py"],
+                    "required_repairs": ["Apply a code fix."],
+                }
+            ],
+        }
+    )
+
+    decision_path = _write_final_review_continuation_decision(
+        release_root=tmp_path,
+        release_id="v0.1.0",
+        feature_review_decision=review,
+        feature_review_path=tmp_path / "feature_review.json",
+        feature_review_recheck=None,
+        feature_review_recheck_path=None,
+        feature_review_proposals=[],
+        final_integration_verification_path=tmp_path / "final_integration_verification.json",
+        finalization_gate={
+            "allowed": False,
+            "reason": "release_decision_not_accepted",
+            "unresolved_required_finding_ids": [],
+        },
+    )
+
+    continuation = json.loads(decision_path.read_text(encoding="utf-8"))
+    assert continuation["outcome"] == "hard_stop"
+    assert continuation["finding_ids"] == ["finding-required-1"]
+    assert continuation["hard_stop_reason"] == "missing_generated_repair_contracts"
 
 
 def test_final_review_continuation_decision_serialized_examples() -> None:
