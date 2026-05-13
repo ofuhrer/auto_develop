@@ -492,7 +492,10 @@ def classify_feature_review_findings_for_convergence(
 ) -> FeatureReviewConvergenceResult:
     previous_findings = [finding for item in previous_decisions for finding in item.findings]
     classified: list[FeatureReviewFindingConvergenceResult] = []
+    required_repair_ids: set[str] = set()
     for finding in decision.findings:
+        if finding.required_repairs:
+            required_repair_ids.add(finding.finding_id)
         previous_match, repeated_by_id, adjacent_similarity = _match_previous_finding(
             finding=finding,
             previous_findings=previous_findings,
@@ -570,9 +573,11 @@ def classify_feature_review_findings_for_convergence(
             )
         )
 
+    _ensure_convergence_gate_consistency(classified=classified, required_repair_ids=required_repair_ids)
     return FeatureReviewConvergenceResult(
         findings=classified,
-        blocking_finding_ids=sorted(item.finding_id for item in classified if item.classification == "blocker"),
+        # Hard gates are tied to required repairs, not to "accept" vs "defer" soft decisions.
+        blocking_finding_ids=sorted(required_repair_ids),
         accepted_finding_ids=sorted(item.finding_id for item in classified if item.selected_action == "accept"),
         deferred_finding_ids=sorted(item.finding_id for item in classified if item.selected_action == "defer"),
         false_positive_candidate_ids=sorted(
@@ -1073,3 +1078,23 @@ def _is_verification_only_finding(finding: FeatureReviewFinding) -> bool:
         return False
     verification_markers = ("verification", "pytest", "test", "junit")
     return all(any(marker in str(path).lower() for marker in verification_markers) for path in finding.evidence_paths)
+
+
+def _ensure_convergence_gate_consistency(
+    *,
+    classified: list[FeatureReviewFindingConvergenceResult],
+    required_repair_ids: set[str],
+) -> None:
+    for item in classified:
+        if item.finding_id in required_repair_ids and item.selected_action != "repair":
+            raise FeatureReviewContextError(
+                f"required repair finding {item.finding_id} cannot be classified with action {item.selected_action}"
+            )
+        if item.selected_action == "defer" and item.classification not in {
+            "duplicate",
+            "backlog_follow_up",
+            "scope_expansion",
+        }:
+            raise FeatureReviewContextError(
+                f"deferred finding {item.finding_id} must be duplicate/backlog_follow_up/scope_expansion"
+            )
