@@ -269,7 +269,11 @@ def run_release(
     feature_review_decision: FeatureReviewDecision | None = None
     feature_review_recheck: FeatureReviewRecheckRecord | None = None
 
-    task_decision = _release_decision([result.decision for result in task_results])
+    task_decision = (
+        Decision.ACCEPTED
+        if not task_results and skipped_completed_task_ids
+        else _release_decision([result.decision for result in task_results])
+    )
     if task_decision == Decision.ACCEPTED and "reviewer" in config.model_roles:
         feature_review_loop = _run_feature_review_and_repair_loop(
             project_id=project_id,
