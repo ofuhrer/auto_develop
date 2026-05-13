@@ -344,6 +344,33 @@ def test_feature_review_recheck_normalizes_legacy_blocked_by_stop_reason() -> No
     assert recheck.stop_reason == "blocked_by_hard_gate"
 
 
+def test_feature_review_finding_drops_empty_evidence_path_items() -> None:
+    finding = FeatureReviewFinding.model_validate(
+        {
+            "finding_id": "feature-001",
+            "severity": "high",
+            "summary": "Reviewer emitted an empty evidence path but otherwise actionable finding.",
+            "affected_files": ["src/agentic_devloop/state_store.py"],
+            "evidence_paths": ["", "  ", "src/agentic_devloop/state_store.py"],
+            "required_repairs": ["Fix the state transition invariant."],
+        }
+    )
+
+    assert finding.evidence_paths == [Path("src/agentic_devloop/state_store.py")]
+
+
+def test_feature_review_finding_rejects_empty_evidence_paths_after_normalization() -> None:
+    with pytest.raises(ValidationError, match="must contain at least one non-empty path when provided"):
+        FeatureReviewFinding.model_validate(
+            {
+                "finding_id": "feature-001",
+                "severity": "high",
+                "summary": "Reviewer supplied only empty evidence paths.",
+                "evidence_paths": ["", "  "],
+            }
+        )
+
+
 def test_feature_review_models_reject_unknown_fields() -> None:
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         FeatureReviewFinding.model_validate(

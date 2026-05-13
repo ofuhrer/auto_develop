@@ -218,27 +218,32 @@ Current implementation status:
 - The soft-gates dogfood run showed a planner-output normalization gap: the generated contracts were semantically usable but missed required `git diff`/changed-files evidence and used worktree-local `.venv` verification commands. Fully autonomous execution should repair those bounded defects, rerun deterministic contract admission, and continue without manual materialization.
 - The same run showed an observability gap for multi-epic operation: per-release `release.log` files are useful child artifacts, but operators need one top-level `governor.log` to watch backlog planning, objective/contract generation, contract normalization, release execution, repair, finalization, state refresh, and next-epic selection across the whole run.
 - The agentic-feature-review-loop run implemented the release-local semantic review boundary: when `model_roles.reviewer` is configured, `run-release` reviews the integrated feature branch, persists `feature_review.json` and `feature_review_recheck.json`, creates bounded repair contracts for required findings, reruns verification, and gates finalization on unresolved required findings or accepted-with-rationale findings. This is a release-local safety boundary, not the broader multi-epic governor; persistent memory, pre-epic state-review decisioning, and N-epic orchestration remain planned.
+- The persistent-governor-memory dogfood run showed that useful generated contracts can be blocked by deterministic overlap policy even when a high-level supervisor would simply serialize, stack, or re-slice the work. It also showed reviewer churn: multiple useful repair passes can improve quality, but without explicit convergence semantics the reviewer can keep discovering adjacent issues until retry budget exhaustion. These are not reasons to remove safety; they are reasons to move scheduling, repair-loop continuation, and finding deferral into typed supervisor decisions that rerun deterministic validators.
 
 Prioritized Phase 4 epics:
 
 Completed: `governor-state-review` added deterministic pre-epic state-review snapshot capture and backlog-planning evidence linkage. `agentic-feature-review-loop` added the release-local semantic review gate with structured reviewer artifacts, bounded repair contracts, verification reruns, and finalization gating. Follow-on decisioning and memory work should now be expressed through later governor/memory epics rather than reusing completed release ids.
 
 1. `persistent-governor-memory`: make persistent backlog/repo-state authoritative for completed, skipped, blocked, active, candidate, and reviewed epics across runs. This should include compact release/epic outcome summaries, unresolved review findings, retry counts, and state-review snapshots.
-2. `multi-epic-run-governor`: extend the current one-epic governor boundary into a top-level `run-governor` or extended `run-backlog` loop that accepts an epic count and continues through the next N highest-priority epics. This should come after state review, feature review, and persistent memory exist, otherwise it will repeat stale or insufficiently reviewed work.
-3. `governor-cockpit-v2`: expand the governor run/log stream (`governor.log`, `governor.raw.log`, `events.jsonl`) so one tail command monitors the full N-epic run and links state-review snapshots, child release logs, feature reviews, repair loops, state updates, and next-epic selection.
-4. `shared-verification-runtime`: add shared verification-runtime configuration so isolated worktrees can run tests through a known Python/toolchain without requiring a per-worktree `.venv`.
-5. `environment-repair-actions`: add environment repair for missing `.venv`, command-not-found, missing `PYTHONPATH`, and dependency-runtime drift when project policy declares a safe repair.
-6. `executor-liveness-supervision`: improve executor liveness detection with process, output, heartbeat, and file/diff activity signals before declaring a worker stuck.
-7. `target-artifact-ownership`: add target-artifact ownership support with project-configured artifact directories, target-repo `.auto_develop/` layout, and compact release/epic outcome summaries in tracked repo-state so deleting the controller checkout does not lose target development memory or next-epic context.
-8. `governor-state-refresh`: teach the governor to apply or commit policy-compliant roadmap/backlog/repo-state updates after each epic with outcome, metrics, lessons, review findings, and next recommendations.
-9. `onboarding-bootstrap`: add a bootstrap/onboarding command or checklist that turns a freshly cloned target repo plus one or two prompts into the required config, repo-state memory, objective/backlog directories, and initial doctor checks.
+2. `supervisor-decision-records`: introduce typed, auditable supervisor decisions for scheduling, repair-loop continuation, finding adjudication, soft-budget acceptance, contract normalization, and environment repair. This is the code-reduction seam: deterministic code emits facts and enforces hard validators; the supervisor owns reasoning-heavy judgment.
+3. `supervisor-owned-release-scheduling`: replace unconditional normal-source overlap stops with overlap-risk reports plus supervisor DAG decisions. Hard-block only configured exclusive paths, generated artifacts, lockfiles, migrations, destructive scripts, forbidden paths, or out-of-scope files.
+4. `review-loop-convergence-policy`: classify repeated reviewer findings as blockers, soft findings, duplicates, false positives, scope expansion, or backlog follow-ups after bounded repair cycles. Convert non-blocking adjacent quality issues into governor memory instead of extending repair loops indefinitely.
+5. `multi-epic-run-governor`: extend the current one-epic governor boundary into a top-level `run-governor` or extended `run-backlog` loop that accepts an epic count and continues through the next N highest-priority epics. This should come after state review, feature review, persistent memory, and supervisor decision records exist, otherwise it will repeat stale work and procedural stops.
+6. `governor-cockpit-v2`: expand the governor run/log stream (`governor.log`, `governor.raw.log`, `events.jsonl`) so one tail command monitors the full N-epic run and links state-review snapshots, child release logs, feature reviews, repair loops, state updates, and next-epic selection.
+7. `shared-verification-runtime`: add shared verification-runtime configuration so isolated worktrees can run tests through a known Python/toolchain without requiring a per-worktree `.venv`.
+8. `environment-repair-actions`: add environment repair for missing `.venv`, command-not-found, missing `PYTHONPATH`, and dependency-runtime drift when project policy declares a safe repair.
+9. `executor-liveness-supervision`: improve executor liveness detection with process, output, heartbeat, and file/diff activity signals before declaring a worker stuck.
+10. `target-artifact-ownership`: add target-artifact ownership support with project-configured artifact directories, target-repo `.auto_develop/` layout, and compact release/epic outcome summaries in tracked repo-state so deleting the controller checkout does not lose target development memory or next-epic context.
+11. `governor-state-refresh`: teach the governor to apply or commit policy-compliant roadmap/backlog/repo-state updates after each epic with outcome, metrics, lessons, review findings, and next recommendations.
+12. `onboarding-bootstrap`: add a bootstrap/onboarding command or checklist that turns a freshly cloned target repo plus one or two prompts into the required config, repo-state memory, objective/backlog directories, and initial doctor checks.
 
 Important dependency order:
 
 1. Implement state review and feature review before N-epic looping.
 2. Implement persistent memory before relying on repeated autonomous cycles.
-3. Keep shared verification runtime and environment repair close behind, because repeated worktree test failures are a known source of unnecessary stops.
-4. Expand the cockpit log as soon as multiple child artifacts exist, otherwise operators cannot monitor long runs coherently.
+3. Add typed supervisor decisions before expanding N-epic looping; otherwise hard-coded scheduling, repair, and review-loop heuristics will keep growing.
+4. Keep shared verification runtime and environment repair close behind, because repeated worktree test failures are a known source of unnecessary stops.
+5. Expand the cockpit log as soon as multiple child artifacts exist, otherwise operators cannot monitor long runs coherently.
 
 Architecture consolidation needed before this should grow much further:
 
@@ -248,6 +253,7 @@ Architecture consolidation needed before this should grow much further:
 4. Move CLI backend construction into application-service factories.
 5. Split schema models by domain so config, contracts, runtime state, evidence, and governor state can evolve independently.
 6. Retire procedural heuristic modules once supervisor-backed decisions exist; keep them only as deterministic test fixtures or fallback scaffolding. Priority candidates are exact-overlap rejection, hard budget rejection for small overages, brittle verification-command assumptions, elapsed-time-only stuck-worker interpretation, and controller-relative target artifact defaults.
+7. Track code-reduction explicitly: new supervisor authority should shrink procedural judgment in `release.py`, `planning.py`, `failure_diagnosis.py`, and `budget.py`, not add parallel policy engines beside them.
 
 ## Critical Path
 

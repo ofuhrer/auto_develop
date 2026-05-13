@@ -568,10 +568,12 @@ class FeatureReviewFinding(StrictModel):
             if isinstance(value, str):
                 item = value.strip()
                 if not item:
-                    raise ValueError("feature review evidence paths must not be empty")
+                    continue
                 normalized.append(item)
                 continue
             normalized.append(value)
+        if not normalized:
+            raise ValueError("feature review evidence_paths must contain at least one non-empty path when provided")
         return normalized
 
     @model_validator(mode="after")
