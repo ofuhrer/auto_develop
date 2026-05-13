@@ -526,6 +526,26 @@ def classify_feature_review_findings_for_convergence(
             )
             continue
         if finding.optional_follow_ups:
+            if previous_decisions:
+                if _has_file_overlap_with_any_previous_finding(
+                    finding=finding,
+                    previous_findings=previous_findings,
+                ):
+                    classification: FeatureReviewFindingClassification = "backlog_follow_up"
+                else:
+                    classification = "scope_expansion"
+                classified.append(
+                    FeatureReviewFindingConvergenceResult(
+                        finding_id=finding.finding_id,
+                        classification=classification,
+                        selected_action="defer",
+                        matched_previous_finding_id=None,
+                        repeated_by_finding_id=False,
+                        adjacent_similarity=0.0,
+                        verification_false_positive_candidate=False,
+                    )
+                )
+                continue
             classified.append(
                 FeatureReviewFindingConvergenceResult(
                     finding_id=finding.finding_id,
@@ -1008,6 +1028,17 @@ def _has_file_overlap(current_files: list[str], previous_files: list[str]) -> bo
     current = {item.strip().lstrip("./") for item in current_files if item.strip()}
     previous = {item.strip().lstrip("./") for item in previous_files if item.strip()}
     return bool(current.intersection(previous))
+
+
+def _has_file_overlap_with_any_previous_finding(
+    *,
+    finding: FeatureReviewFinding,
+    previous_findings: list[FeatureReviewFinding],
+) -> bool:
+    return any(
+        _has_file_overlap(finding.affected_files, previous.affected_files)
+        for previous in previous_findings
+    )
 
 
 def _summary_similarity(current: str, previous: str) -> float:

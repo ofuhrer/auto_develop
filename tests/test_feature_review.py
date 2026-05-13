@@ -616,3 +616,107 @@ def test_classify_feature_review_findings_for_convergence_marks_adjacent_similar
     assert finding.selected_action == "defer"
     assert finding.matched_previous_finding_id == "prior-a"
     assert finding.adjacent_similarity > 0.35
+
+
+def test_classify_feature_review_findings_for_convergence_marks_backlog_follow_up_for_new_optional_overlap() -> None:
+    previous = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-11",
+            "reviewer": "strong_model",
+            "summary": "Prior pass",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "prior-1",
+                    "severity": "high",
+                    "summary": "Restore parser guard",
+                    "affected_files": ["src/parser.py"],
+                    "required_repairs": ["Restore guard"],
+                }
+            ],
+        }
+    )
+    current = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-11",
+            "reviewer": "strong_model",
+            "summary": "Second pass",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "new-optional-1",
+                    "severity": "low",
+                    "summary": "Consider renaming parser helper",
+                    "affected_files": ["src/parser.py"],
+                    "optional_follow_ups": ["Rename helper for readability"],
+                }
+            ],
+        }
+    )
+    result = classify_feature_review_findings_for_convergence(
+        decision=current,
+        previous_decisions=[previous],
+        verification_passed=True,
+    )
+
+    finding = result.findings[0]
+    assert finding.classification == "backlog_follow_up"
+    assert finding.selected_action == "defer"
+    assert finding.matched_previous_finding_id is None
+    assert result.deferred_finding_ids == ["new-optional-1"]
+
+
+def test_classify_feature_review_findings_for_convergence_marks_scope_expansion_for_new_optional_non_overlap() -> None:
+    previous = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-12",
+            "reviewer": "strong_model",
+            "summary": "Prior pass",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "prior-1",
+                    "severity": "high",
+                    "summary": "Restore parser guard",
+                    "affected_files": ["src/parser.py"],
+                    "required_repairs": ["Restore guard"],
+                }
+            ],
+        }
+    )
+    current = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-12",
+            "reviewer": "strong_model",
+            "summary": "Second pass",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "new-optional-2",
+                    "severity": "low",
+                    "summary": "Future cleanup in CLI docs formatting",
+                    "affected_files": ["docs/USER_GUIDE.md"],
+                    "optional_follow_ups": ["Refactor docs examples"],
+                }
+            ],
+        }
+    )
+    result = classify_feature_review_findings_for_convergence(
+        decision=current,
+        previous_decisions=[previous],
+        verification_passed=True,
+    )
+
+    finding = result.findings[0]
+    assert finding.classification == "scope_expansion"
+    assert finding.selected_action == "defer"
+    assert finding.matched_previous_finding_id is None
+    assert result.deferred_finding_ids == ["new-optional-2"]
