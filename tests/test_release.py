@@ -24,6 +24,7 @@ from agentic_devloop.release import (
     _ensure_no_existing_task_branches,
     _ensure_no_existing_worktrees,
     _command_with_env_prefixes,
+    _runtime_supervisor_classification_for_task_result,
     _verification_adjudicated_required_finding_ids,
     _multiplexed_progress,
     _release_dependency_map,
@@ -1345,6 +1346,43 @@ def test_analyze_contract_overlaps_blocks_lockfiles_and_migrations_and_out_of_sc
     assert lockfile_report.has_blocking_findings is True
     assert migration_report.has_blocking_findings is True
     assert out_of_scope_report.has_blocking_findings is True
+
+
+def test_analyze_contract_overlaps_blocks_generated_artifacts() -> None:
+    generated_artifact_report = analyze_contract_overlaps(
+        [
+            _task_contract("demo-0001", allowed_files=["dist/app.min.js"]),
+            _task_contract("demo-0002", allowed_files=["dist/app.min.js"]),
+        ]
+    )
+
+    assert generated_artifact_report.has_blocking_findings is True
+
+
+def test_runtime_supervisor_classifies_model_quota_as_missing_credentials_hard_stop(tmp_path: Path) -> None:
+    bundle_path = tmp_path / "bundle"
+    bundle_path.mkdir(parents=True)
+    (bundle_path / "failure_diagnosis.yaml").write_text("category: model_quota\n", encoding="utf-8")
+    result = TaskRunResult(
+        run_id="20260513T000000Z_v0.1.0_demo-0001",
+        worktree_path=tmp_path / "worktree",
+        bundle_path=bundle_path,
+        decision=ReviewDecision(
+            task_id="demo-0001",
+            decision=Decision.FAILED,
+            reviewer=Reviewer.DETERMINISTIC,
+            rationale="quota exceeded",
+        ),
+    )
+
+    classification, event_kind, category = _runtime_supervisor_classification_for_task_result(
+        result=result,
+        task=_task_contract("demo-0001"),
+    )
+
+    assert classification == "missing_credentials"
+    assert str(event_kind) == "release_blocked"
+    assert category == "model_quota"
 
 
 def test_state_review_snapshot_collector_writes_deterministic_artifact(tmp_path) -> None:
