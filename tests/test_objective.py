@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -41,6 +42,33 @@ class FakePlannerBackend:
             ],
             "warnings": [],
         }
+
+
+class FakePlannerBackendWithAdmissionRepairWarning(FakePlannerBackend):
+    def generate(self, *, prompt: str, objective, existing_contracts, model):
+        payload = super().generate(
+            prompt=prompt,
+            objective=objective,
+            existing_contracts=existing_contracts,
+            model=model,
+        )
+        payload["warnings"] = [
+            "planner_contract_normalization="
+            + json.dumps(
+                {
+                    "planner_admission_repair_action": {
+                        "admission_failure_inputs": [{"task_id": "objective-0001"}],
+                        "selected_action": "accept_broad_but_mechanical",
+                        "outcome": "accept_with_mechanical_guards",
+                        "validators_to_rerun": ["ContractPlan", "TaskContract"],
+                    },
+                    "planner_admission_repair_applied": True,
+                    "validator_rerun_succeeded": True,
+                },
+                sort_keys=True,
+            )
+        ]
+        return payload
 
 
 class FakeExecutor:
@@ -124,6 +152,69 @@ def test_run_objective_plans_writes_contracts_and_runs_release(tmp_path) -> None
     assert result.release is not None
     assert result.release.decision == "accepted"
     assert result.release.task_results[0].decision.task_id == "objective-0001"
+
+
+def test_run_objective_persists_planner_admission_repair_records_into_release(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    objective_path = tmp_path / "objective.yaml"
+    _write_yaml(
+        objective_path,
+        {
+            "release_id": "v1.2.0",
+            "title": "Objective release",
+            "objective": "Create one docs artifact.",
+            "acceptance_criteria": ["docs/objective.md exists"],
+        },
+    )
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "worker", "max_walltime_minutes": 5},
+            "model_roles": {
+                "planner": {"type": "codex_cli", "model": "planner", "max_walltime_minutes": 5}
+            },
+            "model_routing": {"default_role": "planner"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 2,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    result = run_objective(
+        project_id="demo",
+        objective_path=objective_path,
+        config_dir=config_dir,
+        contracts_dir=tmp_path / "contracts",
+        runs_dir=tmp_path / "runs",
+        planning_mode="strong-model",
+        planner_backend=FakePlannerBackendWithAdmissionRepairWarning(),
+        executor=FakeExecutor(),
+    )
+
+    assert result.release is not None
+    artifact_path = tmp_path / "runs" / result.release.run_id / "runtime_supervisor" / "planner_admission_repairs.json"
+    assert artifact_path.exists()
+    artifact = yaml.safe_load(artifact_path.read_text(encoding="utf-8"))
+    assert artifact["records"][0]["task_id"] == "objective-0001"
+    assert artifact["records"][0]["planner_admission_repair_applied"] is True
 
 
 def _git(repo, *args: str) -> None:

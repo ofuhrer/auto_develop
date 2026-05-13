@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -883,7 +884,16 @@ def test_parse_planner_output_stops_with_structured_evidence_for_budget_exceeded
     assert "allowed_files count exceeds project budget" in exc.value.stop_evidence.reason
 
 
-def test_parse_planner_output_normalizes_missing_diff_evidence_and_reruns_admission() -> None:
+def test_parse_planner_output_normalizes_missing_diff_evidence_and_reruns_admission(tmp_path) -> None:
+    planner_prompt_path = tmp_path / "planner_prompt.md"
+    planner_stdout_path = tmp_path / "planner_stdout.log"
+    planner_stderr_path = tmp_path / "planner_stderr.log"
+    planner_metadata_path = tmp_path / "planner_metadata.json"
+    planner_prompt_path.write_text("prompt", encoding="utf-8")
+    planner_stdout_path.write_text("stdout", encoding="utf-8")
+    planner_stderr_path.write_text("stderr", encoding="utf-8")
+    planner_metadata_path.write_text("{}", encoding="utf-8")
+
     plan = parse_planner_output(
         {
             "release_id": "v0.3.5",
@@ -910,6 +920,10 @@ def test_parse_planner_output_normalizes_missing_diff_evidence_and_reruns_admiss
                 }
             ],
             "warnings": [],
+            "planner_prompt_path": str(planner_prompt_path),
+            "planner_stdout_path": str(planner_stdout_path),
+            "planner_stderr_path": str(planner_stderr_path),
+            "planner_metadata_path": str(planner_metadata_path),
         },
         release_id="v0.3.5",
         planner="strong-model",
@@ -926,6 +940,117 @@ def test_parse_planner_output_normalizes_missing_diff_evidence_and_reruns_admiss
     assert payload["validator_rerun_succeeded"] is True
     assert payload["before_snapshot"]["contract"]["required_evidence"] == ["test output"]
     assert "git diff" in payload["after_snapshot"]["contract"]["required_evidence"]
+    supervisor_input = payload["supervisor_input_artifact"]
+    assert supervisor_input["validation_errors"] == [
+        "generated contract must require diff evidence: v0.3.5-0001"
+    ]
+    assert supervisor_input["validators_to_rerun"] == ["ContractPlan", "TaskContract", "validate_generated_contracts"]
+    assert supervisor_input["objective_context"]["generated_objective"] == "Repair missing diff evidence."
+    assert supervisor_input["raw_planner_artifact_paths"] == [
+        str(planner_prompt_path),
+        str(planner_stdout_path),
+        str(planner_stderr_path),
+        str(planner_metadata_path),
+    ]
+    assert "allowed_files_count" in supervisor_input["scope_budget_signals"]
+    assert supervisor_input["policy_constraints"]
+
+
+def test_plan_release_contracts_stops_before_writing_contracts_on_admission_failure(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# demo\n", encoding="utf-8")
+    objective_path = tmp_path / "objective.yaml"
+    _write_yaml(
+        objective_path,
+        {
+            "release_id": "v9.9.9",
+            "title": "Budget constrained release",
+            "objective": "Generate a contract that violates admission.",
+            "acceptance_criteria": ["Contracts are admitted before writing."],
+        },
+    )
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "worker", "max_walltime_minutes": 5},
+            "model_roles": {
+                "planner": {"type": "codex_cli", "model": "gpt-5.5", "max_walltime_minutes": 5}
+            },
+            "model_routing": {"default_role": "planner"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 1,
+                "max_changed_files_per_task": 1,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    class StubPlannerBackend:
+        def generate(self, **_: object) -> dict[str, object]:
+            return {
+                "release_id": "v9.9.9",
+                "planner": "strong-model",
+                "generated_contracts": [
+                    {
+                        "task_id": "v9.9.9-0001",
+                        "title": "Over budget",
+                        "objective": "Touch too many files.",
+                        "rationale": "Admission should stop before writing contracts.",
+                        "suggested_contract": {
+                            "task_id": "v9.9.9-0001",
+                            "release_id": "v9.9.9",
+                            "title": "Over budget",
+                            "task_type": "code_only",
+                            "budget_class": "S",
+                            "objective": "Touch too many files.",
+                            "allowed_files": ["src/one.py", "src/two.py"],
+                            "forbidden_changes": ["Do not touch release flow."],
+                            "required_evidence": ["git diff"],
+                            "verification": {"profile": "default"},
+                            "stop_conditions": ["Stop when scope expands."],
+                        },
+                    }
+                ],
+                "warnings": [],
+            }
+
+    runs_dir = tmp_path / "runs"
+    proposed_dir = tmp_path / "proposed-contracts"
+    now = datetime(2026, 5, 13, tzinfo=UTC)
+    with pytest.raises(PlannerNormalizationError) as exc:
+        plan_release_contracts(
+            objective_path=objective_path,
+            contracts_dir=tmp_path / "contracts",
+            runs_dir=runs_dir,
+            write_contracts_dir=proposed_dir,
+            mode="strong-model",
+            project_id="demo",
+            config_dir=config_dir,
+            planner_backend=StubPlannerBackend(),
+            now=now,
+        )
+
+    assert exc.value.stop_evidence.kind == RuntimeSupervisorApplierStopKind.EXCEEDS_TASK_BUDGET
+    assert not proposed_dir.exists()
+    plan_dir = runs_dir / f"{now.strftime('%Y%m%dT%H%M%SZ')}_v9.9.9_plan"
+    stop_artifact = plan_dir / "planner_admission_repair_stop.json"
+    assert stop_artifact.exists()
+    payload = json.loads(stop_artifact.read_text(encoding="utf-8"))
+    assert payload["action_payload"]["selected_action"] == "stop"
+    assert payload["action_payload"]["validators_to_rerun"] == [
+        "ContractPlan",
+        "TaskContract",
+        "validate_generated_contracts",
+    ]
 
 
 def test_parse_planner_output_hard_stops_when_normalization_changes_guarded_semantics(monkeypatch) -> None:
@@ -985,6 +1110,11 @@ def test_parse_planner_output_hard_stops_when_normalization_changes_guarded_sema
     [
         ({"forbidden_changes": ["Do not touch release flow.", "Do not touch tests."]}, "forbidden_changes"),
         ({"depends_on": ["v0.3.6-0099"]}, "depends_on"),
+        ({"task_type": "release_preparation"}, "task_type"),
+        ({"title": "Unsafe normalization retitle"}, "title"),
+        ({"objective": "Unsafe normalization objective drift."}, "objective"),
+        ({"stop_conditions": ["Stop if scope cannot remain bounded."]}, "stop_conditions"),
+        ({"required_evidence": ["git diff"]}, "required_evidence"),
     ],
 )
 def test_parse_planner_output_hard_stops_when_normalization_changes_other_guarded_semantics(

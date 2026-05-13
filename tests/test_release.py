@@ -49,6 +49,10 @@ from agentic_devloop.supervisor_decisions import (
     load_supervisor_decision_artifact,
     supervisor_decision_artifact_path,
 )
+from agentic_devloop.runtime_supervisor import (
+    PlannerAdmissionRepairDecisionArtifact,
+    write_planner_admission_repair_decision_artifact,
+)
 
 
 class FakeExecutor:
@@ -930,6 +934,81 @@ def test_run_release_supervisor_repairs_verification_and_resumes(tmp_path) -> No
     assert "event=repair_succeeded task=demo-0001 attempt=1" in result.log_path.read_text(encoding="utf-8")
     assert repair["initial_result"]["run_id"] != repair["final_result"]["run_id"]
     assert result.task_results[0].run_id == repair["final_result"]["run_id"]
+
+
+def test_run_release_persists_planner_admission_repairs_and_logs_attempts(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+    planning_bundle = tmp_path / "runs" / "20260513T000000Z_v0.1.0_plan"
+    evidence_path = planning_bundle / "planner_stdout.json"
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    evidence_path.write_text("{}", encoding="utf-8")
+    decision = PlannerAdmissionRepairDecisionArtifact.model_validate(
+        {
+            "decision_id": "v0.1.0__demo-0001__admission_repair",
+            "release_id": "v0.1.0",
+            "decided_at": datetime.now(UTC),
+            "decided_by": "runtime_supervisor",
+            "rationale": "Broad mechanical update accepted with bounded guardrails.",
+            "validators_to_rerun": ["ContractPlan", "TaskContract"],
+            "evidence_paths": [evidence_path.resolve()],
+            "applied": True,
+            "action_payload": {
+                "admission_failure_inputs": [
+                    {
+                        "release_id": "v0.1.0",
+                        "task_id": "demo-0001",
+                        "validation_errors": ["allowed_files count exceeds project budget"],
+                        "policy_constraints": ["Budget limits remain hard-gated."],
+                        "validators_to_rerun": ["ContractPlan", "TaskContract"],
+                    }
+                ],
+                "selected_action": "accept_broad_but_mechanical",
+                "outcome": "accept_with_mechanical_guards",
+                "rationale": "Broad mechanical update accepted with bounded guardrails.",
+                "fallback_plan": "Split if rerun validators fail.",
+                "validators_to_rerun": ["ContractPlan", "TaskContract"],
+                "evidence_paths": [evidence_path.resolve()],
+                "accepted_scope_notes": ["Mechanical-only edits."],
+            },
+        }
+    )
+    decision_path = write_planner_admission_repair_decision_artifact(
+        release_bundle_path=planning_bundle,
+        decision=decision,
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FakeExecutor(),
+        merge_on_accept=True,
+        planning_warnings=[f"supervisor_admission_repair_decision_path={decision_path}"],
+    )
+
+    assert result.decision == Decision.ACCEPTED
+    artifact_path = tmp_path / "runs" / result.run_id / "runtime_supervisor" / "planner_admission_repairs.json"
+    assert artifact_path.exists()
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert artifact["release_id"] == "v0.1.0"
+    assert len(artifact["records"]) == 1
+    record = artifact["records"][0]
+    assert record["task_id"] == "demo-0001"
+    assert record["selected_action"] == "accept_broad_but_mechanical"
+    assert record["outcome"] == "accept_with_mechanical_guards"
+    assert record["validator_rerun_succeeded"] is True
+    assert "Admission repair attempt 1: task=demo-0001 action=accept_broad_but_mechanical outcome=accept_with_mechanical_guards" in (
+        result.log_path.read_text(encoding="utf-8")
+    )
 
 
 def test_run_release_continues_with_completed_dependencies_during_repair_resume(tmp_path) -> None:

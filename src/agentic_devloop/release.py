@@ -71,6 +71,7 @@ from agentic_devloop.runtime_supervisor import (
     BacklogStateReference,
     BudgetLedgerPaths,
     EvidenceBundlePaths,
+    PlannerAdmissionRepairDecisionArtifact,
     RawLogPaths,
     ReleaseEvent,
     ReleaseEventKind,
@@ -82,6 +83,7 @@ from agentic_devloop.runtime_supervisor import (
     RuntimeSupervisorStopReason,
     RuntimeSupervisorInput,
     TuningReportPaths,
+    load_planner_admission_repair_decision_artifact,
 )
 from agentic_devloop.supervisor_decisions import (
     DecisionRiskLevel,
@@ -241,6 +243,115 @@ def _release_scheduling_decision_path(release_root: Path, release_id: str) -> Pa
     )
 
 
+def _persist_planner_admission_repairs_from_warnings(
+    *,
+    release_root: Path,
+    release_id: str,
+    warnings: list[str],
+) -> Path | None:
+    records: list[dict[str, object]] = []
+    decision_paths: list[Path] = []
+    for warning in warnings:
+        if warning.startswith("supervisor_admission_repair_decision_path="):
+            decision_paths.append(Path(warning.split("=", 1)[1]))
+            continue
+        if not warning.startswith("planner_contract_normalization="):
+            continue
+        payload_text = warning.split("=", 1)[1]
+        try:
+            payload = json.loads(payload_text)
+        except json.JSONDecodeError:
+            continue
+        decision_path = payload.get("supervisor_admission_repair_decision_path")
+        if isinstance(decision_path, str) and decision_path.strip():
+            decision_paths.append(Path(decision_path))
+            continue
+        supervisor_decision = payload.get("supervisor_admission_repair_decision")
+        if isinstance(supervisor_decision, dict):
+            repair_action = supervisor_decision.get("action_payload")
+        else:
+            repair_action = payload.get("planner_admission_repair_action")
+        if not isinstance(repair_action, dict):
+            continue
+        failure_inputs = repair_action.get("admission_failure_inputs")
+        task_id = "unknown"
+        if isinstance(failure_inputs, list) and failure_inputs:
+            first = failure_inputs[0]
+            if isinstance(first, dict):
+                raw_task_id = first.get("task_id")
+                if isinstance(raw_task_id, str) and raw_task_id.strip():
+                    task_id = raw_task_id
+        records.append(
+            {
+                "release_id": release_id,
+                "task_id": task_id,
+                "selected_action": repair_action.get("selected_action"),
+                "outcome": repair_action.get("outcome"),
+                "validators_to_rerun": repair_action.get("validators_to_rerun"),
+                "validator_rerun_succeeded": bool(payload.get("validator_rerun_succeeded")),
+                "planner_admission_repair_applied": bool(
+                    supervisor_decision.get("applied")
+                    if isinstance(supervisor_decision, dict)
+                    else payload.get("planner_admission_repair_applied")
+                ),
+                "action_kind": (
+                    supervisor_decision.get("action_kind")
+                    if isinstance(supervisor_decision, dict)
+                    else None
+                ),
+                "decision_type": (
+                    supervisor_decision.get("decision_type")
+                    if isinstance(supervisor_decision, dict)
+                    else None
+                ),
+            }
+        )
+    for decision_path in decision_paths:
+        decision = load_planner_admission_repair_decision_artifact(decision_path)
+        records.append(_planner_admission_record_from_decision(release_id=release_id, decision=decision))
+    if not records:
+        return None
+    artifact_path = release_root / "runtime_supervisor" / "planner_admission_repairs.json"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "release_id": release_id,
+                "recorded_at": datetime.now(UTC).isoformat(),
+                "records": records,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return artifact_path
+
+
+def _planner_admission_record_from_decision(
+    *,
+    release_id: str,
+    decision: PlannerAdmissionRepairDecisionArtifact,
+) -> dict[str, object]:
+    task_id = "unknown"
+    if decision.action_payload.admission_failure_inputs:
+        candidate = decision.action_payload.admission_failure_inputs[0].task_id.strip()
+        if candidate:
+            task_id = candidate
+    return {
+        "release_id": release_id,
+        "task_id": task_id,
+        "selected_action": decision.action_payload.selected_action.value,
+        "outcome": decision.action_payload.outcome.value,
+        "validators_to_rerun": list(decision.validators_to_rerun),
+        "validator_rerun_succeeded": True,
+        "planner_admission_repair_applied": decision.applied,
+        "action_kind": decision.action_kind.value,
+        "decision_type": decision.decision_type.value,
+    }
+
+
 def run_release(
     *,
     project_id: str,
@@ -262,6 +373,7 @@ def run_release(
     debug_keep_artifacts: bool = False,
     now: datetime | None = None,
     progress: Callable[[str], None] | None = None,
+    planning_warnings: list[str] | None = None,
 ) -> ReleaseRunResult:
     if execution_mode not in {"sequential", "parallel"}:
         raise ValueError(f"unsupported execution mode: {execution_mode}")
@@ -275,6 +387,22 @@ def run_release(
     log_path = release_root / "release.log"
     raw_log_path = release_root / "release.raw.log"
     progress = _multiplexed_progress(progress, log_path, raw_log_path)
+    admission_repair_path = _persist_planner_admission_repairs_from_warnings(
+        release_root=release_root,
+        release_id=release_id,
+        warnings=planning_warnings or [],
+    )
+    if admission_repair_path is not None:
+        _report(progress, f"event=admission_repair_records path={admission_repair_path}")
+        records = json.loads(admission_repair_path.read_text(encoding="utf-8")).get("records", [])
+        for index, record in enumerate(records, start=1):
+            _report(
+                progress,
+                "event=admission_repair_attempt "
+                f"attempt={index} task={record.get('task_id', 'unknown')} "
+                f"action={record.get('selected_action', 'unknown')} "
+                f"outcome={record.get('outcome', 'unknown')}",
+            )
     selected_contracts = _select_contracts(
         release_id=release_id,
         config_repo_path=config.repo_path,
@@ -4640,6 +4768,14 @@ def _display_event_message(message: str) -> str:
         return f"🧩 Overlap-risk report: {event.get('count')} finding(s)  {_style(detail, 'dim')} {_style(str(event.get('path')), 'dim')}"
     if name == "scheduling_decision":
         return f"🧭 Release scheduling decision: {event.get('action')} -> {event.get('outcome')}  {_style(str(event.get('path')), 'dim')}"
+    if name == "admission_repair_records":
+        return f"🧾 Admission-repair records: {_style(str(event.get('path')), 'dim')}"
+    if name == "admission_repair_attempt":
+        return (
+            "🛠️ Admission repair attempt "
+            f"{event.get('attempt')}: task={event.get('task')} "
+            f"action={event.get('action')} outcome={event.get('outcome')}"
+        )
     if name == "task_started":
         return _style(
             f"🧭 Task {event.get('index')}/{event.get('total')} {event.get('task')}: {event.get('title')} [{event.get('type')}, budget {event.get('budget')}]",

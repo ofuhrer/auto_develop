@@ -31,7 +31,7 @@ from agentic_devloop.supervisor_decisions import (
     supervisor_decision_artifact_path,
     write_supervisor_decision_artifact,
 )
-from agentic_devloop.models import ModelOutputNormalizationActionPayload
+from agentic_devloop.models import ModelOutputNormalizationActionPayload, PlannerAdmissionRepairActionPayload
 
 
 def _decision(*, evidence_paths: list[Path]) -> ReleaseSchedulingDecision:
@@ -570,3 +570,108 @@ def test_execution_strategy_load_fails_for_missing_evidence_path(tmp_path: Path)
 
     with pytest.raises(ValueError, match="missing evidence path"):
         load_supervisor_decision_artifact(artifact_path)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "admission_failure_inputs": [
+                {
+                    "release_id": "planner-admission-repair",
+                    "task_id": "planner-admission-repair-0002",
+                    "validation_errors": ["too many files"],
+                    "policy_constraints": ["keep bounded scope"],
+                    "validators_to_rerun": ["contract_plan", "verification"],
+                }
+            ],
+            "selected_action": "split_task",
+            "outcome": "split_and_retry",
+            "rationale": "Split to stay within bounded scope.",
+            "fallback_plan": "Stop if split still fails admission.",
+            "validators_to_rerun": ["contract_plan", "verification"],
+            "evidence_paths": [Path("runs/release/supervisor.log")],
+            "split_task_ids": ["planner-admission-repair-0002a"],
+        },
+        {
+            "admission_failure_inputs": [
+                {
+                    "release_id": "planner-admission-repair",
+                    "task_id": "planner-admission-repair-0002",
+                    "validation_errors": ["scope too broad"],
+                    "policy_constraints": ["keep bounded scope"],
+                    "validators_to_rerun": ["contract_plan", "verification"],
+                }
+            ],
+            "selected_action": "narrow_scope",
+            "outcome": "narrow_and_retry",
+            "rationale": "Narrow to a subset of allowed files.",
+            "fallback_plan": "Replan if narrowing blocks required implementation.",
+            "validators_to_rerun": ["contract_plan", "verification"],
+            "evidence_paths": [Path("runs/release/supervisor.log")],
+            "narrowed_allowed_files": ["src/agentic_devloop/runtime_supervisor.py"],
+        },
+        {
+            "admission_failure_inputs": [
+                {
+                    "release_id": "planner-admission-repair",
+                    "task_id": "planner-admission-repair-0002",
+                    "validation_errors": ["file budget exceeded"],
+                    "policy_constraints": ["mechanical broad changes can be accepted with guardrails"],
+                    "validators_to_rerun": ["contract_plan", "verification"],
+                }
+            ],
+            "selected_action": "accept_broad_but_mechanical",
+            "outcome": "accept_with_mechanical_guards",
+            "rationale": "Broad edits are mechanical and low semantic risk.",
+            "fallback_plan": "Split if verification detects semantic drift.",
+            "validators_to_rerun": ["contract_plan", "verification"],
+            "evidence_paths": [Path("runs/release/supervisor.log")],
+            "accepted_scope_notes": ["Mechanical rename only"],
+        },
+        {
+            "admission_failure_inputs": [
+                {
+                    "release_id": "planner-admission-repair",
+                    "task_id": "planner-admission-repair-0002",
+                    "validation_errors": ["dependency cycle"],
+                    "policy_constraints": ["depends_on must remain acyclic"],
+                    "validators_to_rerun": ["contract_plan", "verification"],
+                }
+            ],
+            "selected_action": "replan",
+            "outcome": "replan_and_retry",
+            "rationale": "Requires planner re-decomposition.",
+            "fallback_plan": "Stop if replanning repeats invalid dependencies.",
+            "validators_to_rerun": ["contract_plan", "verification"],
+            "evidence_paths": [Path("runs/release/supervisor.log")],
+            "replan_reason": "Graph constraints require fresh plan synthesis.",
+        },
+        {
+            "admission_failure_inputs": [
+                {
+                    "release_id": "planner-admission-repair",
+                    "task_id": "planner-admission-repair-0002",
+                    "validation_errors": ["unsafe policy expansion"],
+                    "policy_constraints": ["forbidden changes remain hard-gated"],
+                    "validators_to_rerun": ["contract_plan", "verification"],
+                }
+            ],
+            "selected_action": "stop",
+            "outcome": "stop_and_escalate",
+            "rationale": "Cannot safely repair within policy boundaries.",
+            "fallback_plan": "Escalate with evidence bundle.",
+            "validators_to_rerun": ["contract_plan", "verification"],
+            "evidence_paths": [Path("runs/release/supervisor.log")],
+            "stop_reason": "Admission repair would violate hard policy.",
+        },
+    ],
+)
+def test_planner_admission_repair_actions_serialize_with_required_fields(payload: dict[str, object]) -> None:
+    typed_payload = PlannerAdmissionRepairActionPayload.model_validate(payload)
+    serialized = typed_payload.model_dump(mode="json")
+
+    assert serialized["rationale"]
+    assert serialized["fallback_plan"]
+    assert serialized["validators_to_rerun"]
+    assert serialized["evidence_paths"]
