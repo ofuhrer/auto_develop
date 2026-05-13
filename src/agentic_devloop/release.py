@@ -256,7 +256,11 @@ def _persist_planner_admission_repairs_from_warnings(
             payload = json.loads(payload_text)
         except json.JSONDecodeError:
             continue
-        repair_action = payload.get("planner_admission_repair_action")
+        supervisor_decision = payload.get("supervisor_admission_repair_decision")
+        if isinstance(supervisor_decision, dict):
+            repair_action = supervisor_decision.get("action_payload")
+        else:
+            repair_action = payload.get("planner_admission_repair_action")
         if not isinstance(repair_action, dict):
             continue
         failure_inputs = repair_action.get("admission_failure_inputs")
@@ -275,7 +279,21 @@ def _persist_planner_admission_repairs_from_warnings(
                 "outcome": repair_action.get("outcome"),
                 "validators_to_rerun": repair_action.get("validators_to_rerun"),
                 "validator_rerun_succeeded": bool(payload.get("validator_rerun_succeeded")),
-                "planner_admission_repair_applied": bool(payload.get("planner_admission_repair_applied")),
+                "planner_admission_repair_applied": bool(
+                    supervisor_decision.get("applied")
+                    if isinstance(supervisor_decision, dict)
+                    else payload.get("planner_admission_repair_applied")
+                ),
+                "action_kind": (
+                    supervisor_decision.get("action_kind")
+                    if isinstance(supervisor_decision, dict)
+                    else None
+                ),
+                "decision_type": (
+                    supervisor_decision.get("decision_type")
+                    if isinstance(supervisor_decision, dict)
+                    else None
+                ),
             }
         )
     if not records:

@@ -983,6 +983,10 @@ class PlannerAdmissionRepairOutcome(StrEnum):
     STOP_AND_ESCALATE = "stop_and_escalate"
 
 
+class PlannerAdmissionRepairDecisionType(StrEnum):
+    PLANNER_ADMISSION_REPAIR = "planner_admission_repair"
+
+
 class PlannerAdmissionRepairActionPayload(StrictModel):
     admission_failure_inputs: list[PlannerAdmissionFailureSupervisorInput] = Field(default_factory=list)
     selected_action: PlannerAdmissionRepairAction

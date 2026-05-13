@@ -21,6 +21,7 @@ from agentic_devloop.models import (
     ContractPlan,
     GeneratedContract,
     ModelOutputNormalizationActionPayload,
+    PlannerAdmissionRepairDecisionType,
     PlannerAdmissionFailureSupervisorInput,
     PlannerAdmissionRepairAction,
     PlannerAdmissionRepairActionPayload,
@@ -745,11 +746,23 @@ def _persist_planner_admission_repair_stop(
         source_evidence_paths=tuple(path.resolve() for path in evidence_paths),
         action_payload=action_payload,
     )
+    supervisor_decision_payload = {
+        "decision_type": PlannerAdmissionRepairDecisionType.PLANNER_ADMISSION_REPAIR,
+        "action_kind": supervisor_result.action_kind.value,
+        "action_payload": action_payload.model_dump(mode="json"),
+        "applied": supervisor_result.applied,
+    }
     target_path = bundle_path / "planner_admission_repair_stop.json"
     target_path.write_text(
         json.dumps(
             {
                 "planner": planner,
+                "deterministic_normalization": {
+                    "failure_message": failure_message,
+                    "validators_to_rerun": list(validators_to_rerun),
+                },
+                "supervisor_admission_repair_decision": supervisor_decision_payload,
+                # Backward-compatible mirrored fields.
                 "applied": supervisor_result.applied,
                 "action_kind": supervisor_result.action_kind.value,
                 "action_payload": action_payload.model_dump(mode="json"),
@@ -991,9 +1004,17 @@ def _normalize_contracts_for_admission(
             + json.dumps(
                 {
                     **outcome.model_dump(mode="json"),
+                    "deterministic_normalization": outcome.model_dump(mode="json"),
                     "supervisor_input_artifact": supervisor_input_artifact.model_dump(mode="json"),
                     "validators_to_rerun": validators_to_rerun,
                     "validator_rerun_succeeded": True,
+                    "supervisor_admission_repair_decision": {
+                        "decision_type": PlannerAdmissionRepairDecisionType.PLANNER_ADMISSION_REPAIR,
+                        "action_kind": supervisor_result.action_kind.value,
+                        "action_payload": repair_action_payload.model_dump(mode="json"),
+                        "applied": supervisor_result.applied,
+                    },
+                    # Backward-compatible mirrored fields.
                     "planner_admission_repair_action": repair_action_payload.model_dump(mode="json"),
                     "planner_admission_repair_applied": supervisor_result.applied,
                 },
