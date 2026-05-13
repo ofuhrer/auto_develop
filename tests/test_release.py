@@ -4,6 +4,7 @@ import subprocess
 import threading
 import time
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -13,6 +14,7 @@ from agentic_devloop.models import ExecutorResult, ProjectConfig, TaskContract
 from agentic_devloop.models import Decision, Reviewer, ReviewDecision
 from agentic_devloop.orchestrator import TaskRunResult, executor_config_for_task, executor_configs_for_task
 from agentic_devloop.release import (
+    collect_release_planning_state_review_snapshot,
     _completed_release_task_ids,
     _ensure_no_existing_task_branches,
     _ensure_no_existing_worktrees,
@@ -1248,6 +1250,61 @@ def test_analyze_contract_overlaps_blocks_lockfiles_and_migrations_and_out_of_sc
     assert lockfile_report.has_blocking_findings is True
     assert migration_report.has_blocking_findings is True
     assert out_of_scope_report.has_blocking_findings is True
+
+
+def test_state_review_snapshot_collector_writes_deterministic_artifact(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    repo_state = repo / "repo_state" / "demo"
+    repo_state.mkdir(parents=True)
+    (repo_state / "architecture_summary.md").write_text("summary\n", encoding="utf-8")
+    (repo_state / "active_constraints.yaml").write_text("constraints: []\n", encoding="utf-8")
+    (repo_state / "backlog_state.yaml").write_text("active_goal: demo\n", encoding="utf-8")
+    (repo_state / "release_plan.yaml").write_text("release_id: demo\nactive_objective: test\n", encoding="utf-8")
+    (repo_state / "benchmark_status.json").write_text("{\"status\":\"none\"}\n", encoding="utf-8")
+    _git(repo, "checkout", "-b", "feature/test")
+    (repo / "README.md").write_text("# changed\n", encoding="utf-8")
+    runs_dir = tmp_path / "runs"
+    (runs_dir / "20260512T000000Z_demo_release").mkdir(parents=True)
+    (runs_dir / "20260511T000000Z_demo_release").mkdir(parents=True)
+    artifacts_dir = tmp_path / "planning_artifacts"
+    artifacts_dir.mkdir(parents=True)
+
+    artifact_path = collect_release_planning_state_review_snapshot(
+        config_repo_path=repo,
+        repo_state_path=Path("repo_state/demo"),
+        runs_dir=runs_dir,
+        planning_artifacts_dir=artifacts_dir,
+        now=datetime(2026, 5, 13, 0, 0, tzinfo=UTC),
+    )
+
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert artifact_path == artifacts_dir / "state_review_snapshot.json"
+    assert payload["captured_at"] == "2026-05-13T00:00:00Z"
+    assert payload["branch"] == "feature/test"
+    assert payload["status_lines"] == ["?? repo_state/", "M README.md"]
+    assert payload["local_branches"] == ["feature/test", "main"]
+    assert payload["recent_release_runs"] == [
+        "20260512T000000Z_demo_release",
+        "20260511T000000Z_demo_release",
+    ]
+
+
+def test_state_review_snapshot_collector_requires_existing_planning_artifacts_dir(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    missing_dir = tmp_path / "missing-artifacts"
+
+    try:
+        collect_release_planning_state_review_snapshot(
+            config_repo_path=repo,
+            repo_state_path=None,
+            runs_dir=tmp_path / "runs",
+            planning_artifacts_dir=missing_dir,
+            now=datetime(2026, 5, 13, 0, 0, tzinfo=UTC),
+        )
+    except ValueError as error:
+        assert "release planning artifacts directory does not exist" in str(error)
+    else:
+        raise AssertionError("expected missing planning artifacts directory to fail")
 
 
 def _task_contract(

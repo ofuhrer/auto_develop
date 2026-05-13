@@ -19,6 +19,7 @@ from agentic_devloop.models import (
 )
 from agentic_devloop import orchestrator as orchestrator_module
 from agentic_devloop.orchestrator import run_task
+from agentic_devloop.state_review import collect_state_review_snapshot, write_state_review_snapshot_artifact
 
 
 class FakeExecutor:
@@ -1286,3 +1287,32 @@ def test_run_task_keeps_disallowed_files_hard_needs_revision_without_soft_accept
 
 def _write_yaml(path: Path, data: dict) -> None:
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
+def test_state_review_snapshot_writer_is_stable(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+    runs_dir = tmp_path / "runs"
+    (runs_dir / "20260513T000000Z_demo_release").mkdir(parents=True)
+
+    snapshot = collect_state_review_snapshot(
+        repo_path=repo,
+        repo_state_path=None,
+        runs_dir=runs_dir,
+        now=datetime(2026, 5, 13, 0, 0, tzinfo=UTC),
+    )
+    artifact_path = write_state_review_snapshot_artifact(
+        snapshot=snapshot,
+        artifacts_dir=tmp_path / "artifacts",
+    )
+    payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+
+    assert payload["captured_at"] == "2026-05-13T00:00:00Z"
+    assert payload["branch"] == "main"
+    assert payload["recent_release_runs"] == ["20260513T000000Z_demo_release"]
