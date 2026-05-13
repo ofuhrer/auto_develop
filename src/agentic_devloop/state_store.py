@@ -23,7 +23,7 @@ class OutcomeReference(BaseModel):
 
     release_id: str = Field(min_length=1)
     task_id: str | None = Field(default=None, min_length=1)
-    outcome: str | None = Field(default=None, min_length=1)
+    outcome: Literal["accepted", "needs_revision", "failed", "escalated"] | None = None
     run_summary_path: Path | None = None
     recorded_at: datetime | None = None
 
@@ -33,7 +33,7 @@ class UnresolvedFindingReference(BaseModel):
 
     finding_id: str = Field(min_length=1)
     summary: str = Field(min_length=1)
-    severity: str | None = Field(default=None, min_length=1)
+    severity: Literal["low", "moderate", "high", "critical"] | None = None
     source_path: Path | None = None
 
 
@@ -46,7 +46,7 @@ class StateReviewSnapshotReference(BaseModel):
 
 
 class EpicMemoryRecord(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     epic_id: str = Field(min_length=1)
     title: str | None = Field(default=None, min_length=1)

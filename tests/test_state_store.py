@@ -234,7 +234,7 @@ def test_epic_memory_references_and_counters(tmp_path: Path) -> None:
         UnresolvedFindingReference(
             finding_id="finding-1",
             summary="Feature review requires follow-up.",
-            severity="medium",
+            severity="moderate",
             source_path=Path("runs/persistent-governor-memory/feature_review.json"),
         ),
     )
@@ -338,6 +338,30 @@ def test_durable_schema_rejects_empty_structured_ids_and_reasons() -> None:
         BacklogState(candidate_epics=[{"id": "", "title": "Epic"}])
     with pytest.raises(ValueError):
         BacklogState(skipped_epics=[{"epic_id": "epic-1", "status_reason": ""}])
+
+
+def test_durable_schema_rejects_invalid_outcome_and_severity_values() -> None:
+    with pytest.raises(ValueError):
+        OutcomeReference(release_id="release-1", outcome="unknown")
+    with pytest.raises(ValueError):
+        UnresolvedFindingReference(finding_id="f-1", summary="x", severity="medium")
+
+
+def test_durable_schema_rejects_extra_epic_memory_fields(tmp_path: Path) -> None:
+    state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        """
+active_epics:
+  - epic_id: epic-1
+    unknown_field: should-fail
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError):
+        StateStore(state_path).load()
 
 
 def test_record_recent_run_summary_prepends_deduplicates_and_trims(tmp_path: Path) -> None:
