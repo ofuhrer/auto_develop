@@ -700,7 +700,7 @@ class Reviewer:
 
 Review may be deterministic, model-based, strong-model-assisted, hybrid, or human-escalated. The default path should be autonomous deterministic/model review, with human review reserved for configured policy boundaries.
 
-The feature-review reviewer is a higher-level interface than task review. It reviews the integrated branch as a coherent change set:
+The feature-review reviewer is a higher-level interface than task review. When `model_roles.reviewer` is configured, `run-release` uses it to review the integrated branch as a coherent change set, emit structured findings, and gate finalization on unresolved required findings:
 
 ```python
 class FeatureReviewer:
@@ -708,7 +708,7 @@ class FeatureReviewer:
         ...
 ```
 
-`FeatureReviewPacket` should include the release objective, task contracts, integrated branch, base branch, diff, changed files, evidence links, verification results, soft-gate decisions, metrics, and architecture/context references. `FeatureReviewDecision` should include structured findings, required repairs, optional follow-ups, accepted risks, and a merge/PR/finalization recommendation.
+`FeatureReviewPacket` should include the release objective, task contracts, integrated branch, base branch, diff, changed files, evidence links, verification results, soft-gate decisions, metrics, and architecture/context references. `FeatureReviewDecision` should include structured findings, required repairs, optional follow-ups, accepted risks, and a merge/PR/finalization recommendation. Required findings become bounded repair contracts, and the re-check artifacts are part of the evidence trail for the reviewer pass.
 
 ## Security and Auth
 

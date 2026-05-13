@@ -290,7 +290,7 @@ acceptance_criteria:
 
 Use objectives for planning. Use contracts for execution.
 
-The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the current governor service chooses one epic at a time, produces an objective, and feeds the existing objective/contract/release machinery. The runtime supervisor now records structured repair/resume evidence for recoverable release failures. The codebase now also supports deterministic state-review snapshot artifacts (`state_review_snapshot.json`) and contract-plan references (`state_review_snapshot_path`) as bounded evidence inputs. When `model_roles.reviewer` is configured, `run-release` also performs an independent feature-review pass after accepted tasks are integrated into `feature/<release>`, persists structured review/recheck artifacts, launches bounded repair contracts for required findings, reruns verification, and blocks finalization while unresolved required findings remain. The broader multi-epic governor loop, fully agent-driven pre-epic state-review decisioning, persistent governor memory, and always-on state refresh remain planned beyond the current one-epic governor boundary.
+The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the current governor service chooses one epic at a time, produces an objective, and feeds the existing objective/contract/release machinery. The runtime supervisor records structured repair/resume evidence for recoverable release failures. The codebase also supports deterministic state-review snapshot artifacts (`state_review_snapshot.json`) and contract-plan references (`state_review_snapshot_path`) as bounded evidence inputs. When `model_roles.reviewer` is configured, `run-release` performs an independent feature-review pass after accepted tasks are integrated into `feature/<release>`, persists structured review/recheck artifacts, launches bounded repair contracts for required findings, reruns verification, and blocks finalization while unresolved required findings remain. The broader multi-epic governor loop, fully agent-driven pre-epic state-review decisioning, persistent governor memory, and always-on state refresh remain planned beyond the current one-epic governor boundary.
 
 Use backlog planning first:
 
@@ -1074,7 +1074,7 @@ Then decide whether to repair manually, narrow the contract, or rerun from a cle
 
 ## Current Limits
 
-`auto_develop` is useful for bounded autonomous development today. The active direction is a complete autonomous project governor with runtime supervision: it should review current repository state, choose epics from docs/roadmap/state/artifacts, decompose them, run workers, verify, run independent feature review, repair reviewer findings and contract-contained failures, update memory, and continue until configured stopping criteria are reached.
+`auto_develop` is useful for bounded autonomous development today. The current implementation includes one-epic planning, runtime-supervisor repair/resume, deterministic state-review snapshot capture, and an independent feature-review pass when `model_roles.reviewer` is configured. The active direction is a complete autonomous project governor with runtime supervision: it should review current repository state, choose epics from docs/roadmap/state/artifacts, decompose them, run workers, verify, run independent feature review, repair reviewer findings and contract-contained failures, update memory, and continue until configured stopping criteria are reached.
 
 Current important limits:
 
@@ -1082,7 +1082,7 @@ Current important limits:
 - Fully dynamic model-driven orchestration is still evolving.
 - The broader multi-epic governor loop remains planned.
 - Full agent-driven pre-epic state-review decisioning before backlog selection remains planned.
-- Independent reviewer-agent plus reviewer-comment repair loop remains planned.
+- Independent reviewer-agent plus reviewer-finding repair loop beyond the current release remains planned for broader multi-epic operation.
 - Pull request creation is not yet automated by the CLI.
 - Remote execution adapters, such as cluster or SLURM execution, are still project-specific work.
 - Human review is still recommended before merging significant work into `main`.

@@ -7,7 +7,7 @@ current_tasks:
   - release-finalization-gate
   - docs-and-state-update
 next_steps:
-  - Keep the implemented runtime-supervisor, planner-normalization, and one-epic governor logging behavior aligned with docs.
+  - Keep the implemented runtime-supervisor, planner-normalization, one-epic governor logging behavior, and semantic feature-review loop aligned with docs.
   - Treat governor-state-review as completed for the current cycle; follow with agentic-feature-review-loop so integrated feature branches receive independent semantic review and repair before PR, merge, or autonomous finalization.
   - Follow with persistent-governor-memory so completed, skipped, blocked, active, reviewed, and candidate epics are durable across repeated cycles.
   - Preserve the implemented repair/resume seam while the broader N-epic governor loop remains planned until state review and feature review exist.
