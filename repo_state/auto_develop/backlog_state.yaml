@@ -11,55 +11,51 @@ completed_epics:
   - agent-governed-soft-gates
   - governor-log-and-contract-normalization
   - governor-state-review
+  - agentic-feature-review-loop
 blocked_epics: []
 candidate_epics:
-  - id: agentic-feature-review-loop
-    priority: 1
-    title: Add reviewer-agent findings and repair-agent loop for feature branches.
-    rationale: "`release_review.md` is currently an evidence summary; the target workflow needs an independent reviewer agent over `main..feature`, structured findings, bounded repair contracts, verification reruns, and reviewer re-checks before PR, merge, or autonomous finalization."
-    next_release_id: agentic-feature-review-loop
   - id: persistent-governor-memory
-    priority: 2
+    priority: 1
     title: Persist authoritative multi-epic governor memory.
     rationale: Repeated autonomous cycles need durable completed/skipped/blocked/active epic state, compact release history, unresolved review findings, retry counts, and state-review snapshots instead of relying on raw runs or manually maintained notes.
     next_release_id: persistent-governor-memory
   - id: multi-epic-run-governor
-    priority: 3
+    priority: 2
     title: Run the next N highest-priority epics autonomously.
     rationale: Converts one-epic run-backlog into the intended high-level development loop after state review, feature review, and persistent memory can prevent stale or insufficiently reviewed work.
     next_release_id: multi-epic-run-governor
   - id: governor-cockpit-v2
-    priority: 4
+    priority: 3
     title: Expand governor cockpit logging for full N-epic runs.
     rationale: Operators need one `governor.log` stream that links state review, backlog selection, child releases, feature reviews, repair loops, state refresh, and next-epic selection across repeated cycles.
     next_release_id: governor-cockpit-v2
   - id: shared-verification-runtime
-    priority: 5
+    priority: 4
     title: Make isolated worktrees run tests through a configured shared runtime.
     rationale: Sub-agents repeatedly could not run pytest because task worktrees do not contain .venv; verification should use project runtime policy rather than worktree-local assumptions.
     next_release_id: shared-verification-runtime
   - id: environment-repair-actions
-    priority: 6
+    priority: 5
     title: Repair safe verification-environment drift autonomously.
     rationale: Stale editable installs, command-not-found errors, missing PYTHONPATH, and dependency runtime drift should become bounded repair actions when project policy declares a safe repair.
     next_release_id: environment-repair-actions
   - id: executor-liveness-supervision
-    priority: 7
+    priority: 6
     title: Classify active, stalled, hung, and environment-blocked executors.
     rationale: Long-running workers need process/output/file heartbeat evidence so the supervisor can wait, inspect, restart, or stop without human guessing.
     next_release_id: executor-liveness-supervision
   - id: target-artifact-ownership
-    priority: 8
+    priority: 7
     title: Store target development memory in the target repo or a durable control repo.
     rationale: Deleting and recloning the auto_develop controller should not lose target repo-state, objectives, contracts, completed-epic history, or next-epic planning context.
     next_release_id: target-artifact-ownership
   - id: governor-state-refresh
-    priority: 9
+    priority: 8
     title: Apply roadmap and repo-state updates after each epic.
     rationale: Ensures new learnings from artifacts, validation, metrics, review findings, and documentation feed the next planning cycle.
     next_release_id: governor-state-refresh
   - id: onboarding-bootstrap
-    priority: 10
+    priority: 9
     title: Bootstrap a freshly cloned target repository from one or two onboarding prompts.
     rationale: The target operator experience is minimal setup followed by a high-level epic-count loop.
     next_release_id: onboarding-bootstrap
