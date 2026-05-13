@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import threading
 from hashlib import sha256
@@ -51,6 +52,8 @@ from agentic_devloop.models import (
     OverlapFinding,
     ReleaseOverlapReport,
     ReleasePlan,
+    ReleaseFinalizationPolicy,
+    ReleaseFinalizationPolicyName,
     ReleaseSoftGateDecisionRecord,
     ReviewDecision,
     SoftGateDecision,
@@ -121,6 +124,7 @@ class ReleaseRunResult:
     integration_branch: str | None = None
     finalization: FinalizeResult | None = None
     finalization_gate: dict[str, object] | None = None
+    finalization_decision_path: Path | None = None
     feature_review_path: Path | None = None
     feature_review_recheck_path: Path | None = None
     final_review_continuation_decision_path: Path | None = None
@@ -604,10 +608,15 @@ def run_release(
             + " unresolved_required_findings="
             + json.dumps(finalization_gate["unresolved_required_finding_ids"], sort_keys=True),
         )
-    finalization = _finalize_release(
+    finalization_decision_path, finalization = _finalize_release(
+        release_root=release_root,
+        release_id=release_id,
+        run_id=run_id,
         repo_path=config.repo_path,
         integration_branch=feature_branch,
         base_branch=config.default_base_branch,
+        integration_commit=integration_commit,
+        policy=config.release_finalization_policy,
         decision=decision,
         allowed=bool(finalization_gate["allowed"]),
         blocked_reason=str(finalization_gate["reason"]),
@@ -641,6 +650,7 @@ def run_release(
         feature_review_normalized_artifact_path=feature_review_normalized_artifact_path,
         final_review_continuation_decision_path=final_review_continuation_decision_path,
         finalization_gate=finalization_gate,
+        finalization_decision_path=finalization_decision_path,
         final_integration_verification_path=final_integration_verification_path,
         final_integration_verification=final_integration_verification_summary,
     )
@@ -703,6 +713,7 @@ def run_release(
         integration_branch=feature_branch,
         finalization=finalization,
         finalization_gate=finalization_gate,
+        finalization_decision_path=finalization_decision_path,
         feature_review_path=feature_review_path,
         feature_review_recheck_path=feature_review_recheck_path,
         final_review_continuation_decision_path=final_review_continuation_decision_path,
@@ -2782,43 +2793,247 @@ def _load_release_plan(config_repo_path: Path, repo_state_path: Path | None) -> 
 
 def _finalize_release(
     *,
+    release_root: Path,
+    release_id: str,
+    run_id: str,
     repo_path: Path,
     integration_branch: str,
     base_branch: str,
+    integration_commit: str,
+    policy: ReleaseFinalizationPolicy | None,
     decision: Decision,
     allowed: bool,
     blocked_reason: str,
     mode: str,
     progress: Callable[[str], None] | None,
-) -> FinalizeResult | None:
+) -> tuple[Path | None, FinalizeResult | None]:
+    decision_path = release_root / "finalization_decision.json"
+    git_commands: list[str] = []
+    handoff_path: Path | None = None
+
+    def _write(payload: dict[str, object]) -> Path:
+        decision_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        return decision_path
+
     if mode == "none":
-        return None
+        payload = {
+            "release_id": release_id,
+            "run_id": run_id,
+            "requested_mode": mode,
+            "policy": policy.model_dump(mode="json") if policy is not None else None,
+            "policy_source": "config" if policy is not None else "none",
+            "gate": {"allowed": bool(allowed), "reason": blocked_reason, "decision": str(decision)},
+            "outcome": "skipped",
+            "stop_reason": None,
+            "missing_credentials": [],
+            "git_commands": git_commands,
+            "handoff_path": None,
+            "finalization": None,
+        }
+        return _write(payload), None
+
     if not allowed:
         _report(progress, f"release_finalization_skipped reason={blocked_reason}")
-        return None
+        payload = {
+            "release_id": release_id,
+            "run_id": run_id,
+            "requested_mode": mode,
+            "policy": policy.model_dump(mode="json") if policy is not None else None,
+            "policy_source": "config" if policy is not None else "missing",
+            "gate": {"allowed": bool(allowed), "reason": blocked_reason, "decision": str(decision)},
+            "outcome": "stopped",
+            "stop_reason": "failed_gate",
+            "missing_credentials": [],
+            "git_commands": git_commands,
+            "handoff_path": None,
+            "finalization": None,
+        }
+        return _write(payload), None
+
     if decision != Decision.ACCEPTED:
         _report(progress, f"release_finalization_skipped decision={decision}")
-        return None
+        payload = {
+            "release_id": release_id,
+            "run_id": run_id,
+            "requested_mode": mode,
+            "policy": policy.model_dump(mode="json") if policy is not None else None,
+            "policy_source": "config" if policy is not None else "missing",
+            "gate": {"allowed": bool(allowed), "reason": blocked_reason, "decision": str(decision)},
+            "outcome": "stopped",
+            "stop_reason": "release_decision_not_accepted",
+            "missing_credentials": [],
+            "git_commands": git_commands,
+            "handoff_path": None,
+            "finalization": None,
+        }
+        return _write(payload), None
+
+    if policy is None:
+        _report(progress, "event=release_finalization_stopped reason=missing_policy")
+        payload = {
+            "release_id": release_id,
+            "run_id": run_id,
+            "requested_mode": mode,
+            "policy": None,
+            "policy_source": "missing",
+            "gate": {"allowed": bool(allowed), "reason": blocked_reason, "decision": str(decision)},
+            "outcome": "stopped",
+            "stop_reason": "missing_policy",
+            "missing_credentials": [],
+            "git_commands": git_commands,
+            "handoff_path": None,
+            "finalization": None,
+        }
+        return _write(payload), None
+
+    missing_credentials = sorted(
+        env for env in policy.required_credential_env_vars if not str(os.environ.get(env, "")).strip()
+    )
+    if missing_credentials:
+        _report(
+            progress,
+            "event=release_finalization_stopped reason=missing_credentials vars="
+            + json.dumps(missing_credentials, sort_keys=True),
+        )
+        payload = {
+            "release_id": release_id,
+            "run_id": run_id,
+            "requested_mode": mode,
+            "policy": policy.model_dump(mode="json"),
+            "policy_source": "config",
+            "gate": {"allowed": bool(allowed), "reason": blocked_reason, "decision": str(decision)},
+            "outcome": "stopped",
+            "stop_reason": "missing_credentials",
+            "missing_credentials": missing_credentials,
+            "git_commands": git_commands,
+            "handoff_path": None,
+            "finalization": None,
+        }
+        return _write(payload), None
+
     try:
-        if mode == "push-feature":
+        if policy.policy == ReleaseFinalizationPolicyName.PUSH_FEATURE:
+            git_commands.append(f"git push origin {integration_branch}")
             push_branch(repo_path, integration_branch)
             _report(progress, f"event=release_pushed branch=origin/{integration_branch}")
-            return FinalizeResult(pushed=True)
-        if mode in {"merge-main", "push-main"}:
+            result = FinalizeResult(pushed=True)
+            payload = {
+                "release_id": release_id,
+                "run_id": run_id,
+                "requested_mode": mode,
+                "policy": policy.model_dump(mode="json"),
+                "policy_source": "config",
+                "gate": {"allowed": bool(allowed), "reason": blocked_reason, "decision": str(decision)},
+                "outcome": "executed",
+                "stop_reason": None,
+                "missing_credentials": [],
+                "git_commands": git_commands,
+                "handoff_path": None,
+                "finalization": result.__dict__,
+            }
+            return _write(payload), result
+
+        if policy.policy == ReleaseFinalizationPolicyName.LOCAL_MERGE:
+            git_commands.append(f"git merge --no-edit {integration_branch} (into {base_branch})")
             result = merge_integration_branch_to_base(
                 repo_path=repo_path,
                 integration_branch=integration_branch,
                 base_branch=base_branch,
-                push=mode == "push-main",
+                push=False,
             )
             _report(progress, f"event=release_merged target={base_branch}")
-            if result.pushed:
-                _report(progress, f"event=release_pushed branch=origin/{base_branch}")
-            return result
+            payload = {
+                "release_id": release_id,
+                "run_id": run_id,
+                "requested_mode": mode,
+                "policy": policy.model_dump(mode="json"),
+                "policy_source": "config",
+                "gate": {"allowed": bool(allowed), "reason": blocked_reason, "decision": str(decision)},
+                "outcome": "executed",
+                "stop_reason": None,
+                "missing_credentials": [],
+                "git_commands": git_commands,
+                "handoff_path": None,
+                "finalization": result.__dict__,
+            }
+            return _write(payload), result
+
+        if policy.policy == ReleaseFinalizationPolicyName.PR_PREPARATION:
+            handoff_path = release_root / "pr_handoff.json"
+            handoff_payload = {
+                "release_id": release_id,
+                "run_id": run_id,
+                "base_branch": base_branch,
+                "head_branch": integration_branch,
+                "head_commit": integration_commit,
+                "suggested_title": f"{release_id}: finalize accepted release",
+                "suggested_body": "\n".join(
+                    [
+                        f"Release `{release_id}` accepted with integration branch `{integration_branch}`.",
+                        "",
+                        "Create a PR from the head branch into the base branch.",
+                        "",
+                        "Fallback commands:",
+                        f"- Ensure the head branch is pushed: `git push origin {integration_branch}`",
+                        "- Open a PR via your hosting provider UI.",
+                    ]
+                ),
+            }
+            handoff_path.write_text(json.dumps(handoff_payload, indent=2) + "\n", encoding="utf-8")
+            _report(progress, f"event=release_pr_handoff_written path={handoff_path}")
+            payload = {
+                "release_id": release_id,
+                "run_id": run_id,
+                "requested_mode": mode,
+                "policy": policy.model_dump(mode="json"),
+                "policy_source": "config",
+                "gate": {"allowed": bool(allowed), "reason": blocked_reason, "decision": str(decision)},
+                "outcome": "executed",
+                "stop_reason": None,
+                "missing_credentials": [],
+                "git_commands": git_commands,
+                "handoff_path": str(handoff_path),
+                "finalization": None,
+            }
+            return _write(payload), None
+
+        if policy.policy == ReleaseFinalizationPolicyName.STOP_MISSING_POLICY_OR_CREDENTIALS:
+            _report(progress, "event=release_finalization_stopped reason=policy_stop")
+            payload = {
+                "release_id": release_id,
+                "run_id": run_id,
+                "requested_mode": mode,
+                "policy": policy.model_dump(mode="json"),
+                "policy_source": "config",
+                "gate": {"allowed": bool(allowed), "reason": blocked_reason, "decision": str(decision)},
+                "outcome": "stopped",
+                "stop_reason": "policy_stop",
+                "missing_credentials": [],
+                "git_commands": git_commands,
+                "handoff_path": None,
+                "finalization": None,
+            }
+            return _write(payload), None
     except GitFinalizeError as error:
         _report(progress, f"event=release_finalization_failed error={json.dumps(str(error))}")
-        return FinalizeResult(failed_step=error.step, error=str(error))
-    raise ValueError(f"unsupported release finalization mode: {mode}")
+        result = FinalizeResult(failed_step=error.step, error=str(error))
+        payload = {
+            "release_id": release_id,
+            "run_id": run_id,
+            "requested_mode": mode,
+            "policy": policy.model_dump(mode="json"),
+            "policy_source": "config",
+            "gate": {"allowed": bool(allowed), "reason": blocked_reason, "decision": str(decision)},
+            "outcome": "failed",
+            "stop_reason": None,
+            "missing_credentials": [],
+            "git_commands": git_commands,
+            "handoff_path": str(handoff_path) if handoff_path is not None else None,
+            "finalization": result.__dict__,
+        }
+        return _write(payload), result
+
+    raise ValueError(f"unsupported release finalization policy: {policy.policy}")
 
 
 def _ensure_no_existing_worktrees(worktree_root: Path) -> None:
@@ -3030,6 +3245,7 @@ def _write_release_summary(
     feature_review_normalized_artifact_path: Path | None,
     final_review_continuation_decision_path: Path,
     finalization_gate: dict[str, object],
+    finalization_decision_path: Path | None,
     final_integration_verification_path: Path | None,
     final_integration_verification: dict[str, object] | None,
 ) -> Path:
@@ -3065,6 +3281,7 @@ def _write_release_summary(
         ),
         "final_review_continuation_decision_path": str(final_review_continuation_decision_path),
         "finalization_gate": finalization_gate,
+        "finalization_decision_path": str(finalization_decision_path) if finalization_decision_path else None,
         "integration_branch": integration_branch,
         "integration_commit": integration_commit,
         "final_integration_verification_path": (

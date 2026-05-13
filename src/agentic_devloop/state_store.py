@@ -28,6 +28,30 @@ class OutcomeReference(BaseModel):
     recorded_at: datetime | None = None
 
 
+class FinalizationOutcomeReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    release_id: str = Field(min_length=1)
+    outcome: Literal["accepted", "blocked", "failed", "needs_revision", "escalated"] | None = None
+    run_summary_path: Path | None = None
+    finalization_policy: str | None = Field(default=None, min_length=1)
+    branch: str | None = Field(default=None, min_length=1)
+    commit: str | None = Field(default=None, min_length=1)
+    cleanup_report_path: Path | None = None
+    blocked_reason: str | None = Field(default=None, min_length=1)
+    blocked_type: str | None = Field(default=None, min_length=1)
+    unresolved_finding_ids: list[str] = Field(default_factory=list)
+    recommended_backlog_state: str | None = Field(default=None, min_length=1)
+    recorded_at: datetime | None = None
+
+    @field_validator("unresolved_finding_ids")
+    @classmethod
+    def _unresolved_finding_ids_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("unresolved finding IDs must not be empty")
+        return values
+
+
 class UnresolvedFindingReference(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -56,6 +80,7 @@ class EpicMemoryRecord(BaseModel):
     retry_count: int = Field(default=0, ge=0)
     repair_count: int = Field(default=0, ge=0)
     outcome_references: list[OutcomeReference] = Field(default_factory=list)
+    finalization_outcome_references: list[FinalizationOutcomeReference] = Field(default_factory=list)
     unresolved_finding_references: list[UnresolvedFindingReference] = Field(default_factory=list)
     state_review_snapshot_references: list[StateReviewSnapshotReference] = Field(default_factory=list)
     updated_at: datetime | None = None
@@ -226,6 +251,18 @@ class StateStore:
         state = self.load()
         record = self._get_or_create_epic_record(state, epic_id)
         record.unresolved_finding_references.append(reference)
+        record.updated_at = datetime.now(UTC)
+        self.save(state)
+        return state
+
+    def add_epic_finalization_outcome_reference(
+        self,
+        epic_id: str,
+        reference: FinalizationOutcomeReference,
+    ) -> BacklogState:
+        state = self.load()
+        record = self._get_or_create_epic_record(state, epic_id)
+        record.finalization_outcome_references.append(reference)
         record.updated_at = datetime.now(UTC)
         self.save(state)
         return state

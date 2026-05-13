@@ -33,6 +33,7 @@ from agentic_devloop.state_review import (
     write_state_review_snapshot_artifact,
 )
 from agentic_devloop.state_store import StateStore
+from agentic_devloop.state_store import FinalizationOutcomeReference
 from agentic_devloop.yaml_io import load_yaml_model, write_yaml_model
 
 class PlanBacklogFn(Protocol):
@@ -196,6 +197,8 @@ class GovernorLoop:
                 now=now,
             )
             cycles.append(result)
+            if self._state_store is not None:
+                self._record_finalization_memory_for_cycle(result=result, recorded_at=now)
             if result.release is None and result.release_id == "no_actionable_work":
                 stop_reason = GovernorStopReason.NO_ACTIONABLE_WORK
                 break
@@ -397,8 +400,18 @@ class GovernorLoop:
             execution_strategy_inputs=execution_strategy_inputs,
         )
         release = objective_run.release
+        blocked_finalization = _blocked_finalization_result(
+            release=release,
+            finalization_policy=release_finalize,
+        )
         if self._state_store is not None:
-            if release is not None and release.decision == "accepted":
+            if blocked_finalization is not None:
+                blocked_reason = blocked_finalization.get("reason")
+                self._state_store.mark_blocked_epic(
+                    epic.epic_id,
+                    blocked_reason=str(blocked_reason) if blocked_reason is not None else None,
+                )
+            elif release is not None and release.decision == "accepted":
                 self._state_store.mark_completed_epic(epic.epic_id)
             elif release is None and getattr(objective_run.planning, "execution_strategy_selection", None) is not None:
                 selection = objective_run.planning.execution_strategy_selection
@@ -450,11 +463,6 @@ class GovernorLoop:
             state_review_snapshot_path=plan.state_review_snapshot_path,
             state_refresh_summary_path=plan.state_refresh_summary_path,
         )
-        blocked_finalization = _blocked_finalization_result(
-            release=release,
-            finalization_policy=release_finalize,
-        )
-
         return BacklogRunResult(
             selected_epic_id=epic.epic_id,
             plan_path=plan_result.plan_path,
@@ -486,6 +494,48 @@ class GovernorLoop:
             ),
             evidence_manifest=evidence_manifest,
             state_refresh_summary_path=plan.state_refresh_summary_path,
+        )
+
+    def _record_finalization_memory_for_cycle(
+        self,
+        *,
+        result: BacklogRunResult,
+        recorded_at: datetime | None,
+    ) -> None:
+        if result.release_id in {"no_actionable_work"}:
+            return
+        summary_payload = _load_release_summary_payload_from_path(result.release_summary_path)
+        unresolved_ids = _unresolved_finding_ids_from_cycle(result)
+        branch = _read_string(summary_payload, "integration_branch") or _read_string(summary_payload, "branch")
+        commit = _read_string(summary_payload, "integration_commit") or _read_string(summary_payload, "head_commit")
+        cleanup_report = _path_from_summary_payload(summary_payload, "cleanup_report_path")
+        blocked_reason = None
+        blocked_type = None
+        finalization_outcome = None
+        if result.blocked_finalization is not None:
+            blocked_reason_raw = result.blocked_finalization.get("reason")
+            blocked_type_raw = result.blocked_finalization.get("type")
+            blocked_reason = str(blocked_reason_raw) if blocked_reason_raw is not None else None
+            blocked_type = str(blocked_type_raw) if blocked_type_raw is not None else None
+            finalization_outcome = "blocked"
+        else:
+            finalization_outcome = _release_decision_value(result.release) if result.release is not None else None
+        self._state_store.add_epic_finalization_outcome_reference(
+            result.selected_epic_id,
+            FinalizationOutcomeReference(
+                release_id=result.release_id,
+                outcome=finalization_outcome,
+                run_summary_path=result.release_summary_path,
+                finalization_policy=result.finalization_policy,
+                branch=branch,
+                commit=commit,
+                cleanup_report_path=cleanup_report,
+                blocked_reason=blocked_reason,
+                blocked_type=blocked_type,
+                unresolved_finding_ids=unresolved_ids,
+                recommended_backlog_state=_recommended_backlog_state(result),
+                recorded_at=recorded_at or datetime.now(UTC),
+            ),
         )
 
     def _no_actionable_reason_for_selected_epic(
@@ -902,6 +952,57 @@ def _load_release_summary_payload(release: object) -> dict[str, object]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _load_release_summary_payload_from_path(summary_path: Path | None) -> dict[str, object]:
+    if summary_path is None or not summary_path.exists():
+        return {}
+    try:
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _read_string(payload: dict[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _path_from_summary_payload(payload: dict[str, object], key: str) -> Path | None:
+    value = _read_string(payload, key)
+    return Path(value) if value is not None else None
+
+
+def _unresolved_finding_ids_from_cycle(result: BacklogRunResult) -> list[str]:
+    from_blocked = []
+    if result.blocked_finalization is not None:
+        raw = result.blocked_finalization.get("unresolved_required_finding_ids", [])
+        if isinstance(raw, list):
+            from_blocked = [str(item) for item in raw if str(item).strip()]
+    from_feature_review = []
+    continuation = result.governor_cycle_continuation
+    if continuation is not None and continuation.feature_review is not None:
+        from_feature_review = [value for value in continuation.feature_review.unresolved_finding_ids if value.strip()]
+    ordered = []
+    for finding_id in [*from_blocked, *from_feature_review]:
+        if finding_id not in ordered:
+            ordered.append(finding_id)
+    return ordered
+
+
+def _recommended_backlog_state(result: BacklogRunResult) -> str:
+    if result.blocked_finalization is not None:
+        return "blocked"
+    continuation = result.governor_cycle_continuation
+    if continuation is not None and continuation.action == GovernorContinuationAction.STOP:
+        return "blocked"
+    if result.release is not None and _release_was_accepted(result.release):
+        return "completed"
+    return "active"
 
 
 def _release_artifact_path(

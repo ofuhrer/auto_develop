@@ -1247,6 +1247,139 @@ def test_governor_loop_stops_on_blocked_finalization_before_next_cycle(tmp_path)
     assert result.cycles[0].blocked_finalization["type"] == "finalization_gate_blocked"
 
 
+def test_governor_persists_blocked_finalization_memory_before_second_cycle(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    runs_dir = tmp_path / "runs"
+    objectives_dir = tmp_path / "objectives"
+    roadmap_path = tmp_path / "ROADMAP.md"
+    roadmap_path.write_text("# Roadmap\n", encoding="utf-8")
+    config_dir = _write_project_config(tmp_path)
+    run_objective_calls = 0
+    plan_calls = 0
+
+    plan_path = runs_dir / "epic-0001" / "backlog_plan.json"
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text("{}", encoding="utf-8")
+    plan = parse_backlog_planner_output(
+        {
+            "project_id": "demo",
+            "goal": "Goal.",
+            "roadmap_path": str(roadmap_path),
+            "planner": "deterministic",
+            "selected_epic_id": "epic-0001",
+            "warnings": [],
+            "epics": [
+                {
+                    "epic_id": "epic-0001",
+                    "title": "Epic 1",
+                    "objective": "Do epic 1.",
+                    "rationale": "Because.",
+                    "priority": 1,
+                    "source_refs": ["roadmap:1"],
+                    "acceptance_criteria": ["It works."],
+                    "suggested_release_id": "demo-epic-0001",
+                }
+            ],
+        },
+        project_id="demo",
+    )
+
+    def fake_plan_backlog(**_kwargs):
+        nonlocal plan_calls
+        plan_calls += 1
+        return SimpleNamespace(plan_path=plan_path, plan=plan, objective_path=None)
+
+    def fake_run_objective(**kwargs):
+        nonlocal run_objective_calls
+        run_objective_calls += 1
+        objective_path = kwargs["objective_path"]
+        release_dir = runs_dir / objective_path.stem
+        release_dir.mkdir(parents=True, exist_ok=True)
+        release_summary_path = release_dir / "release_summary.json"
+        release_summary_path.write_text(
+            json.dumps(
+                {
+                    "integration_branch": "feature/demo-epic-0001",
+                    "integration_commit": "deadbeef",
+                    "cleanup_report_path": str(release_dir / "cleanup_report.json"),
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(
+            release_id=objective_path.stem,
+            planning=SimpleNamespace(plan_path=runs_dir / objective_path.stem / "contract_plan.json"),
+            release=SimpleNamespace(
+                release_id=objective_path.stem,
+                summary_path=release_summary_path,
+                metrics_path=release_dir / "release_metrics.json",
+                budget_path=release_dir / "release_budget.json",
+                tuning_path=release_dir / "release_tuning.md",
+                decision="accepted",
+                finalization_gate={
+                    "allowed": False,
+                    "reason": "unresolved_required_findings",
+                    "unresolved_required_finding_ids": ["finding-1"],
+                    "decision": "accepted",
+                },
+                finalization=None,
+            ),
+        )
+
+    state_store = StateStore(tmp_path / "repo_state" / "demo" / "backlog_state.yaml")
+    result = GovernorLoop(
+        plan_backlog=fake_plan_backlog,
+        run_objective=fake_run_objective,
+        state_store=state_store,
+    ).run_epics(
+        project_id="demo",
+        goal="Run one epic.",
+        roadmap_path=roadmap_path,
+        selected_epic_id=None,
+        epic_count=2,
+        config_dir=config_dir,
+        contracts_dir=tmp_path / "contracts",
+        runs_dir=runs_dir,
+        objectives_dir=objectives_dir,
+        mode="deterministic",
+        planner_backend=None,
+        objective_planner_backend=FakeObjectivePlannerBackend(),
+        executor=FakeExecutor(),
+        verification_timeout_seconds=60,
+        allow_dirty=True,
+        commit_on_accept=False,
+        merge_on_accept=False,
+        push_on_accept=False,
+        release_finalize="push-feature",
+        integration_branch=None,
+        stop_on_failure=True,
+        execution_mode="sequential",
+        debug_keep_artifacts=False,
+        progress=None,
+        now=datetime(2026, 5, 12, 12, 0, tzinfo=UTC),
+    )
+
+    assert plan_calls == 1
+    assert run_objective_calls == 1
+    assert result.stop_reason == GovernorStopReason.BLOCKED_FINALIZATION
+    state = state_store.load()
+    blocked_record = state.blocked_epic_records[0]
+    assert blocked_record.epic_id == "epic-0001"
+    assert blocked_record.blocked_reason == "unresolved_required_findings"
+    assert len(blocked_record.finalization_outcome_references) == 1
+    finalization_memory = blocked_record.finalization_outcome_references[0]
+    assert finalization_memory.release_id == "demo-epic-0001"
+    assert finalization_memory.outcome == "blocked"
+    assert str(finalization_memory.run_summary_path).endswith("release_summary.json")
+    assert finalization_memory.branch == "feature/demo-epic-0001"
+    assert finalization_memory.commit == "deadbeef"
+    assert str(finalization_memory.cleanup_report_path).endswith("cleanup_report.json")
+    assert finalization_memory.unresolved_finding_ids == ["finding-1"]
+    assert finalization_memory.recommended_backlog_state == "blocked"
+
+
 def test_governor_cycle_continuation_records_unresolved_review_stop_reason(tmp_path) -> None:
     from types import SimpleNamespace
 

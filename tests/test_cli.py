@@ -104,6 +104,7 @@ def test_run_release_command_is_registered(capsys) -> None:
     assert "--release" in captured.out
     assert "--continue-on-failure" in captured.out
     assert "--execution-mode" in captured.out
+    assert "--release-finalize" in captured.out
     assert "--debug-keep-artifacts" in captured.out
 
 
@@ -783,6 +784,87 @@ def test_run_governor_outputs_blocked_finalization_state(monkeypatch, capsys, tm
     assert '"blocked_finalization": {' in captured.out
     assert '"type": "finalization_gate_blocked"' in captured.out
     assert '"finalization_policy": "push-feature"' in captured.out
+
+
+def test_run_governor_outputs_pr_preparation_handoff_state(monkeypatch, capsys, tmp_path) -> None:
+    run_id = "20260513T000000Z_demo_governor"
+    release_result = SimpleNamespace(
+        release_id="demo-epic-1",
+        run_id="run-1",
+        summary_path=tmp_path / "runs" / "summary.json",
+        log_path=tmp_path / "runs" / "release.log",
+        review_path=tmp_path / "runs" / "review.md",
+        metrics_path=tmp_path / "runs" / "metrics.json",
+        budget_path=tmp_path / "runs" / "budget.json",
+        tuning_path=tmp_path / "runs" / "tuning.md",
+        decision="accepted",
+        task_results=[],
+    )
+    handoff_path = tmp_path / "runs" / "pr_handoff.json"
+    cycle = SimpleNamespace(
+        selected_epic_id="epic-1",
+        plan_path=tmp_path / "runs" / "backlog_plan.json",
+        objective_path=tmp_path / "objectives" / "demo-epic-1.yaml",
+        contract_plan_path=tmp_path / "runs" / "contract_plan.json",
+        release=release_result,
+        finalization_policy="pr_preparation",
+        finalization_result={
+            "handoff_path": str(handoff_path),
+            "policy": "pr_preparation",
+        },
+    )
+    result = SimpleNamespace(
+        project_id="demo",
+        requested_epic_count=1,
+        attempted_epic_count=1,
+        accepted_epic_count=1,
+        stop_reason=GovernorStopReason.REQUESTED_EPIC_COUNT_REACHED,
+        cycles=[cycle],
+    )
+
+    monkeypatch.setattr(cli_module, "_make_governor_run_id", lambda **_kwargs: run_id)
+    monkeypatch.setattr(cli_module, "run_governor", lambda **kwargs: result)
+    monkeypatch.setattr(cli_module, "_codex_backlog_planner_backend", lambda **kwargs: object())
+    monkeypatch.setattr(
+        cli_module,
+        "cleanup_release_artifacts",
+        lambda **_kwargs: SimpleNamespace(
+            project_id="demo",
+            release_id="demo-epic-1",
+            dry_run=True,
+            worktree_paths=[],
+            task_branches=[],
+            integration_branch=None,
+            removed_worktrees=[],
+            deleted_branches=[],
+            errors=[],
+        ),
+    )
+
+    exit_code = main(
+        [
+            "run-governor",
+            "--project",
+            "demo",
+            "--goal",
+            "Run repeated epics",
+            "--epic-count",
+            "1",
+            "--execute-planner",
+            "--runs-dir",
+            str(tmp_path / "runs"),
+            "--release-finalize",
+            "push-feature",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert '"finalization_policy": "pr_preparation"' in captured.out
+    assert '"finalization_result": {' in captured.out
+    assert '"handoff_path":' in captured.out
+    assert str(handoff_path) in captured.out
 
 
 def test_run_backlog_requires_execute_planner(capsys) -> None:
