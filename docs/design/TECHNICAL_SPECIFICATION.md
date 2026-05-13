@@ -630,8 +630,7 @@ Current limitation: the implemented control plane now supports deterministic sta
 
 ### Feature Review and Repair Flow
 
-The existing `release_review.md` is a deterministic release evidence summary. The target autonomous workflow needs a separate semantic feature-review loop:
-This loop is planned, not yet implemented, in the current release.
+The existing `release_review.md` is a deterministic release evidence summary. When `model_roles.reviewer` is configured, `run-release` now also runs a separate semantic feature-review loop:
 
 1. After accepted task branches are integrated into `feature/<release>`, build a review packet containing objective, contracts, `base..feature` diff, changed-files list, release summary, verification logs, soft-gate artifacts, metrics, tuning reports, docs touched, and relevant architecture constraints.
 2. Invoke a reviewer agent that did not implement the worker tasks.

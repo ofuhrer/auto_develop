@@ -164,6 +164,11 @@ def run_release(
             raise ValueError(
                 f"contract {contract_path} belongs to release {task.release_id}, expected {release_id}"
             )
+    feature_review_source_tasks = _feature_review_source_contracts(
+        release_id=release_id,
+        contracts_dir=contracts_dir,
+        selected_tasks=selected_tasks,
+    )
     _ensure_no_existing_task_branches(config.repo_path, release_id, selected_tasks)
     overlap_report = analyze_contract_overlaps(
         selected_tasks,
@@ -276,7 +281,7 @@ def run_release(
             config_dir=config_dir,
             integration_branch=feature_branch,
             task_results=task_results,
-            source_contracts=selected_tasks,
+            source_contracts=feature_review_source_tasks,
             executor=executor,
             verification_timeout_seconds=verification_timeout_seconds,
             allow_dirty=allow_dirty,
@@ -453,6 +458,24 @@ def _select_contracts(
         if task.release_id == release_id:
             contracts.append(path)
     return contracts
+
+
+def _feature_review_source_contracts(
+    *,
+    release_id: str,
+    contracts_dir: Path,
+    selected_tasks: list[TaskContract],
+) -> list[TaskContract]:
+    """Feature review sees the whole feature diff, including prior release slices."""
+    by_task_id = {task.task_id: task for task in selected_tasks}
+    for path in sorted(contracts_dir.glob("*.yaml")):
+        try:
+            task = load_yaml_model(path, TaskContract)
+        except Exception:
+            continue
+        if task.release_id == release_id:
+            by_task_id.setdefault(task.task_id, task)
+    return [by_task_id[task_id] for task_id in sorted(by_task_id)]
 
 
 def collect_release_planning_state_review_snapshot(
@@ -1153,6 +1176,7 @@ def _run_feature_review_and_repair_loop(
                     "feature review requested rerun_verification_commands outside configured verification profile: "
                     + ", ".join(unknown)
                 )
+            commands = list(decision.rerun_verification_commands)
         return _run_integration_verification_rerun(
             repo_path=config.repo_path,
             integration_branch=integration_branch,

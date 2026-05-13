@@ -290,7 +290,7 @@ acceptance_criteria:
 
 Use objectives for planning. Use contracts for execution.
 
-The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the current governor service chooses one epic at a time, produces an objective, and feeds the existing objective/contract/release machinery. The runtime supervisor now records structured repair/resume evidence for recoverable release failures. The codebase now also supports deterministic state-review snapshot artifacts (`state_review_snapshot.json`) and contract-plan references (`state_review_snapshot_path`) as bounded evidence inputs. The broader multi-epic governor loop, fully agent-driven pre-epic state-review decisioning, independent feature-review agent, bounded repair-contract loop for reviewer findings, and always-on state refresh remain planned beyond the current one-epic governor boundary.
+The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the current governor service chooses one epic at a time, produces an objective, and feeds the existing objective/contract/release machinery. The runtime supervisor now records structured repair/resume evidence for recoverable release failures. The codebase now also supports deterministic state-review snapshot artifacts (`state_review_snapshot.json`) and contract-plan references (`state_review_snapshot_path`) as bounded evidence inputs. When `model_roles.reviewer` is configured, `run-release` also performs an independent feature-review pass after accepted tasks are integrated into `feature/<release>`, persists structured review/recheck artifacts, launches bounded repair contracts for required findings, reruns verification, and blocks finalization while unresolved required findings remain. The broader multi-epic governor loop, fully agent-driven pre-epic state-review decisioning, persistent governor memory, and always-on state refresh remain planned beyond the current one-epic governor boundary.
 
 Use backlog planning first:
 
@@ -829,9 +829,9 @@ Relationship to nearby commands:
 - `run-objective` skips backlog selection and starts from an existing objective file.
 - `run-backlog` forwards the usual release execution and finalization flags, so `--commit-on-accept`, `--merge-on-accept`, `--push-on-accept`, and `--release-finalize` still control task commits and release finalization.
 
-`run-backlog` is intentionally one epic per invocation. A multi-epic governor command is planned but not yet the documented user workflow, and the feature-review/review-repair loop remains a planned follow-on after release integration.
+`run-backlog` is intentionally one epic per invocation. A multi-epic governor command is planned but not yet the documented user workflow.
 
-Current review behavior is also narrower than the target workflow. `run-release` writes a deterministic `release_review.md`, but that file is an evidence summary, not an independent semantic PR-style review. The target workflow should add a reviewer agent that inspects the integrated feature branch diff and evidence, emits structured findings, and launches bounded repair agents before PR creation, merge-to-main, or policy-approved autonomous finalization. This reviewer/fixup loop is planned, not implemented, in the current release.
+`run-release` writes a deterministic `release_review.md` evidence summary. If the project config also defines `model_roles.reviewer`, it invokes a separate reviewer agent over `base..feature`, writes `feature_review.json`, generates bounded repair contracts for required findings, reruns verification using validated reviewer-requested commands or the default verification profile, writes `feature_review_recheck.json`, and blocks PR/merge/push finalization when required findings remain unresolved.
 
 The planned multi-epic governor should expose one parent log stream:
 
