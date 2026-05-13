@@ -1,0 +1,52 @@
+task_id: multi-epic-run-governor-hardening-0004
+release_id: multi-epic-run-governor-hardening
+title: Record accepted-release finalization and cleanup handoff
+task_type: code_only
+budget_class: M
+objective: Extend governor cycle results and parent artifacts to capture accepted
+  child release finalization policy, finalization result, cleanup result or dry-run
+  summary, and typed blocked-finalization stop state before continuing to the next
+  cycle.
+allowed_files:
+- src/agentic_devloop/backlog.py
+- src/agentic_devloop/governor.py
+- src/agentic_devloop/cli.py
+- src/agentic_devloop/governor_log.py
+- tests/test_backlog.py
+- tests/test_cli.py
+forbidden_changes:
+- Do not make cleanup destructive by default; preserve cleanup dry-run behavior unless
+  an existing explicit force flag is passed through a tested policy.
+- Do not change run-release finalization semantics or merge targets.
+- Do not delete worktrees, branches, runs artifacts, or integration branches from
+  tests except inside temporary repositories through existing cleanup APIs.
+- Do not start the next epic after a blocked finalization policy state.
+required_evidence:
+- git diff
+- pytest output for accepted child finalization handoff and blocked-finalization cases
+- governor events JSONL sample/assertion linking finalization and cleanup artifacts
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_backlog.py tests/test_cli.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if accepted releases can proceed to the next epic without a recorded finalization
+  or typed blocked-finalization result.
+- Stop if cleanup hooks require changing cleanup --force safety behavior.
+- Stop if finalization-policy stop reason cannot be serialized in parent governor
+  output.
+- Stop if tests require edits outside the allowed files.
+non_goals:
+- Do not implement new Git finalization modes.
+- Do not change task-level finalize behavior.
+- Do not update documentation in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- multi-epic-run-governor-hardening-0002
+- multi-epic-run-governor-hardening-0003

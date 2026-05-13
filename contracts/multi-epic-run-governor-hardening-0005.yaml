@@ -1,0 +1,54 @@
+task_id: multi-epic-run-governor-hardening-0005
+release_id: multi-epic-run-governor-hardening
+title: Convert feature-review outcomes into governor continuation inputs
+task_type: code_only
+budget_class: M
+objective: Thread release-local feature_review, feature_review_recheck, finalization_gate,
+  repair-contract trail, accepted finding rationale, and backlog-follow-up proposals
+  into governor cycle continuation metadata and typed stop decisions.
+allowed_files:
+- src/agentic_devloop/models.py
+- src/agentic_devloop/backlog.py
+- src/agentic_devloop/governor.py
+- src/agentic_devloop/feature_review.py
+- tests/test_feature_review.py
+- tests/test_backlog.py
+forbidden_changes:
+- Do not weaken feature-review required-finding gates, finalization gates, or repair-contract
+  scope validation.
+- Do not auto-accept required findings without an existing rationale and passing verification
+  evidence.
+- Do not implement new reviewer prompt behavior or model-output normalization in this
+  task.
+- Do not create backlog follow-up contracts directly; only record typed continuation
+  inputs/proposals.
+required_evidence:
+- git diff
+- pytest output for unresolved-review, exhausted-repair-budget, accepted-with-rationale,
+  and backlog-follow-up continuation cases
+- serialized governor cycle metadata linking feature-review and recheck artifacts
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_feature_review.py tests/test_backlog.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if unresolved required review findings cannot be distinguished from non-accepted-release
+  stops.
+- Stop if accepted-with-rationale cannot require existing evidence and rationale in
+  serialized metadata.
+- Stop if backlog-follow-up findings would be folded into the current release scope.
+- Stop if tests require edits outside the allowed files.
+non_goals:
+- Do not change reviewer finding classification rules except to expose existing outcomes
+  to the governor.
+- Do not implement cleanup or finalization policy hooks here.
+- Do not update docs in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- multi-epic-run-governor-hardening-0002

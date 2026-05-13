@@ -1,0 +1,50 @@
+task_id: multi-epic-run-governor-hardening-0006
+release_id: multi-epic-run-governor-hardening
+title: Link complete child artifact graph from parent governor artifacts
+task_type: code_only
+budget_class: M
+objective: Expand BacklogEvidenceManifest, governor event records, and run-governor
+  JSON output so every cycle exposes paths to child planning, objective, release,
+  review, decision, finalization, cleanup, and repo-state proposal artifacts.
+allowed_files:
+- src/agentic_devloop/models.py
+- src/agentic_devloop/backlog.py
+- src/agentic_devloop/governor.py
+- src/agentic_devloop/governor_log.py
+- src/agentic_devloop/cli.py
+- tests/test_cli.py
+- tests/test_backlog.py
+forbidden_changes:
+- Do not move existing child artifacts or rename existing artifact files.
+- Do not remove existing run-governor output keys or governor event types.
+- Do not parse human-readable markdown when structured JSON artifacts are available.
+- Do not implement new state update application policy in this task.
+required_evidence:
+- git diff
+- pytest output for parent artifact linking and run-governor JSON serialization
+- governor events JSONL assertion containing all linked artifact categories when present
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_cli.py tests/test_backlog.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if parent artifacts cannot link feature-review, supervisor-decision, finalization,
+  cleanup, or repo-state proposal paths without fabricating paths.
+- Stop if linking requires changing existing artifact locations.
+- Stop if run-governor output becomes incompatible with existing tests for prior keys.
+- Stop if tests require edits outside the allowed files.
+non_goals:
+- Do not implement state update proposal application.
+- Do not change feature-review or finalization decisions.
+- Do not update documentation here.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- multi-epic-run-governor-hardening-0001
+- multi-epic-run-governor-hardening-0004
+- multi-epic-run-governor-hardening-0005
