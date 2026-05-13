@@ -17,6 +17,9 @@ from agentic_devloop.supervisor_decisions import (
     ExecutionStrategyOutcome,
     FindingAdjudicationOutcome,
     FindingSeverity,
+    ModelOutputNormalizationAction,
+    ModelOutputNormalizationDecision,
+    ModelOutputNormalizationOutcome,
     ReleaseSchedulingDecision,
     ReleaseSchedulingAction,
     ReleaseSchedulingStalenessInputs,
@@ -238,6 +241,100 @@ def test_parse_environment_repair_decision() -> None:
 
     assert isinstance(decision, EnvironmentRepairDecision)
     assert decision.outcome == EnvironmentRepairOutcome.APPLY_AND_RETRY
+
+
+def test_parse_model_output_normalization_decision() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+        "risk_level": DecisionRiskLevel.HIGH,
+        "raw_artifact_paths": ["runs/release/reviewer_raw.json"],
+        "validation_errors": [
+            {
+                "field": "findings[0].evidence_paths",
+                "message": "Field required",
+                "error_type": "missing",
+            }
+        ],
+        "selected_action": ModelOutputNormalizationAction.APPLY_NORMALIZATION,
+        "outcome": ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
+        "fallback_plan": "Refuse and stop if rerun validation still fails.",
+        "validators_to_rerun": ["review_findings_schema", "release_review_gate"],
+        "normalized_artifact_path": "runs/release/feature_review.normalized.json",
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, ModelOutputNormalizationDecision)
+    assert decision.decision_type == SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION
+    assert decision.selected_action == ModelOutputNormalizationAction.APPLY_NORMALIZATION
+    assert decision.outcome == ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY
+
+
+def test_model_output_normalization_requires_consistent_outcome_fields() -> None:
+    with pytest.raises(ValidationError, match="selected_action must match outcome"):
+        ModelOutputNormalizationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+                "risk_level": DecisionRiskLevel.HIGH,
+                "raw_artifact_paths": ["runs/release/reviewer_raw.json"],
+                "validation_errors": [
+                    {
+                        "field": "findings[0].evidence_paths",
+                        "message": "Field required",
+                        "error_type": "missing",
+                    }
+                ],
+                "selected_action": ModelOutputNormalizationAction.REFUSE,
+                "outcome": ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
+                "fallback_plan": "Escalate decisioning to stop path.",
+                "validators_to_rerun": ["review_findings_schema"],
+                "normalized_artifact_path": "runs/release/feature_review.normalized.json",
+            }
+        )
+
+    with pytest.raises(ValidationError, match="requires normalized_artifact_path"):
+        ModelOutputNormalizationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+                "risk_level": DecisionRiskLevel.HIGH,
+                "raw_artifact_paths": ["runs/release/reviewer_raw.json"],
+                "validation_errors": [
+                    {
+                        "field": "findings[0].evidence_paths",
+                        "message": "Field required",
+                        "error_type": "missing",
+                    }
+                ],
+                "selected_action": ModelOutputNormalizationAction.APPLY_NORMALIZATION,
+                "outcome": ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY,
+                "fallback_plan": "Escalate decisioning to stop path.",
+                "validators_to_rerun": ["review_findings_schema"],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="requires refusal_reason"):
+        ModelOutputNormalizationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+                "risk_level": DecisionRiskLevel.HIGH,
+                "raw_artifact_paths": ["runs/release/reviewer_raw.json"],
+                "validation_errors": [
+                    {
+                        "field": "findings[0].evidence_paths",
+                        "message": "Field required",
+                        "error_type": "missing",
+                    }
+                ],
+                "selected_action": ModelOutputNormalizationAction.REFUSE,
+                "outcome": ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+                "fallback_plan": "Escalate decisioning to stop path.",
+                "validators_to_rerun": ["review_findings_schema"],
+            }
+        )
 
 
 def test_parse_supervisor_decision_rejects_unsupported_type() -> None:
