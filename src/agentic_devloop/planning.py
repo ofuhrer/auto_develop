@@ -782,20 +782,33 @@ def _normalize_planner_contract_payloads(raw_plan: dict[str, Any], *, release_id
         if isinstance(contract_payload.get("verification"), list):
             contract_payload["verification"] = {"commands": contract_payload["verification"]}
             changed_fields.append("verification")
-        implementation_requirements = contract_payload.pop("implementation_requirements", None)
-        if isinstance(implementation_requirements, list) and implementation_requirements:
-            requirement_lines = [str(item).strip() for item in implementation_requirements if str(item).strip()]
-            if requirement_lines:
-                base_objective = str(contract_payload.get("objective") or generated.get("objective") or "").strip()
-                contract_payload["objective"] = "\n".join(
-                    [
-                        base_objective,
-                        "",
-                        "Implementation requirements:",
-                        *[f"- {line}" for line in requirement_lines],
-                    ]
-                ).strip()
-                changed_fields.append("implementation_requirements")
+        implementation_requirement_sources = {
+            "implementation_requirements": contract_payload.pop("implementation_requirements", None),
+            "implementation_notes": contract_payload.pop("implementation_notes", None),
+        }
+        requirement_lines = [
+            str(item).strip()
+            for source_value in implementation_requirement_sources.values()
+            if isinstance(source_value, list)
+            for item in source_value
+            if str(item).strip()
+        ]
+        if requirement_lines:
+            repaired_source_fields = [
+                field
+                for field, source_value in implementation_requirement_sources.items()
+                if isinstance(source_value, list) and source_value
+            ]
+            base_objective = str(contract_payload.get("objective") or generated.get("objective") or "").strip()
+            contract_payload["objective"] = "\n".join(
+                [
+                    base_objective,
+                    "",
+                    "Implementation requirements:",
+                    *[f"- {line}" for line in requirement_lines],
+                ]
+            ).strip()
+            changed_fields.extend(repaired_source_fields)
         if "requirements" in contract_payload:
             contract_payload.pop("requirements")
             changed_fields.append("requirements")

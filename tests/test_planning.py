@@ -673,6 +673,41 @@ def test_parse_planner_output_preserves_implementation_requirements_as_objective
     assert any("implementation_requirements" in warning for warning in plan.warnings)
 
 
+def test_parse_planner_output_preserves_implementation_notes_as_objective_detail() -> None:
+    plan = parse_planner_output(
+        {
+            "release_id": "v0.3.25",
+            "planner": "strong-model",
+            "generated_contracts": [
+                {
+                    "task_id": "v0.3.25-0001",
+                    "title": "Review evidence package",
+                    "objective": "Build a bounded review package.",
+                    "rationale": "Planner used implementation_notes outside the strict contract schema.",
+                    "suggested_contract": {
+                        "allowed_files": ["src/agentic_devloop/release.py"],
+                        "forbidden_changes": ["Do not weaken validation."],
+                        "implementation_notes": [
+                            "Attach final verification logs by reference.",
+                            "Record truncation metadata explicitly.",
+                        ],
+                        "verification": [".venv/bin/python -m pytest tests/test_planning.py"],
+                        "stop_conditions": ["Stop if scope expands."],
+                    },
+                }
+            ],
+            "warnings": [],
+        },
+        release_id="v0.3.25",
+        planner="strong-model",
+    )
+
+    contract = plan.generated_contracts[0].suggested_contract
+    assert "Implementation requirements:" in contract.objective
+    assert "- Attach final verification logs by reference." in contract.objective
+    assert any("implementation_notes" in warning for warning in plan.warnings)
+
+
 def test_parse_planner_output_repairs_tail_brace_and_wrapper_depends_on() -> None:
     raw_output = json.dumps(
         {
