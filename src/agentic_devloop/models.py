@@ -539,6 +539,12 @@ class FeatureReviewFinding(StrictModel):
             raise ValueError("feature review list items must not be empty")
         return values
 
+    @model_validator(mode="after")
+    def actionable_findings_require_affected_files(self) -> "FeatureReviewFinding":
+        if (self.required_repairs or self.optional_follow_ups) and not self.affected_files:
+            raise ValueError("feature review findings with repairs or follow-ups require affected_files")
+        return self
+
 
 class FeatureReviewDecision(StrictModel):
     release_id: str = Field(min_length=1)

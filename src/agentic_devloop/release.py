@@ -1223,11 +1223,16 @@ def _run_feature_review_and_repair_loop(
 
         if not required_findings:
             stop_reason = "resolved" if not decision.findings else "accepted_with_rationale"
+            optional_finding_ids = {finding.finding_id for finding in optional_findings}
             feature_review_recheck = FeatureReviewRecheckRecord(
                 release_id=release_id,
                 unresolved_finding_ids=[],
-                resolved_finding_ids=[finding.finding_id for finding in decision.findings],
-                accepted_finding_ids=[finding.finding_id for finding in optional_findings],
+                resolved_finding_ids=[
+                    finding.finding_id
+                    for finding in decision.findings
+                    if finding.finding_id not in optional_finding_ids
+                ],
+                accepted_finding_ids=sorted(optional_finding_ids),
                 stop_reason=stop_reason,
             )
             feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)

@@ -342,6 +342,28 @@ def test_feature_review_models_reject_unknown_fields() -> None:
         )
 
 
+def test_feature_review_findings_with_actions_require_affected_files() -> None:
+    with pytest.raises(ValidationError, match="require affected_files"):
+        FeatureReviewFinding.model_validate(
+            {
+                "finding_id": "feature-001",
+                "severity": "high",
+                "summary": "Required repair lacks scope.",
+                "required_repairs": ["Fix the issue."],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="require affected_files"):
+        FeatureReviewFinding.model_validate(
+            {
+                "finding_id": "feature-002",
+                "severity": "moderate",
+                "summary": "Optional follow-up lacks scope.",
+                "optional_follow_ups": ["Document the follow-up."],
+            }
+        )
+
+
 def _budget() -> Budget:
     return Budget(
         max_executor_attempts_per_task=2,

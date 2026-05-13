@@ -638,7 +638,7 @@ The existing `release_review.md` is a deterministic release evidence summary. Wh
 4. Convert required findings into bounded repair contracts on the feature branch.
 5. Run repair agents, rerun verification, and rerun reviewer checks on unresolved findings.
 6. Stop only when required findings are resolved, explicitly accepted with rationale, retry budget is exhausted, hard gates fail, credentials/policy are missing, or configured policy requires human escalation.
-7. Persist `feature_review.json`, human-readable `feature_review.md`, repair contracts, repair evidence, and reviewer re-check results as release/governor child artifacts.
+7. Persist `feature_review.json`, `feature_review_recheck.json`, generated repair contracts, repair evidence, and reviewer re-check results as release/governor child artifacts.
 
 This review loop is intentionally agentic. Deterministic code should assemble evidence, enforce hard invariants, validate review schemas, and rerun verification; it should not try to encode semantic architecture review as brittle heuristics.
 

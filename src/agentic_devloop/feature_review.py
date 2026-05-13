@@ -491,6 +491,7 @@ def _blocked_feature_review_decision(
         finding_id=f"{release_id}:feature_review_blocked",
         severity=FeatureReviewSeverity.CRITICAL,
         summary=reason,
+        affected_files=["feature_review_context"],
         evidence_paths=evidence_paths,
         required_repairs=["Restore reviewer backend or provide missing context and retry feature review."],
     )
