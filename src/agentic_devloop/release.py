@@ -2514,7 +2514,7 @@ def _build_release_scheduling_decision(
         selected_tasks=selected_tasks,
         overlap_report=overlap_report,
     )
-    evidence_paths = [overlap_report_path, *[path.resolve() for path in selected_contracts]]
+    evidence_paths = [overlap_report_path.resolve(), *[path.resolve() for path in selected_contracts]]
     if selected_action == ReleaseSchedulingAction.SEQUENTIAL:
         if overlap_report.findings:
             rationale = "Normal source overlap is serialized for safety."

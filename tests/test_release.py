@@ -505,6 +505,7 @@ def test_run_release_parallel_executes_independent_tasks_concurrently(tmp_path) 
     )
     decision = load_supervisor_decision_artifact(decision_path)
     assert decision.selected_action == ReleaseSchedulingAction.PARALLEL
+    assert decision.evidence_paths[0] == (tmp_path / "runs" / result.run_id / "release_overlap_report.json").resolve()
     assert result.review_path.exists()
 
 
