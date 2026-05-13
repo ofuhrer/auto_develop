@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import shlex
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
@@ -507,10 +506,59 @@ def _parse_json_object(text: str) -> dict[str, Any]:
         loaded = None
     if isinstance(loaded, dict):
         return loaded
-    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-    if not match:
-        raise ValueError("no JSON object found in output")
-    loaded = json.loads(match.group(0))
+
+    start_index = None
+    for index, char in enumerate(text):
+        if char.isspace():
+            continue
+        if char != "{":
+            raise ValueError("reviewer output contains non-whitespace before JSON object")
+        start_index = index
+        break
+
+    if start_index is None:
+        raise ValueError("reviewer output is empty")
+
+    depth = 0
+    in_string = False
+    escape = False
+    end_index = None
+    for index in range(start_index, len(text)):
+        char = text[index]
+        if in_string:
+            if escape:
+                escape = False
+                continue
+            if char == "\\":
+                escape = True
+                continue
+            if char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            continue
+        if char == "{":
+            depth += 1
+            continue
+        if char == "}":
+            depth -= 1
+            if depth < 0:
+                raise ValueError("reviewer output has an unmatched closing brace")
+            if depth == 0:
+                end_index = index + 1
+                break
+            continue
+
+    if end_index is None or depth != 0:
+        raise ValueError("reviewer output contains an unterminated JSON object")
+
+    suffix = text[end_index:]
+    if suffix.strip():
+        raise ValueError("reviewer output contains non-whitespace after JSON object")
+
+    loaded = json.loads(text[start_index:end_index])
     if not isinstance(loaded, dict):
         raise ValueError("parsed JSON is not an object")
     return loaded
