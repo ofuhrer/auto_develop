@@ -417,10 +417,40 @@ class GovernorLoop:
             backlog_plan_path=plan_result.plan_path,
             generated_objective_path=objective_path if created_objective else None,
             contract_plan_path=objective_run.planning.plan_path,
+            execution_strategy_selection_path=getattr(
+                objective_run.planning, "execution_strategy_selection_path", None
+            ),
+            supervisor_decision_path=getattr(objective_run.planning, "supervisor_decision_path", None),
+            one_shot_execution_input_path=getattr(
+                objective_run.planning, "one_shot_execution_input_path", None
+            ),
             release_summary_path=release.summary_path if release is not None else None,
+            release_log_path=getattr(release, "log_path", None) if release is not None else None,
+            release_review_path=getattr(release, "review_path", None) if release is not None else None,
             release_metrics_path=release.metrics_path if release is not None else None,
             release_budget_path=release.budget_path if release is not None else None,
             release_tuning_path=release.tuning_path if release is not None else None,
+            release_soft_gate_decision_path=(
+                _release_summary_artifact_paths(release).get("release_soft_gate_decision_path")
+                if release is not None
+                else None
+            ),
+            feature_review_path=(
+                _release_summary_artifact_paths(release).get("feature_review_path")
+                if release is not None
+                else None
+            ),
+            feature_review_recheck_path=(
+                _release_summary_artifact_paths(release).get("feature_review_recheck_path")
+                if release is not None
+                else None
+            ),
+            feature_review_proposal_paths=(
+                _release_summary_feature_review_proposal_paths(release) if release is not None else []
+            ),
+            finalization_summary_path=release.summary_path if release is not None else None,
+            repo_state_proposal_plan_path=plan_result.plan_path if plan.repo_state_updates else None,
+            roadmap_proposal_plan_path=plan_result.plan_path if plan.roadmap_updates else None,
             state_review_snapshot_path=plan.state_review_snapshot_path,
             state_refresh_summary_path=plan.state_refresh_summary_path,
         )
@@ -608,6 +638,55 @@ def _release_finalization_result(release: object | None) -> dict[str, object] | 
             "error": getattr(finalize, "error", None),
         }
     return result or None
+
+
+def _release_summary_artifact_paths(release: object) -> dict[str, Path]:
+    summary_path = getattr(release, "summary_path", None)
+    if summary_path is None:
+        return {}
+    path = Path(summary_path)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    paths: dict[str, Path] = {}
+    for key in (
+        "release_soft_gate_decision_path",
+        "feature_review_path",
+        "feature_review_recheck_path",
+    ):
+        raw_value = payload.get(key)
+        if isinstance(raw_value, str) and raw_value.strip():
+            paths[key] = Path(raw_value)
+    return paths
+
+
+def _release_summary_feature_review_proposal_paths(release: object) -> list[Path]:
+    summary_path = getattr(release, "summary_path", None)
+    if summary_path is None:
+        return []
+    path = Path(summary_path)
+    if not path.exists():
+        return []
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    proposal_payload = payload.get("feature_review_proposals")
+    if not isinstance(proposal_payload, list):
+        return []
+
+    paths: list[Path] = []
+    for item in proposal_payload:
+        if not isinstance(item, dict):
+            continue
+        raw_path = item.get("decision_artifact_path")
+        if isinstance(raw_path, str) and raw_path.strip():
+            paths.append(Path(raw_path))
+    return paths
 
 
 def _blocked_finalization_result(

@@ -396,7 +396,12 @@ def test_run_backlog_selects_one_epic_reuses_objective_and_runs_release(tmp_path
     assert result.evidence_manifest.backlog_plan_path == result.plan_path
     assert result.evidence_manifest.generated_objective_path is None
     assert result.evidence_manifest.contract_plan_path == result.contract_plan_path
+    assert result.evidence_manifest.execution_strategy_selection_path == result.execution_strategy_selection_path
+    assert result.evidence_manifest.supervisor_decision_path == result.supervisor_decision_path
+    assert result.evidence_manifest.one_shot_execution_input_path == result.one_shot_execution_input_path
     assert result.evidence_manifest.release_summary_path == result.release_summary_path
+    assert result.evidence_manifest.release_log_path == result.release.log_path
+    assert result.evidence_manifest.release_review_path == result.release.review_path
     assert result.evidence_manifest.release_metrics_path == result.release_metrics_path
     assert result.evidence_manifest.release_budget_path == result.release_budget_path
     assert result.evidence_manifest.release_tuning_path == result.release_tuning_path
@@ -474,7 +479,12 @@ def test_run_backlog_records_generated_objective_path_when_objective_is_created(
     assert result.evidence_manifest.backlog_plan_path == result.backlog_plan_path
     assert result.evidence_manifest.generated_objective_path == result.generated_objective_path
     assert result.evidence_manifest.contract_plan_path == result.contract_plan_path
+    assert result.evidence_manifest.execution_strategy_selection_path == result.execution_strategy_selection_path
+    assert result.evidence_manifest.supervisor_decision_path == result.supervisor_decision_path
+    assert result.evidence_manifest.one_shot_execution_input_path == result.one_shot_execution_input_path
     assert result.evidence_manifest.release_summary_path == result.release_summary_path
+    assert result.evidence_manifest.release_log_path == result.release.log_path
+    assert result.evidence_manifest.release_review_path == result.release.review_path
     assert result.evidence_manifest.release_metrics_path == result.release_metrics_path
     assert result.evidence_manifest.release_budget_path == result.release_budget_path
     assert result.evidence_manifest.release_tuning_path == result.release_tuning_path
@@ -769,6 +779,8 @@ def test_governor_loop_runs_one_epic_and_builds_evidence_manifest(tmp_path) -> N
     assert result.evidence_manifest.generated_objective_path == result.objective_path
     assert result.evidence_manifest.contract_plan_path == contract_plan_path
     assert result.evidence_manifest.release_summary_path == release_summary_path
+    assert result.evidence_manifest.release_log_path is None
+    assert result.evidence_manifest.release_review_path is None
     assert result.state_refresh_summary_path is not None
     assert result.state_refresh_summary_path.exists()
     summary_payload = json.loads(result.state_refresh_summary_path.read_text(encoding="utf-8"))

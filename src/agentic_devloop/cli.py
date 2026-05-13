@@ -773,27 +773,33 @@ def main(argv: list[str] | None = None) -> int:
         cleanup_payloads_by_cycle: dict[int, dict[str, object]] = {}
 
         for index, cycle in enumerate(result.cycles, start=1):
+            cycle_release_id = cycle.release.release_id if cycle.release is not None else cycle.release_id
+            cleanup_path_for_cycle: Path | None = None
+            cycle_artifacts = _cycle_artifact_graph(
+                cycle=cycle,
+                cleanup_path=cleanup_path_for_cycle,
+            )
             governor_writer.write(
                 event_type=GovernorEventType.EPIC_SELECTED,
                 message=f"cycle={index} selected_epic_id={cycle.selected_epic_id}",
-                artifacts=[cycle.plan_path],
+                artifacts=cycle_artifacts["planning"] + cycle_artifacts["repo_state_proposal"],
             )
             governor_writer.write(
                 event_type=GovernorEventType.OBJECTIVE_READY,
                 message=f"cycle={index} objective_path={cycle.objective_path}",
-                artifacts=[cycle.objective_path],
+                artifacts=cycle_artifacts["objective"],
             )
             if cycle.contract_plan_path is not None:
                 governor_writer.write(
                     event_type=GovernorEventType.CONTRACT_PLAN_COMPLETED,
                     message=f"cycle={index} contract_plan_path={cycle.contract_plan_path}",
-                    artifacts=[cycle.contract_plan_path],
+                    artifacts=cycle_artifacts["planning"],
                 )
             if cycle.release is not None:
                 governor_writer.write(
                     event_type=GovernorEventType.RELEASE_COMPLETED,
                     message=f"cycle={index} release_id={cycle.release.release_id} decision={cycle.release.decision}",
-                    artifacts=_release_artifact_links(cycle.release),
+                    artifacts=cycle_artifacts["release"] + cycle_artifacts["review"] + cycle_artifacts["decision"],
                 )
                 cleanup_result = None
                 if str(cycle.release.decision) == "accepted":
@@ -808,18 +814,20 @@ def main(argv: list[str] | None = None) -> int:
                     cleanup_payloads_by_cycle[index] = cleanup_payload
                     cleanup_path = cleanup_reports_dir / f"cycle_{index:03d}_{cycle.release.release_id}_cleanup.json"
                     cleanup_path.write_text(json.dumps(cleanup_payload, indent=2) + "\n", encoding="utf-8")
+                    cleanup_path_for_cycle = cleanup_path
+                    cycle_artifacts = _cycle_artifact_graph(
+                        cycle=cycle,
+                        cleanup_path=cleanup_path_for_cycle,
+                    )
                     governor_writer.write(
                         event_type=GovernorEventType.STATE_REFRESHED,
                         message=(
                             f"cycle={index} release_id={cycle.release.release_id} "
                             f"cleanup_handoff dry_run={cleanup_payload['dry_run']}"
                         ),
-                        artifacts=[cleanup_path],
+                        artifacts=cycle_artifacts["cleanup"],
                     )
                 if args.release_finalize != "none" or getattr(cycle, "finalization_result", None) is not None:
-                    finalization_artifacts = [cycle.release.summary_path]
-                    if cleanup_result is not None:
-                        finalization_artifacts.append(cleanup_path)
                     governor_writer.write(
                         event_type=GovernorEventType.FINALIZATION_COMPLETED,
                         message=(
@@ -827,7 +835,7 @@ def main(argv: list[str] | None = None) -> int:
                             f"mode={args.release_finalize} blocked="
                             f"{getattr(cycle, 'blocked_finalization', None) is not None}"
                         ),
-                        artifacts=finalization_artifacts,
+                        artifacts=cycle_artifacts["finalization"] + cycle_artifacts["cleanup"],
                     )
         governor_writer.write(
             event_type=GovernorEventType.GOVERNOR_COMPLETED,
@@ -1031,6 +1039,8 @@ def _backlog_run_result(result) -> dict[str, object]:
         output["cleanup_result"] = result.cleanup_result
     if getattr(result, "blocked_finalization", None) is not None:
         output["blocked_finalization"] = result.blocked_finalization
+    if getattr(result, "evidence_manifest", None) is not None:
+        output["evidence_manifest"] = result.evidence_manifest.model_dump(mode="json")
     return output
 
 
@@ -1081,3 +1091,85 @@ def _release_artifact_links(release_result) -> list[Path]:
         if value is not None:
             artifacts.append(value)
     return artifacts
+
+
+def _cycle_artifact_graph(*, cycle, cleanup_path: Path | None) -> dict[str, list[Path]]:
+    manifest = getattr(cycle, "evidence_manifest", None)
+    planning: list[Path] = []
+    objective: list[Path] = []
+    release: list[Path] = []
+    review: list[Path] = []
+    decision: list[Path] = []
+    finalization: list[Path] = []
+    cleanup: list[Path] = []
+    repo_state_proposal: list[Path] = []
+
+    if manifest is not None:
+        planning = _existing_paths(
+            [
+                manifest.backlog_plan_path,
+                manifest.contract_plan_path,
+                manifest.execution_strategy_selection_path,
+                manifest.one_shot_execution_input_path,
+                manifest.state_review_snapshot_path,
+                manifest.state_refresh_summary_path,
+            ]
+        )
+        objective = _existing_paths([manifest.generated_objective_path or cycle.objective_path])
+        release = _existing_paths(
+            [
+                manifest.release_summary_path,
+                manifest.release_log_path,
+                manifest.release_metrics_path,
+                manifest.release_budget_path,
+                manifest.release_tuning_path,
+            ]
+        )
+        review = _existing_paths(
+            [
+                manifest.release_review_path,
+                manifest.feature_review_path,
+                manifest.feature_review_recheck_path,
+                *manifest.feature_review_proposal_paths,
+            ]
+        )
+        decision = _existing_paths(
+            [
+                manifest.supervisor_decision_path,
+                manifest.release_soft_gate_decision_path,
+            ]
+        )
+        finalization = _existing_paths([manifest.finalization_summary_path or manifest.release_summary_path])
+        repo_state_proposal = _existing_paths(
+            [manifest.repo_state_proposal_plan_path, manifest.roadmap_proposal_plan_path]
+        )
+    else:
+        planning = _existing_paths([getattr(cycle, "plan_path", None), getattr(cycle, "contract_plan_path", None)])
+        objective = _existing_paths([getattr(cycle, "objective_path", None)])
+        if getattr(cycle, "release", None) is not None:
+            release = _existing_paths(_release_artifact_links(cycle.release))
+            finalization = _existing_paths([getattr(cycle.release, "summary_path", None)])
+
+    if cleanup_path is not None:
+        cleanup = _existing_paths([cleanup_path])
+
+    return {
+        "planning": planning,
+        "objective": objective,
+        "release": release,
+        "review": review,
+        "decision": decision,
+        "finalization": finalization,
+        "cleanup": cleanup,
+        "repo_state_proposal": repo_state_proposal,
+    }
+
+
+def _existing_paths(paths: list[Path | None]) -> list[Path]:
+    result: list[Path] = []
+    for path in paths:
+        if path is None:
+            continue
+        if path.exists():
+            result.append(path)
+    return result

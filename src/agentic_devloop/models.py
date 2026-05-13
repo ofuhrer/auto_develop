@@ -181,10 +181,23 @@ class BacklogEvidenceManifest(StrictModel):
     backlog_plan_path: Path | None = None
     generated_objective_path: Path | None = None
     contract_plan_path: Path | None = None
+    execution_strategy_selection_path: Path | None = None
+    supervisor_decision_path: Path | None = None
+    one_shot_execution_input_path: Path | None = None
     release_summary_path: Path | None = None
+    release_log_path: Path | None = None
+    release_review_path: Path | None = None
     release_metrics_path: Path | None = None
     release_budget_path: Path | None = None
     release_tuning_path: Path | None = None
+    release_soft_gate_decision_path: Path | None = None
+    feature_review_path: Path | None = None
+    feature_review_recheck_path: Path | None = None
+    feature_review_proposal_paths: list[Path] = Field(default_factory=list)
+    finalization_summary_path: Path | None = None
+    cleanup_report_path: Path | None = None
+    repo_state_proposal_plan_path: Path | None = None
+    roadmap_proposal_plan_path: Path | None = None
     state_review_snapshot_path: Path | None = None
     state_refresh_summary_path: Path | None = None
 
