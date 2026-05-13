@@ -666,7 +666,7 @@ def test_model_output_normalization_requires_consistent_outcome_fields() -> None
             }
         )
 
-    with pytest.raises(ValidationError, match="requires explicit validators_to_rerun"):
+    with pytest.raises(ValidationError, match="validators to rerun must not be empty"):
         ModelOutputNormalizationDecision.model_validate(
             {
                 **BASE,
@@ -710,7 +710,7 @@ def test_model_output_normalization_requires_consistent_outcome_fields() -> None
         )
 
 
-def test_model_output_normalization_refused_allows_empty_validation_and_rerun_lists() -> None:
+def test_model_output_normalization_refused_allows_empty_validation_errors_but_requires_rerun_validators() -> None:
     decision = ModelOutputNormalizationDecision.model_validate(
         {
             **BASE,
@@ -721,12 +721,29 @@ def test_model_output_normalization_refused_allows_empty_validation_and_rerun_li
             "selected_action": ModelOutputNormalizationAction.REFUSE,
             "outcome": ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
             "fallback_plan": "Escalate decisioning to stop path.",
-            "validators_to_rerun": [],
+            "validators_to_rerun": ["review_findings_schema"],
             "refusal_reason": "Insufficient confidence in safe normalization.",
         }
     )
 
     assert decision.outcome == ModelOutputNormalizationOutcome.REFUSED_AND_STOP
+    assert decision.validators_to_rerun == ["review_findings_schema"]
+
+    with pytest.raises(ValidationError, match="validators to rerun must not be empty"):
+        ModelOutputNormalizationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
+                "risk_level": DecisionRiskLevel.HIGH,
+                "raw_artifact_paths": ["runs/release/reviewer_raw.json"],
+                "validation_errors": [],
+                "selected_action": ModelOutputNormalizationAction.REFUSE,
+                "outcome": ModelOutputNormalizationOutcome.REFUSED_AND_STOP,
+                "fallback_plan": "Escalate decisioning to stop path.",
+                "validators_to_rerun": [],
+                "refusal_reason": "Insufficient confidence in safe normalization.",
+            }
+        )
 
 
 def test_parse_supervisor_decision_rejects_unsupported_type() -> None:
