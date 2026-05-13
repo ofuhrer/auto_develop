@@ -7,6 +7,7 @@ import pytest
 
 from agentic_devloop.state_store import (
     BacklogState,
+    EpicRefreshOutcome,
     FinalizationOutcomeReference,
     OutcomeReference,
     StateReviewSnapshotReference,
@@ -471,3 +472,91 @@ def test_add_epic_finalization_outcome_reference_persists_memory_fields(tmp_path
     assert finalization.commit == "abc123"
     assert str(finalization.cleanup_report_path).endswith("cleanup_report.json")
     assert finalization.recommended_backlog_state == "completed"
+
+
+def test_apply_epic_refresh_outcome_is_typed_and_idempotent_for_references(tmp_path: Path) -> None:
+    state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
+    store = StateStore(state_path)
+
+    refresh_outcome = EpicRefreshOutcome(
+        lifecycle_state="completed",
+        status_reason="completed via feature/governor-state-refresh",
+        retry_count=2,
+        repair_count=1,
+        next_recommendations=["start planner-admission-repair"],
+        outcome_references=[
+            OutcomeReference(
+                release_id="governor-state-refresh",
+                outcome="accepted",
+                run_summary_path=Path("runs/gov/release_summary.json"),
+                recorded_at=datetime(2026, 5, 13, 12, 0, tzinfo=UTC),
+            )
+        ],
+        finalization_outcome_references=[
+            FinalizationOutcomeReference(
+                release_id="governor-state-refresh",
+                outcome="accepted",
+                branch="feature/governor-state-refresh",
+                commit="deadbeef",
+                recorded_at=datetime(2026, 5, 13, 12, 10, tzinfo=UTC),
+            )
+        ],
+        unresolved_finding_references=[
+            UnresolvedFindingReference(
+                finding_id="finding-1",
+                summary="follow-up in next epic",
+                severity="moderate",
+                source_path=Path("runs/gov/feature_review.json"),
+            )
+        ],
+        state_review_snapshot_references=[
+            StateReviewSnapshotReference(
+                snapshot_path=Path("runs/gov/state_review_snapshot.json"),
+                captured_at=datetime(2026, 5, 13, 11, 30, tzinfo=UTC),
+                release_id="governor-state-refresh",
+            )
+        ],
+    )
+
+    store.apply_epic_refresh_outcome("governor-state-refresh", refresh_outcome)
+    state = store.apply_epic_refresh_outcome("governor-state-refresh", refresh_outcome)
+
+    assert state.active_epics == []
+    assert [record.epic_id for record in state.completed_epic_records] == ["governor-state-refresh"]
+    assert state.completed_epics == ["governor-state-refresh"]
+
+    record = state.completed_epic_records[0]
+    assert record.status_reason == "completed via feature/governor-state-refresh"
+    assert record.retry_count == 2
+    assert record.repair_count == 1
+    assert record.next_recommendations == ["start planner-admission-repair"]
+    assert len(record.outcome_references) == 1
+    assert len(record.finalization_outcome_references) == 1
+    assert len(record.unresolved_finding_references) == 1
+    assert len(record.state_review_snapshot_references) == 1
+
+
+def test_apply_epic_refresh_outcome_preserves_legacy_string_record_loading(tmp_path: Path) -> None:
+    state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        """
+completed_epic_records:
+  - legacy-epic
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    store = StateStore(state_path)
+    loaded = store.load()
+    assert [record.epic_id for record in loaded.completed_epic_records] == ["legacy-epic"]
+
+    state = store.apply_epic_refresh_outcome(
+        "legacy-epic",
+        EpicRefreshOutcome(
+            lifecycle_state="reviewed",
+            status_reason="refreshed-after-merge",
+        ),
+    )
+    assert [record.epic_id for record in state.reviewed_epics] == ["legacy-epic"]
+    assert state.reviewed_epics[0].status_reason == "refreshed-after-merge"

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 import yaml
 
 from agentic_devloop.yaml_io import dump_yaml_data
+
+ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
 class CandidateEpic(BaseModel):
@@ -77,6 +79,7 @@ class EpicMemoryRecord(BaseModel):
     rationale: str | None = Field(default=None, min_length=1)
     status_reason: str | None = Field(default=None, min_length=1)
     blocked_reason: str | None = Field(default=None, min_length=1)
+    next_recommendations: list[str] = Field(default_factory=list)
     retry_count: int = Field(default=0, ge=0)
     repair_count: int = Field(default=0, ge=0)
     outcome_references: list[OutcomeReference] = Field(default_factory=list)
@@ -84,6 +87,28 @@ class EpicMemoryRecord(BaseModel):
     unresolved_finding_references: list[UnresolvedFindingReference] = Field(default_factory=list)
     state_review_snapshot_references: list[StateReviewSnapshotReference] = Field(default_factory=list)
     updated_at: datetime | None = None
+
+
+class EpicRefreshOutcome(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    lifecycle_state: Literal["active", "completed", "blocked", "skipped", "reviewed"]
+    status_reason: str | None = Field(default=None, min_length=1)
+    blocked_reason: str | None = Field(default=None, min_length=1)
+    retry_count: int | None = Field(default=None, ge=0)
+    repair_count: int | None = Field(default=None, ge=0)
+    next_recommendations: list[str] = Field(default_factory=list)
+    outcome_references: list[OutcomeReference] = Field(default_factory=list)
+    finalization_outcome_references: list[FinalizationOutcomeReference] = Field(default_factory=list)
+    unresolved_finding_references: list[UnresolvedFindingReference] = Field(default_factory=list)
+    state_review_snapshot_references: list[StateReviewSnapshotReference] = Field(default_factory=list)
+
+    @field_validator("next_recommendations")
+    @classmethod
+    def _next_recommendations_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("next recommendations must not be empty")
+        return values
 
 
 class RecentRunSummary(BaseModel):
@@ -235,6 +260,38 @@ class StateStore:
     def increment_epic_repair_count(self, epic_id: str, *, amount: int = 1) -> BacklogState:
         return self._increment_epic_counter(epic_id, amount=amount, counter="repair_count")
 
+    def apply_epic_refresh_outcome(self, epic_id: str, outcome: EpicRefreshOutcome) -> BacklogState:
+        state = self.load()
+        record = self._pop_existing_epic_record(state, epic_id) or EpicMemoryRecord(epic_id=epic_id)
+        record.status_reason = outcome.status_reason
+        record.blocked_reason = outcome.blocked_reason
+        if outcome.retry_count is not None:
+            record.retry_count = outcome.retry_count
+        if outcome.repair_count is not None:
+            record.repair_count = outcome.repair_count
+        if outcome.next_recommendations:
+            record.next_recommendations = list(outcome.next_recommendations)
+        record.outcome_references = self._merge_unique_references(
+            record.outcome_references,
+            outcome.outcome_references,
+        )
+        record.finalization_outcome_references = self._merge_unique_references(
+            record.finalization_outcome_references,
+            outcome.finalization_outcome_references,
+        )
+        record.unresolved_finding_references = self._merge_unique_references(
+            record.unresolved_finding_references,
+            outcome.unresolved_finding_references,
+        )
+        record.state_review_snapshot_references = self._merge_unique_references(
+            record.state_review_snapshot_references,
+            outcome.state_review_snapshot_references,
+        )
+        record.updated_at = datetime.now(UTC)
+        self._set_epic_lifecycle_state(state, record, outcome.lifecycle_state)
+        self.save(state)
+        return state
+
     def add_epic_outcome_reference(self, epic_id: str, reference: OutcomeReference) -> BacklogState:
         state = self.load()
         record = self._get_or_create_epic_record(state, epic_id)
@@ -349,6 +406,42 @@ class StateStore:
         target_records.insert(0, record)
         return record
 
+    def _set_epic_lifecycle_state(
+        self,
+        state: BacklogState,
+        record: EpicMemoryRecord,
+        lifecycle_state: Literal["active", "completed", "blocked", "skipped", "reviewed"],
+    ) -> None:
+        epic_id = record.epic_id
+        state.active_epics = [value for value in state.active_epics if value.epic_id != epic_id]
+        state.completed_epic_records = [value for value in state.completed_epic_records if value.epic_id != epic_id]
+        state.blocked_epic_records = [value for value in state.blocked_epic_records if value.epic_id != epic_id]
+        state.skipped_epics = [value for value in state.skipped_epics if value.epic_id != epic_id]
+        state.reviewed_epics = [value for value in state.reviewed_epics if value.epic_id != epic_id]
+        state.completed_epics = [value for value in state.completed_epics if value != epic_id]
+        state.blocked_epics = [value for value in state.blocked_epics if value != epic_id]
+        if state.active_epic == epic_id:
+            state.active_epic = None
+
+        if lifecycle_state == "active":
+            state.active_epic = epic_id
+            self._set_record(state.active_epics, record)
+            return
+        if lifecycle_state == "completed":
+            if epic_id not in state.completed_epics:
+                state.completed_epics.append(epic_id)
+            self._set_record(state.completed_epic_records, record)
+            return
+        if lifecycle_state == "blocked":
+            if epic_id not in state.blocked_epics:
+                state.blocked_epics.append(epic_id)
+            self._set_record(state.blocked_epic_records, record)
+            return
+        if lifecycle_state == "skipped":
+            self._set_record(state.skipped_epics, record)
+            return
+        self._set_record(state.reviewed_epics, record)
+
     def _pop_existing_epic_record(self, state: BacklogState, epic_id: str) -> EpicMemoryRecord | None:
         for records in self._epic_record_lists(state):
             for index, record in enumerate(records):
@@ -370,6 +463,18 @@ class StateStore:
     def _set_record(records: list[EpicMemoryRecord], record: EpicMemoryRecord) -> None:
         records[:] = [value for value in records if value.epic_id != record.epic_id]
         records.insert(0, record)
+
+    @staticmethod
+    def _merge_unique_references(existing: list[ModelT], additions: list[ModelT]) -> list[ModelT]:
+        merged = list(existing)
+        seen = {item.model_dump_json(exclude_none=True) for item in merged}
+        for item in additions:
+            key = item.model_dump_json(exclude_none=True)
+            if key in seen:
+                continue
+            merged.append(item)
+            seen.add(key)
+        return merged
 
     @staticmethod
     def _normalize_legacy_backlog_state(parsed: dict[object, object]) -> dict[object, object]:
