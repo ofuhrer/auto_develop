@@ -1553,7 +1553,7 @@ def _run_feature_review_and_repair_loop(
                         "selected_action": item.selected_action,
                         "outcome": outcome.value,
                         "fallback_plan": fallback_plan,
-                        "validators_to_rerun": ["feature_review_recheck", "finalization_gate"],
+                        "validators_to_rerun": ["feature_review_recheck"],
                     }
                 )
                 attempt_path = write_supervisor_decision_artifact(
