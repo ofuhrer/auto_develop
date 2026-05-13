@@ -16,11 +16,12 @@ from agentic_devloop.execution_strategy import (
     ExecutionStrategyReason,
     ExecutionStrategySelection,
 )
-from agentic_devloop.governor import GovernorLoop
+from agentic_devloop.governor import GovernorLoop, governor_stop_category_for_reason
 from agentic_devloop.models import (
     ExecutorResult,
     GovernorContinuationAction,
     GovernorContinuationStopReason,
+    GovernorStopCategory,
     GovernorStopReason,
 )
 from agentic_devloop.state_refresh import (
@@ -794,6 +795,14 @@ def test_governor_loop_runs_one_epic_and_builds_evidence_manifest(tmp_path) -> N
     assert summary_payload["status_count"] >= 0
 
 
+def test_governor_stop_reason_category_mapping_is_typed() -> None:
+    assert governor_stop_category_for_reason(GovernorStopReason.NO_ACTIONABLE_WORK) == GovernorStopCategory.NO_ACTIONABLE_WORK
+    assert governor_stop_category_for_reason(GovernorStopReason.PLANNING_ONLY_STRATEGY) == GovernorStopCategory.PLANNING_ONLY_STRATEGY
+    assert governor_stop_category_for_reason(GovernorStopReason.RELEASE_NOT_ACCEPTED) == GovernorStopCategory.NON_ACCEPTED_RELEASE
+    assert governor_stop_category_for_reason(GovernorStopReason.BLOCKED_FINALIZATION) == GovernorStopCategory.BLOCKED_FINALIZATION
+    assert governor_stop_category_for_reason(GovernorStopReason.STATE_REFRESH_FAILED) == GovernorStopCategory.STATE_REFRESH_FAILURE
+
+
 def test_governor_loop_state_refresh_failure_writes_error_artifact(tmp_path, monkeypatch) -> None:
     runs_dir = tmp_path / "runs"
     objectives_dir = tmp_path / "objectives"
@@ -1188,6 +1197,14 @@ def test_governor_loop_runs_multiple_epic_cycles_and_records_state(tmp_path) -> 
     assert result.stop_reason == GovernorStopReason.REQUESTED_EPIC_COUNT_REACHED
     assert [cycle.selected_epic_id for cycle in result.cycles] == ["epic-0001", "epic-0002"]
     assert [path.stem for path in run_calls] == ["demo-epic-0001", "demo-epic-0002"]
+    assert all(cycle.evidence_manifest is not None for cycle in result.cycles)
+    assert [
+        cycle.evidence_manifest.release_summary_path for cycle in result.cycles if cycle.evidence_manifest is not None
+    ] == [cycle.release.summary_path for cycle in result.cycles if cycle.release is not None]
+    assert [cycle.selected_release_id for cycle in result.cycles] == ["demo-epic-0001", "demo-epic-0002"]
+    assert [cycle.selected_epic_title for cycle in result.cycles] == ["Epic epic-0001", "Epic epic-0002"]
+    assert all(cycle.selected_epic_rationale == "Because." for cycle in result.cycles)
+    assert all(cycle.selected_epic_priority == 1 for cycle in result.cycles)
     state = state_store.load()
     assert state.completed_epics == ["epic-0001", "epic-0002"]
     assert [summary.release_id for summary in state.recent_run_summaries] == ["demo-epic-0002", "demo-epic-0001"]

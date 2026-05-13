@@ -61,6 +61,11 @@ class BacklogRunResult:
     blocked_finalization: dict[str, Any] | None = None
     governor_cycle_continuation: GovernorCycleContinuation | None = None
     evidence_manifest: BacklogEvidenceManifest | None = None
+    selected_epic_title: str | None = None
+    selected_epic_priority: int | None = None
+    selected_epic_rationale: str | None = None
+    selected_release_id: str | None = None
+    state_review_snapshot_path: Path | None = None
 
 
 @dataclass(frozen=True)

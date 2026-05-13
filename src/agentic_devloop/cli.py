@@ -15,9 +15,11 @@ from agentic_devloop.config import ProjectConfigError, load_project_config
 from agentic_devloop.doctor import run_doctor
 from agentic_devloop.objective import run_objective
 from agentic_devloop.orchestrator import run_task
+from agentic_devloop.models import GovernorStopCategory, GovernorStopContext, GovernorStopReason
 from agentic_devloop.planning import plan_release_contracts
 from agentic_devloop.planner_backend import CodexPlannerBackend
-from agentic_devloop.governor_log import GovernorEventType, build_governor_event_log_writer
+from agentic_devloop.governor_log import GovernorEventContext, GovernorEventType, build_governor_event_log_writer
+from agentic_devloop.governor import governor_stop_category_for_reason
 from agentic_devloop.release import run_release
 from agentic_devloop.status import load_run_summaries
 
@@ -703,37 +705,9 @@ def main(argv: list[str] | None = None) -> int:
             runs_dir=Path(args.runs_dir),
             run_id=governor_run_id,
         )
-        live_cycle_events: set[str] = set()
 
         def governor_progress(message: str) -> None:
             _print_progress(message)
-            if "event=governor_cycle_started" in message:
-                governor_writer.write(
-                    event_type=GovernorEventType.EPIC_SELECTED,
-                    message=message,
-                )
-            elif "event=release_started" in message:
-                governor_writer.write(
-                    event_type=GovernorEventType.RELEASE_STARTED,
-                    message=message,
-                )
-            elif (
-                "event=repair_" in message
-                or "event=task_resumed" in message
-                or "event=conflict_repair_started" in message
-            ):
-                event_key = f"repair:{message}"
-                if event_key not in live_cycle_events:
-                    live_cycle_events.add(event_key)
-                    governor_writer.write(
-                        event_type=GovernorEventType.REPAIR_DECISION,
-                        message=message,
-                    )
-            elif "event=governor_cycle_completed" in message:
-                governor_writer.write(
-                    event_type=GovernorEventType.RELEASE_COMPLETED,
-                    message=message,
-                )
 
         governor_writer.write(
             event_type=GovernorEventType.GOVERNOR_STARTED,
@@ -776,7 +750,53 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             parser.exit(130, "\ninterrupted: run-governor stopped before completion\n")
         except Exception as error:
+            stop_context = _governor_failure_stop_context(error)
+            governor_writer.write(
+                event_type=GovernorEventType.STOP_REASON_RECORDED,
+                message=(
+                    f"governor stop context category={stop_context.category.value} "
+                    f"reason={stop_context.reason}"
+                ),
+                artifacts=stop_context.evidence_artifact_paths,
+                context=GovernorEventContext(
+                    phase=GovernorEventType.STOP_REASON_RECORDED.value,
+                    stop_reason=stop_context.reason,
+                    artifact_count=len(stop_context.evidence_artifact_paths),
+                    details={
+                        "exception_class": error.__class__.__name__,
+                        "stop_category": stop_context.category.value,
+                    },
+                ),
+            )
             parser.exit(2, f"error: {error}\n")
+
+        def write_cycle_event(
+            *,
+            cycle_index: int,
+            event_type: GovernorEventType,
+            message: str,
+            artifacts: list[Path],
+            epic_id: str | None = None,
+            release_id: str | None = None,
+            decision: str | None = None,
+            outcome: str | None = None,
+            details: dict[str, str | int | float | bool] | None = None,
+        ) -> None:
+            governor_writer.write(
+                event_type=event_type,
+                message=message,
+                artifacts=artifacts,
+                context=GovernorEventContext(
+                    phase=event_type.value,
+                    cycle_index=cycle_index,
+                    epic_id=epic_id,
+                    release_id=release_id,
+                    decision=decision,
+                    outcome=outcome,
+                    artifact_count=len(artifacts),
+                    details=details,
+                ),
+            )
 
         cleanup_reports_dir = governor_writer.paths.run_root / "cleanup"
         cleanup_reports_dir.mkdir(parents=True, exist_ok=True)
@@ -790,17 +810,96 @@ def main(argv: list[str] | None = None) -> int:
                 cycle=cycle,
                 cleanup_path=cleanup_path_for_cycle,
             )
+            manifest = getattr(cycle, "evidence_manifest", None)
+
+            state_review_snapshot_path = getattr(manifest, "state_review_snapshot_path", None) if manifest is not None else None
+            state_refresh_summary_path = getattr(manifest, "state_refresh_summary_path", None) if manifest is not None else None
+            state_refresh_error_path = getattr(manifest, "state_refresh_error_path", None) if manifest is not None else None
+            backlog_plan_path = getattr(manifest, "backlog_plan_path", None) if manifest is not None else None
+
+            if state_review_snapshot_path is not None and state_review_snapshot_path.exists():
+                write_cycle_event(
+                    cycle_index=index,
+                    event_type=GovernorEventType.STATE_REVIEW_COMPLETED,
+                    message=f"cycle={index} epic_id={cycle.selected_epic_id} state_review_snapshot_path={state_review_snapshot_path}",
+                    artifacts=[state_review_snapshot_path],
+                    epic_id=cycle.selected_epic_id,
+                    release_id=cycle_release_id,
+                )
+            if state_refresh_error_path is not None and state_refresh_error_path.exists():
+                write_cycle_event(
+                    cycle_index=index,
+                    event_type=GovernorEventType.STATE_REFRESH_ERROR,
+                    message=f"cycle={index} epic_id={cycle.selected_epic_id} state_refresh_error_path={state_refresh_error_path}",
+                    artifacts=[state_refresh_error_path],
+                    epic_id=cycle.selected_epic_id,
+                    release_id=cycle_release_id,
+                )
+            elif state_refresh_summary_path is not None and state_refresh_summary_path.exists():
+                write_cycle_event(
+                    cycle_index=index,
+                    event_type=GovernorEventType.STATE_REFRESH_SUMMARY,
+                    message=f"cycle={index} epic_id={cycle.selected_epic_id} state_refresh_summary_path={state_refresh_summary_path}",
+                    artifacts=[state_refresh_summary_path],
+                    epic_id=cycle.selected_epic_id,
+                    release_id=cycle_release_id,
+                )
+
+            backlog_planning_artifacts = cycle_artifacts["planning"] + cycle_artifacts["repo_state_proposal"]
+            write_cycle_event(
+                cycle_index=index,
+                event_type=GovernorEventType.BACKLOG_PLANNING_COMPLETED,
+                message=f"cycle={index} epic_id={cycle.selected_epic_id} backlog_plan_path={backlog_plan_path or cycle.plan_path}",
+                artifacts=backlog_planning_artifacts,
+                epic_id=cycle.selected_epic_id,
+                release_id=cycle_release_id,
+            )
+            write_cycle_event(
+                cycle_index=index,
+                event_type=GovernorEventType.BACKLOG_SELECTION_COMPLETED,
+                message=f"cycle={index} selected_epic_id={cycle.selected_epic_id}",
+                artifacts=_existing_paths([backlog_plan_path or getattr(cycle, "plan_path", None)]),
+                epic_id=cycle.selected_epic_id,
+                release_id=cycle_release_id,
+            )
             governor_writer.write(
                 event_type=GovernorEventType.EPIC_SELECTED,
                 message=f"cycle={index} selected_epic_id={cycle.selected_epic_id}",
                 artifacts=cycle_artifacts["planning"] + cycle_artifacts["repo_state_proposal"],
             )
+            objective_artifacts = cycle_artifacts["objective"]
+            if objective_artifacts:
+                write_cycle_event(
+                    cycle_index=index,
+                    event_type=GovernorEventType.OBJECTIVE_GENERATION_COMPLETED,
+                    message=f"cycle={index} objective_path={cycle.objective_path}",
+                    artifacts=objective_artifacts,
+                    epic_id=cycle.selected_epic_id,
+                    release_id=cycle_release_id,
+                )
             governor_writer.write(
                 event_type=GovernorEventType.OBJECTIVE_READY,
                 message=f"cycle={index} objective_path={cycle.objective_path}",
                 artifacts=cycle_artifacts["objective"],
             )
             if cycle.contract_plan_path is not None:
+                contract_generation_artifacts = _existing_paths(
+                    [
+                        getattr(manifest, "execution_strategy_selection_path", None) if manifest is not None else None,
+                        getattr(manifest, "one_shot_execution_input_path", None) if manifest is not None else None,
+                        getattr(manifest, "supervisor_decision_path", None) if manifest is not None else None,
+                        getattr(manifest, "contract_plan_path", None) if manifest is not None else None,
+                    ]
+                )
+                if contract_generation_artifacts:
+                    write_cycle_event(
+                        cycle_index=index,
+                        event_type=GovernorEventType.CONTRACT_GENERATION_COMPLETED,
+                        message=f"cycle={index} contract_plan_path={cycle.contract_plan_path}",
+                        artifacts=contract_generation_artifacts,
+                        epic_id=cycle.selected_epic_id,
+                        release_id=cycle_release_id,
+                    )
                 governor_writer.write(
                     event_type=GovernorEventType.CONTRACT_PLAN_COMPLETED,
                     message=f"cycle={index} contract_plan_path={cycle.contract_plan_path}",
@@ -808,11 +907,81 @@ def main(argv: list[str] | None = None) -> int:
                 )
             if cycle.release is not None:
                 cleanup_handoff_note = ""
+                write_cycle_event(
+                    cycle_index=index,
+                    event_type=GovernorEventType.CHILD_RELEASE_STARTED,
+                    message=f"cycle={index} release_id={cycle.release.release_id} child_release_started",
+                    artifacts=_existing_paths(
+                        [
+                            getattr(manifest, "release_summary_path", None) if manifest is not None else None,
+                            getattr(manifest, "release_log_path", None) if manifest is not None else None,
+                            getattr(manifest, "release_review_path", None) if manifest is not None else None,
+                        ]
+                    ),
+                    epic_id=cycle.selected_epic_id,
+                    release_id=cycle.release.release_id,
+                )
+                child_release_artifacts = _existing_paths(
+                    [
+                        getattr(manifest, "release_summary_path", None) if manifest is not None else None,
+                        getattr(manifest, "release_log_path", None) if manifest is not None else None,
+                        getattr(manifest, "release_review_path", None) if manifest is not None else None,
+                    ]
+                )
+                if child_release_artifacts:
+                    write_cycle_event(
+                        cycle_index=index,
+                        event_type=GovernorEventType.CHILD_RELEASE_COMPLETED,
+                        message=f"cycle={index} release_id={cycle.release.release_id} decision={cycle.release.decision}",
+                        artifacts=child_release_artifacts,
+                        epic_id=cycle.selected_epic_id,
+                        release_id=cycle.release.release_id,
+                    )
                 governor_writer.write(
                     event_type=GovernorEventType.RELEASE_COMPLETED,
                     message=f"cycle={index} release_id={cycle.release.release_id} decision={cycle.release.decision}",
                     artifacts=cycle_artifacts["release"] + cycle_artifacts["review"] + cycle_artifacts["decision"],
                 )
+                feature_review_artifacts = _existing_paths(
+                    [
+                        getattr(manifest, "feature_review_path", None) if manifest is not None else None,
+                        getattr(manifest, "feature_review_recheck_path", None) if manifest is not None else None,
+                        *(
+                            list(getattr(manifest, "feature_review_proposal_paths", []))
+                            if manifest is not None
+                            else []
+                        ),
+                    ]
+                )
+                if feature_review_artifacts:
+                    write_cycle_event(
+                        cycle_index=index,
+                        event_type=GovernorEventType.FEATURE_REVIEW_COMPLETED,
+                        message=f"cycle={index} release_id={cycle.release.release_id} feature_review_artifacts={len(feature_review_artifacts)}",
+                        artifacts=feature_review_artifacts,
+                        epic_id=cycle.selected_epic_id,
+                        release_id=cycle.release.release_id,
+                    )
+                final_verification_path = getattr(cycle.release, "final_integration_verification_path", None)
+                if final_verification_path is not None and final_verification_path.exists():
+                    write_cycle_event(
+                        cycle_index=index,
+                        event_type=GovernorEventType.FINAL_VERIFICATION_COMPLETED,
+                        message=f"cycle={index} release_id={cycle.release.release_id} final_integration_verification_path={final_verification_path}",
+                        artifacts=[final_verification_path],
+                        epic_id=cycle.selected_epic_id,
+                        release_id=cycle.release.release_id,
+                    )
+                decision_artifacts = cycle_artifacts["decision"]
+                if decision_artifacts:
+                    write_cycle_event(
+                        cycle_index=index,
+                        event_type=GovernorEventType.REPAIR_DECISION,
+                        message=f"cycle={index} release_id={cycle.release.release_id} decision_artifacts={len(decision_artifacts)}",
+                        artifacts=decision_artifacts,
+                        epic_id=cycle.selected_epic_id,
+                        release_id=cycle.release.release_id,
+                    )
                 cleanup_result = None
                 should_collect_cleanup_dry_run = (
                     args.cleanup_accepted_cycles_dry_run or args.release_finalize != "none"
@@ -847,7 +1016,32 @@ def main(argv: list[str] | None = None) -> int:
                         cleanup_path=cleanup_path_for_cycle,
                     )
                     cleanup_handoff_note = f" cleanup_handoff dry_run={cleanup_payload['dry_run']}"
+                    if cleanup_path_for_cycle is not None and cleanup_path_for_cycle.exists():
+                        write_cycle_event(
+                            cycle_index=index,
+                            event_type=GovernorEventType.CLEANUP_ELIGIBILITY_EVALUATED,
+                            message=f"cycle={index} release_id={cycle.release.release_id} cleanup_report_path={cleanup_path_for_cycle}",
+                            artifacts=[cleanup_path_for_cycle],
+                            epic_id=cycle.selected_epic_id,
+                            release_id=cycle.release.release_id,
+                        )
                 if args.release_finalize != "none" or getattr(cycle, "finalization_result", None) is not None:
+                    write_cycle_event(
+                        cycle_index=index,
+                        event_type=GovernorEventType.FINALIZATION_DECISION,
+                        message=(
+                            f"cycle={index} release_id={cycle.release.release_id} "
+                            f"mode={args.release_finalize} decision={cycle.release.decision}"
+                        ),
+                        artifacts=cycle_artifacts["decision"] + cycle_artifacts["finalization"],
+                        epic_id=cycle.selected_epic_id,
+                        release_id=cycle.release.release_id,
+                        decision=str(cycle.release.decision),
+                        outcome="blocked"
+                        if getattr(cycle, "blocked_finalization", None) is not None
+                        else "continue",
+                        details={"mode": args.release_finalize},
+                    )
                     governor_writer.write(
                         event_type=GovernorEventType.FINALIZATION_COMPLETED,
                         message=(
@@ -857,8 +1051,58 @@ def main(argv: list[str] | None = None) -> int:
                             f"{cleanup_handoff_note}"
                         ),
                         artifacts=cycle_artifacts["finalization"] + cycle_artifacts["cleanup"],
+                        context=GovernorEventContext(
+                            phase=GovernorEventType.FINALIZATION_COMPLETED.value,
+                            cycle_index=index,
+                            epic_id=cycle.selected_epic_id,
+                            release_id=cycle.release.release_id,
+                            decision=str(cycle.release.decision),
+                            outcome="blocked"
+                            if getattr(cycle, "blocked_finalization", None) is not None
+                            else "completed",
+                            artifact_count=len(cycle_artifacts["finalization"] + cycle_artifacts["cleanup"]),
+                            details={"mode": args.release_finalize},
+                        ),
                     )
             cycles_for_output.append(cycle_for_output)
+
+            if index < len(result.cycles):
+                next_cycle_index = index + 1
+                next_cycle = result.cycles[index]
+                next_cycle_release_id = (
+                    next_cycle.release.release_id if next_cycle.release is not None else next_cycle.release_id
+                )
+                next_manifest = getattr(next_cycle, "evidence_manifest", None)
+                next_backlog_plan_path = (
+                    getattr(next_manifest, "backlog_plan_path", None) if next_manifest is not None else None
+                )
+                next_artifacts = _existing_paths([next_backlog_plan_path or getattr(next_cycle, "plan_path", None)])
+                write_cycle_event(
+                    cycle_index=next_cycle_index,
+                    event_type=GovernorEventType.NEXT_EPIC_SELECTED,
+                    message=f"cycle={next_cycle_index} selected_epic_id={next_cycle.selected_epic_id}",
+                    artifacts=next_artifacts,
+                    epic_id=next_cycle.selected_epic_id,
+                    release_id=next_cycle_release_id,
+                )
+        stop_context = _governor_stop_context(result)
+        governor_writer.write(
+            event_type=GovernorEventType.STOP_REASON_RECORDED,
+            message=(
+                f"governor stop context category={stop_context.category.value} "
+                f"reason={stop_context.reason}"
+            ),
+            artifacts=stop_context.evidence_artifact_paths,
+            context=GovernorEventContext(
+                phase=GovernorEventType.STOP_REASON_RECORDED.value,
+                stop_reason=stop_context.reason,
+                cycle_index=stop_context.cycle_index,
+                epic_id=stop_context.epic_id,
+                release_id=stop_context.release_id,
+                artifact_count=len(stop_context.evidence_artifact_paths),
+                details={"stop_category": stop_context.category.value},
+            ),
+        )
         governor_writer.write(
             event_type=GovernorEventType.GOVERNOR_COMPLETED,
             message=(
@@ -867,10 +1111,17 @@ def main(argv: list[str] | None = None) -> int:
                 f"requested_epic_count={result.requested_epic_count} stop_reason={result.stop_reason}"
             ),
             artifacts=[cycle.plan_path for cycle in result.cycles],
+            context=GovernorEventContext(
+                phase=GovernorEventType.GOVERNOR_COMPLETED.value,
+                stop_reason=getattr(result.stop_reason, "value", str(result.stop_reason)),
+                artifact_count=len(result.cycles),
+                details={"stop_category": stop_context.category.value},
+            ),
         )
 
         result_for_output = _with_updates(result, {"cycles": cycles_for_output})
         output = _backlog_multi_run_result(result_for_output)
+        output["stop_context"] = stop_context.model_dump(mode="json")
         output["governor_log_path"] = str(governor_writer.paths.log_path)
         output["governor_events_path"] = str(governor_writer.paths.events_path)
         print(json.dumps(output, indent=2))
@@ -1123,6 +1374,68 @@ def _backlog_multi_run_result(result) -> dict[str, object]:
     }
 
 
+def _governor_stop_context(result) -> GovernorStopContext:
+    stop_reason = result.stop_reason
+    category = governor_stop_category_for_reason(stop_reason)
+    cycle_index: int | None = None
+    epic_id: str | None = None
+    release_id: str | None = None
+    evidence_paths: list[Path] = []
+    if result.cycles:
+        attempted = getattr(result, "attempted_epic_count", None)
+        cycle_index = attempted if isinstance(attempted, int) and attempted > 0 else len(result.cycles)
+        last_cycle = result.cycles[-1]
+        epic_id = getattr(last_cycle, "selected_epic_id", None)
+        cycle_release = getattr(last_cycle, "release", None)
+        release_id = (
+            getattr(cycle_release, "release_id", None)
+            if cycle_release is not None
+            else getattr(last_cycle, "release_id", None)
+        )
+        evidence_paths = _cycle_stop_artifacts(last_cycle)
+    return GovernorStopContext(
+        reason=getattr(stop_reason, "value", str(stop_reason)),
+        category=category,
+        cycle_index=cycle_index,
+        epic_id=epic_id,
+        release_id=release_id,
+        evidence_artifact_paths=evidence_paths,
+    )
+
+
+def _cycle_stop_artifacts(cycle) -> list[Path]:
+    manifest = getattr(cycle, "evidence_manifest", None)
+    if manifest is None:
+        return _existing_paths([getattr(cycle, "plan_path", None), getattr(cycle, "objective_path", None)])
+    return _existing_paths(
+        [
+            manifest.backlog_plan_path,
+            manifest.contract_plan_path,
+            manifest.release_summary_path,
+            manifest.finalization_decision_path,
+            manifest.final_review_continuation_decision_path,
+            manifest.state_refresh_error_path,
+            manifest.state_refresh_summary_path,
+            manifest.feature_review_path,
+            manifest.feature_review_recheck_path,
+        ]
+    )
+
+
+def _governor_failure_stop_context(error: Exception) -> GovernorStopContext:
+    reason = str(error).strip() or error.__class__.__name__
+    normalized = reason.lower()
+    category = GovernorStopCategory.UNKNOWN
+    if "credential" in normalized or "auth" in normalized:
+        category = GovernorStopCategory.MISSING_PLANNER_CREDENTIALS
+    elif "hard policy" in normalized or "hard gate" in normalized or "forbidden" in normalized:
+        category = GovernorStopCategory.HARD_POLICY_STOP
+    return GovernorStopContext(
+        reason=reason,
+        category=category,
+    )
+
+
 def _codex_planner_backend(*, project_id: str | None, config_dir: Path, runs_dir: Path) -> CodexPlannerBackend:
     if project_id is None:
         raise ValueError("--execute-planner requires --project")
@@ -1181,6 +1494,7 @@ def _cycle_artifact_graph(*, cycle, cleanup_path: Path | None) -> dict[str, list
                 manifest.one_shot_execution_input_path,
                 manifest.state_review_snapshot_path,
                 manifest.state_refresh_summary_path,
+                manifest.state_refresh_error_path,
             ]
         )
         objective = _existing_paths([manifest.generated_objective_path or cycle.objective_path])

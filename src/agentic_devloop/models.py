@@ -221,8 +221,17 @@ class BacklogEvidenceManifest(StrictModel):
     release_soft_gate_decision_path: Path | None = None
     feature_review_path: Path | None = None
     feature_review_recheck_path: Path | None = None
+    feature_review_prompt_path: Path | None = None
+    feature_review_stdout_path: Path | None = None
+    feature_review_stderr_path: Path | None = None
+    feature_review_metadata_path: Path | None = None
+    feature_review_output_normalization_decision_path: Path | None = None
+    feature_review_normalized_artifact_path: Path | None = None
     feature_review_proposal_paths: list[Path] = Field(default_factory=list)
     finalization_summary_path: Path | None = None
+    finalization_decision_path: Path | None = None
+    final_review_continuation_decision_path: Path | None = None
+    final_integration_verification_path: Path | None = None
     cleanup_report_path: Path | None = None
     repo_state_proposal_plan_path: Path | None = None
     roadmap_proposal_plan_path: Path | None = None
@@ -240,6 +249,34 @@ class GovernorStopReason(StrEnum):
     BLOCKED_FINALIZATION = "blocked_finalization"
     STATE_REFRESH_FAILED = "state_refresh_failed"
 
+
+class GovernorStopCategory(StrEnum):
+    NO_ACTIONABLE_WORK = "no_actionable_work"
+    PLANNING_ONLY_STRATEGY = "planning_only_strategy"
+    NON_ACCEPTED_RELEASE = "non_accepted_release"
+    BLOCKED_FINALIZATION = "blocked_finalization"
+    STATE_REFRESH_FAILURE = "state_refresh_failure"
+    MISSING_PLANNER_CREDENTIALS = "missing_planner_credentials"
+    HARD_POLICY_STOP = "hard_policy_stop"
+    REPEATED_EPIC_SELECTED = "repeated_epic_selected"
+    REQUESTED_EPIC_COUNT_REACHED = "requested_epic_count_reached"
+    UNKNOWN = "unknown"
+
+
+class GovernorStopContext(StrictModel):
+    reason: str = Field(min_length=1)
+    category: GovernorStopCategory
+    cycle_index: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "1-based governor cycle number most directly associated with the stop. "
+            "When present, it can be mapped to the `cycles` array via `cycles[cycle_index - 1]`."
+        ),
+    )
+    epic_id: str | None = None
+    release_id: str | None = None
+    evidence_artifact_paths: list[Path] = Field(default_factory=list)
 
 class StateReviewSnapshot(StrictModel):
     captured_at: datetime

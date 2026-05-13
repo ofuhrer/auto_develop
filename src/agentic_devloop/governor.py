@@ -18,6 +18,7 @@ from agentic_devloop.models import (
     FeatureReviewRecheckStopReason,
     FeatureReviewFollowUpProposal,
     GovernorContinuationAction,
+    GovernorStopCategory,
     GovernorContinuationStopReason,
     GovernorCycleContinuation,
     GovernorFeatureReviewContinuation,
@@ -459,6 +460,7 @@ class GovernorLoop:
             else:
                 self._state_store.mark_blocked_epic(epic.epic_id)
 
+        release_summary_paths = _release_summary_artifact_paths(release) if release is not None else {}
         evidence_manifest = BacklogEvidenceManifest(
             backlog_plan_path=plan_result.plan_path,
             generated_objective_path=objective_path if created_objective else None,
@@ -477,24 +479,70 @@ class GovernorLoop:
             release_budget_path=release.budget_path if release is not None else None,
             release_tuning_path=release.tuning_path if release is not None else None,
             release_soft_gate_decision_path=(
-                _release_summary_artifact_paths(release).get("release_soft_gate_decision_path")
-                if release is not None
-                else None
+                release_summary_paths.get("release_soft_gate_decision_path") if release is not None else None
             ),
             feature_review_path=(
-                _release_summary_artifact_paths(release).get("feature_review_path")
-                if release is not None
-                else None
+                release_summary_paths.get("feature_review_path") if release is not None else None
             ),
             feature_review_recheck_path=(
-                _release_summary_artifact_paths(release).get("feature_review_recheck_path")
-                if release is not None
-                else None
+                release_summary_paths.get("feature_review_recheck_path") if release is not None else None
             ),
+            feature_review_prompt_path=getattr(release, "feature_review_prompt_path", None)
+            if release is not None
+            else None,
+            feature_review_stdout_path=getattr(release, "feature_review_stdout_path", None)
+            if release is not None
+            else None,
+            feature_review_stderr_path=getattr(release, "feature_review_stderr_path", None)
+            if release is not None
+            else None,
+            feature_review_metadata_path=getattr(release, "feature_review_metadata_path", None)
+            if release is not None
+            else None,
+            feature_review_output_normalization_decision_path=getattr(
+                release, "feature_review_output_normalization_decision_path", None
+            )
+            if release is not None
+            else None,
+            feature_review_normalized_artifact_path=getattr(
+                release, "feature_review_normalized_artifact_path", None
+            )
+            if release is not None
+            else None,
             feature_review_proposal_paths=(
                 _release_summary_feature_review_proposal_paths(release) if release is not None else []
             ),
-            finalization_summary_path=release.summary_path if release is not None else None,
+            finalization_summary_path=(
+                (
+                    release_summary_paths.get("finalization_summary_path")
+                    or getattr(release, "finalization_decision_path", None)
+                    or getattr(release, "summary_path", None)
+                )
+                if release is not None
+                else None
+            ),
+            finalization_decision_path=getattr(release, "finalization_decision_path", None)
+            if release is not None
+            else None,
+            final_review_continuation_decision_path=(
+                (
+                    getattr(release, "final_review_continuation_decision_path", None)
+                    or release_summary_paths.get("final_review_continuation_decision_path")
+                )
+                if release is not None
+                else None
+            ),
+            final_integration_verification_path=(
+                (
+                    getattr(release, "final_integration_verification_path", None)
+                    or release_summary_paths.get("final_integration_verification_path")
+                )
+                if release is not None
+                else None
+            ),
+            cleanup_report_path=(
+                release_summary_paths.get("cleanup_report_path") if release is not None else None
+            ),
             repo_state_proposal_plan_path=plan_result.plan_path if plan.repo_state_updates else None,
             roadmap_proposal_plan_path=plan_result.plan_path if plan.roadmap_updates else None,
             state_review_snapshot_path=plan.state_review_snapshot_path,
@@ -531,6 +579,11 @@ class GovernorLoop:
             ),
             evidence_manifest=evidence_manifest,
             state_refresh_summary_path=plan.state_refresh_summary_path,
+            selected_epic_title=epic.title,
+            selected_epic_priority=epic.priority,
+            selected_epic_rationale=epic.rationale,
+            selected_release_id=epic.suggested_release_id,
+            state_review_snapshot_path=plan.state_review_snapshot_path,
         )
 
     def _apply_post_cycle_refresh_for_cycle(
@@ -672,6 +725,11 @@ class GovernorLoop:
             governor_cycle_continuation=GovernorCycleContinuation(action=GovernorContinuationAction.CONTINUE),
             evidence_manifest=evidence_manifest,
             state_refresh_summary_path=plan.state_refresh_summary_path,
+            selected_epic_title=epic.title if epic is not None else None,
+            selected_epic_priority=epic.priority if epic is not None else None,
+            selected_epic_rationale=epic.rationale if epic is not None else None,
+            selected_release_id=epic.suggested_release_id if epic is not None else None,
+            state_review_snapshot_path=plan.state_review_snapshot_path,
         )
 
 
@@ -835,6 +893,10 @@ def _release_summary_artifact_paths(release: object) -> dict[str, Path]:
         "release_soft_gate_decision_path",
         "feature_review_path",
         "feature_review_recheck_path",
+        "finalization_summary_path",
+        "cleanup_report_path",
+        "final_integration_verification_path",
+        "final_review_continuation_decision_path",
     ):
         raw_value = payload.get(key)
         if isinstance(raw_value, str) and raw_value.strip():
@@ -1168,3 +1230,16 @@ def _load_backlog_follow_up_proposals(
         if proposal.classification == "backlog_follow_up":
             proposals.append(proposal)
     return proposals
+
+
+def governor_stop_category_for_reason(stop_reason: GovernorStopReason) -> GovernorStopCategory:
+    category_map: dict[GovernorStopReason, GovernorStopCategory] = {
+        GovernorStopReason.NO_ACTIONABLE_WORK: GovernorStopCategory.NO_ACTIONABLE_WORK,
+        GovernorStopReason.PLANNING_ONLY_STRATEGY: GovernorStopCategory.PLANNING_ONLY_STRATEGY,
+        GovernorStopReason.RELEASE_NOT_ACCEPTED: GovernorStopCategory.NON_ACCEPTED_RELEASE,
+        GovernorStopReason.BLOCKED_FINALIZATION: GovernorStopCategory.BLOCKED_FINALIZATION,
+        GovernorStopReason.STATE_REFRESH_FAILED: GovernorStopCategory.STATE_REFRESH_FAILURE,
+        GovernorStopReason.REPEATED_EPIC_SELECTED: GovernorStopCategory.REPEATED_EPIC_SELECTED,
+        GovernorStopReason.REQUESTED_EPIC_COUNT_REACHED: GovernorStopCategory.REQUESTED_EPIC_COUNT_REACHED,
+    }
+    return category_map.get(stop_reason, GovernorStopCategory.UNKNOWN)
