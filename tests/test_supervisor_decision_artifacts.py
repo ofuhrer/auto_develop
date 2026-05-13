@@ -153,6 +153,22 @@ def test_write_and_load_supervisor_decision_artifact_round_trip(tmp_path: Path) 
     assert loaded == decision
 
 
+def test_load_supervisor_decision_artifact_accepts_bundle_relative_evidence_path(
+    tmp_path: Path,
+) -> None:
+    evidence_file = tmp_path / "changed_files.txt"
+    evidence_file.write_text("src/agentic_devloop/release.py\n", encoding="utf-8")
+    decision = _decision(evidence_paths=[Path("changed_files.txt")])
+
+    artifact_path = write_supervisor_decision_artifact(
+        release_bundle_path=tmp_path,
+        decision=decision,
+    )
+    loaded = load_supervisor_decision_artifact(artifact_path)
+
+    assert loaded == decision
+
+
 def test_write_and_load_execution_strategy_artifact_round_trip(tmp_path: Path) -> None:
     evidence_file = tmp_path / "strategy-evidence.log"
     evidence_file.write_text("selected one-shot\n", encoding="utf-8")
@@ -255,7 +271,7 @@ def test_load_supervisor_decision_artifact_rejects_relative_evidence_path_traver
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="escapes artifact directory"):
+    with pytest.raises(ValueError, match="escapes artifact bundle"):
         load_supervisor_decision_artifact(artifact_path)
 
 
