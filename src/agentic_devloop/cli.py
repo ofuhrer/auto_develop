@@ -762,7 +762,10 @@ def main(argv: list[str] | None = None) -> int:
                     phase=GovernorEventType.STOP_REASON_RECORDED.value,
                     stop_reason=stop_context.reason,
                     artifact_count=len(stop_context.evidence_artifact_paths),
-                    details={"stop_category": stop_context.category.value},
+                    details={
+                        "exception_class": error.__class__.__name__,
+                        "stop_category": stop_context.category.value,
+                    },
                 ),
             )
             parser.exit(2, f"error: {error}\n")

@@ -770,6 +770,85 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
     assert finalization_completed["context"]["details"]["mode"] == "push-feature"
 
 
+def test_run_governor_next_epic_event_uses_upcoming_cycle_context(monkeypatch, tmp_path) -> None:
+    run_id = "20260513T000000Z_demo_governor"
+    for name in ("cycle1_plan.json", "cycle2_plan.json", "summary.json", "release.log", "review.md"):
+        path = tmp_path / "runs" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}", encoding="utf-8")
+    objective_path = tmp_path / "objectives" / "demo-epic-1.yaml"
+    objective_path.parent.mkdir(parents=True, exist_ok=True)
+    objective_path.write_text("release_id: demo-epic-1\n", encoding="utf-8")
+    release_result = SimpleNamespace(
+        release_id="demo-epic-1",
+        run_id="run-1",
+        summary_path=tmp_path / "runs" / "summary.json",
+        log_path=tmp_path / "runs" / "release.log",
+        review_path=tmp_path / "runs" / "review.md",
+        decision="accepted",
+        task_results=[],
+    )
+    first_cycle = SimpleNamespace(
+        selected_epic_id="epic-1",
+        plan_path=tmp_path / "runs" / "cycle1_plan.json",
+        objective_path=objective_path,
+        contract_plan_path=None,
+        release=release_result,
+        evidence_manifest=BacklogEvidenceManifest(backlog_plan_path=tmp_path / "runs" / "cycle1_plan.json"),
+    )
+    second_cycle = SimpleNamespace(
+        selected_epic_id="next-epic",
+        release_id="next-release",
+        plan_path=tmp_path / "runs" / "cycle2_plan.json",
+        objective_path=None,
+        contract_plan_path=None,
+        release=None,
+        evidence_manifest=BacklogEvidenceManifest(backlog_plan_path=tmp_path / "runs" / "cycle2_plan.json"),
+    )
+    result = SimpleNamespace(
+        project_id="demo",
+        requested_epic_count=2,
+        attempted_epic_count=2,
+        accepted_epic_count=1,
+        stop_reason=GovernorStopReason.REQUESTED_EPIC_COUNT_REACHED,
+        cycles=[first_cycle, second_cycle],
+    )
+
+    monkeypatch.setattr(cli_module, "_make_governor_run_id", lambda **_kwargs: run_id)
+    monkeypatch.setattr(cli_module, "run_governor", lambda **_kwargs: result)
+    monkeypatch.setattr(cli_module, "_codex_backlog_planner_backend", lambda **kwargs: object())
+
+    assert (
+        main(
+            [
+                "run-governor",
+                "--project",
+                "demo",
+                "--goal",
+                "Run repeated epics",
+                "--epic-count",
+                "2",
+                "--execute-planner",
+                "--runs-dir",
+                str(tmp_path / "runs"),
+            ]
+        )
+        == 0
+    )
+
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "runs" / run_id / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    release_completed = next(record for record in records if record["event_type"] == "release_completed")
+    next_epic = next(record for record in records if record["event_type"] == "next_epic_selected")
+    assert records.index(release_completed) < records.index(next_epic)
+    assert next_epic["context"]["phase"] == "next_epic_selected"
+    assert next_epic["context"]["cycle_index"] == 2
+    assert next_epic["context"]["epic_id"] == "next-epic"
+    assert next_epic["context"]["release_id"] == "next-release"
+
+
 def test_run_governor_outputs_blocked_finalization_state(monkeypatch, capsys, tmp_path) -> None:
     run_id = "20260513T000000Z_demo_governor"
     release_result = SimpleNamespace(
@@ -1067,6 +1146,7 @@ def test_run_governor_records_missing_credentials_stop_context_before_nonzero_ex
     events_text = (tmp_path / "runs" / run_id / "events.jsonl").read_text(encoding="utf-8")
     assert '"event_type": "stop_reason_recorded"' in events_text
     assert '"stop_category": "missing_planner_credentials"' in events_text
+    assert '"exception_class": "RuntimeError"' in events_text
 
 
 def test_run_governor_records_hard_policy_stop_context_before_nonzero_exit(
