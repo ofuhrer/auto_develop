@@ -47,6 +47,7 @@ class BacklogRunResult:
     release_metrics_path: Path | None = None
     release_budget_path: Path | None = None
     release_tuning_path: Path | None = None
+    state_refresh_summary_path: Path | None = None
     evidence_manifest: BacklogEvidenceManifest | None = None
 
 
@@ -176,6 +177,9 @@ def plan_backlog(
     write_objective: bool = False,
     mode: str = "deterministic",
     planner_backend: BacklogPlannerBackend | None = None,
+    state_review_snapshot_path: Path | None = None,
+    state_refresh_summary_path: Path | None = None,
+    state_refresh_summary: dict[str, Any] | None = None,
     now: datetime | None = None,
 ) -> BacklogPlanResult:
     config = load_project_config(project_id, config_dir, validate_repo=True)
@@ -206,6 +210,9 @@ def plan_backlog(
             roadmap_text=roadmap_text,
             documentation=_documentation_context(config.repo_path, roadmap_path),
             repo_state=_repo_state_context(config.repo_state_path),
+            state_review_snapshot_path=state_review_snapshot_path,
+            state_refresh_summary_path=state_refresh_summary_path,
+            state_refresh_summary=state_refresh_summary,
         )
         planner_prompt_path = plan_dir / "backlog_planner_prompt.md"
         planner_prompt_path.write_text(planner_prompt, encoding="utf-8")
@@ -237,6 +244,8 @@ def plan_backlog(
                     "goal": goal,
                     "roadmap_path": roadmap_path,
                     "planner_prompt_path": planner_prompt_path,
+                    "state_review_snapshot_path": state_review_snapshot_path,
+                    "state_refresh_summary_path": state_refresh_summary_path,
                     **backend_paths,
                     "warnings": [*plan.warnings, *warnings],
                 }
@@ -250,6 +259,12 @@ def plan_backlog(
             roadmap_text=roadmap_text,
             warnings=warnings,
             now=now,
+        )
+        plan = plan.model_copy(
+            update={
+                "state_review_snapshot_path": state_review_snapshot_path,
+                "state_refresh_summary_path": state_refresh_summary_path,
+            }
         )
         if planner_prompt_path is not None:
             plan = plan.model_copy(update={"planner_prompt_path": planner_prompt_path})
@@ -478,6 +493,9 @@ def _backlog_planner_prompt(
     roadmap_text: str,
     documentation: list[tuple[Path, str]],
     repo_state: list[tuple[Path, str]],
+    state_review_snapshot_path: Path | None,
+    state_refresh_summary_path: Path | None,
+    state_refresh_summary: dict[str, Any] | None,
 ) -> str:
     doc_sections = []
     for path, content in documentation:
@@ -485,6 +503,27 @@ def _backlog_planner_prompt(
     state_sections = []
     for path, content in repo_state:
         state_sections.extend([f"## Repo State: {path}", _truncate(content, 12000), ""])
+    refresh_sections: list[str] = []
+    if state_review_snapshot_path is not None:
+        refresh_sections.extend(["## State Review Snapshot", f"path: {state_review_snapshot_path}", ""])
+    if state_refresh_summary_path is not None or state_refresh_summary is not None:
+        refresh_sections.append("## State Refresh Summary")
+        if state_refresh_summary_path is not None:
+            refresh_sections.append(f"path: {state_refresh_summary_path}")
+        if state_refresh_summary is not None:
+            concise_fields = (
+                "branch",
+                "head_commit",
+                "status_count",
+                "local_branch_count",
+                "worktree_count",
+                "repo_state_file_count",
+                "recent_release_run_count",
+            )
+            for key in concise_fields:
+                if key in state_refresh_summary:
+                    refresh_sections.append(f"{key}: {state_refresh_summary[key]}")
+        refresh_sections.append("")
     return "\n".join(
         [
             "# Autonomous Roadmap Governor",
@@ -509,6 +548,7 @@ def _backlog_planner_prompt(
             "",
             *doc_sections,
             *state_sections,
+            *refresh_sections,
             "## Roadmap",
             _truncate(roadmap_text, 30000),
         ]

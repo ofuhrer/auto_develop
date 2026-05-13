@@ -174,6 +174,7 @@ class BacklogPlan(StrictModel):
     planner_stderr_path: Path | None = None
     planner_metadata_path: Path | None = None
     state_review_snapshot_path: Path | None = None
+    state_refresh_summary_path: Path | None = None
 
 
 class BacklogEvidenceManifest(StrictModel):
@@ -185,6 +186,7 @@ class BacklogEvidenceManifest(StrictModel):
     release_budget_path: Path | None = None
     release_tuning_path: Path | None = None
     state_review_snapshot_path: Path | None = None
+    state_refresh_summary_path: Path | None = None
 
 
 class StateReviewSnapshot(StrictModel):
@@ -198,6 +200,18 @@ class StateReviewSnapshot(StrictModel):
     worktrees: list[dict[str, str]] = Field(default_factory=list)
     repo_state_files: dict[str, str | None] = Field(default_factory=dict)
     recent_release_runs: list[str] = Field(default_factory=list)
+
+
+class StateRefreshSummary(StrictModel):
+    captured_at: datetime
+    state_review_snapshot_path: Path
+    branch: str = Field(min_length=1)
+    head_commit: str = Field(min_length=1)
+    status_count: int = Field(ge=0)
+    local_branch_count: int = Field(ge=0)
+    worktree_count: int = Field(ge=0)
+    repo_state_file_count: int = Field(ge=0)
+    recent_release_run_count: int = Field(ge=0)
 
 
 class ReleasePlan(StrictModel):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, Protocol
 
@@ -16,6 +16,12 @@ from agentic_devloop.models import (
 from agentic_devloop.orchestrator import ExecutorProtocol
 from agentic_devloop.planning import PlannerBackend
 from agentic_devloop.planner_backend import CodexPlannerBackend
+from agentic_devloop.state_review import (
+    build_state_refresh_summary,
+    collect_state_review_snapshot,
+    write_state_refresh_summary_artifact,
+    write_state_review_snapshot_artifact,
+)
 from agentic_devloop.state_store import StateStore
 from agentic_devloop.yaml_io import load_yaml_model, write_yaml_model
 
@@ -33,6 +39,9 @@ class PlanBacklogFn(Protocol):
         mode: str,
         planner_backend: object | None,
         now: datetime | None,
+        state_review_snapshot_path: Path | None,
+        state_refresh_summary_path: Path | None,
+        state_refresh_summary: dict[str, object] | None,
     ) -> BacklogPlanResult: ...
 
 
@@ -248,6 +257,34 @@ class GovernorLoop:
         progress: Callable[[str], None] | None,
         now: datetime | None,
     ) -> BacklogRunResult:
+        state_review_snapshot_path: Path | None = None
+        state_refresh_summary_path: Path | None = None
+        state_refresh_summary_payload: dict[str, object] | None = None
+        config = load_project_config(project_id, config_dir, validate_repo=True)
+        state_refresh_artifacts_dir = _state_refresh_artifacts_dir(
+            runs_dir=runs_dir,
+            now=now,
+        )
+        snapshot = collect_state_review_snapshot(
+            repo_path=config.repo_path,
+            repo_state_path=config.repo_state_path,
+            runs_dir=runs_dir,
+            now=now,
+        )
+        state_review_snapshot_path = write_state_review_snapshot_artifact(
+            snapshot=snapshot,
+            artifacts_dir=state_refresh_artifacts_dir,
+        )
+        state_refresh_summary = build_state_refresh_summary(
+            snapshot=snapshot,
+            state_review_snapshot_path=state_review_snapshot_path,
+        )
+        state_refresh_summary_path = write_state_refresh_summary_artifact(
+            summary=state_refresh_summary,
+            artifacts_dir=state_refresh_artifacts_dir,
+        )
+        state_refresh_summary_payload = state_refresh_summary.model_dump(mode="json")
+
         plan_result = self._plan_backlog(
             project_id=project_id,
             goal=goal,
@@ -258,9 +295,17 @@ class GovernorLoop:
             write_objective=False,
             mode=mode,
             planner_backend=planner_backend,
+            state_review_snapshot_path=state_review_snapshot_path,
+            state_refresh_summary_path=state_refresh_summary_path,
+            state_refresh_summary=state_refresh_summary_payload,
             now=now,
         )
-        plan = plan_result.plan
+        plan = plan_result.plan.model_copy(
+            update={
+                "state_review_snapshot_path": plan_result.plan.state_review_snapshot_path or state_review_snapshot_path,
+                "state_refresh_summary_path": plan_result.plan.state_refresh_summary_path or state_refresh_summary_path,
+            }
+        )
         epic = select_epic(plan, selected_epic_id=selected_epic_id)
         if self._state_store is not None:
             self._state_store.mark_active_epic(epic.epic_id)
@@ -328,6 +373,7 @@ class GovernorLoop:
             release_budget_path=release.budget_path if release is not None else None,
             release_tuning_path=release.tuning_path if release is not None else None,
             state_review_snapshot_path=plan.state_review_snapshot_path,
+            state_refresh_summary_path=plan.state_refresh_summary_path,
         )
 
         return BacklogRunResult(
@@ -353,7 +399,13 @@ class GovernorLoop:
             release_budget_path=release.budget_path if release is not None else None,
             release_tuning_path=release.tuning_path if release is not None else None,
             evidence_manifest=evidence_manifest,
+            state_refresh_summary_path=plan.state_refresh_summary_path,
         )
+
+
+def _state_refresh_artifacts_dir(*, runs_dir: Path, now: datetime | None) -> Path:
+    timestamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%SZ")
+    return runs_dir / f"{timestamp}_governor_state_refresh"
 
 
 def _build_execution_strategy_inputs(

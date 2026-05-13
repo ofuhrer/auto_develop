@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from agentic_devloop.models import StateReviewSnapshot
+from agentic_devloop.models import StateRefreshSummary, StateReviewSnapshot
 from agentic_devloop.process import run_process
 
 
@@ -58,6 +58,35 @@ def write_state_review_snapshot_artifact(*, snapshot: StateReviewSnapshot, artif
     artifact_path = artifacts_dir / "state_review_snapshot.json"
     artifact_path.write_text(
         json.dumps(snapshot.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return artifact_path
+
+
+def build_state_refresh_summary(
+    *,
+    snapshot: StateReviewSnapshot,
+    state_review_snapshot_path: Path,
+) -> StateRefreshSummary:
+    tracked_repo_state_file_count = sum(1 for value in snapshot.repo_state_files.values() if value is not None)
+    return StateRefreshSummary(
+        captured_at=snapshot.captured_at,
+        state_review_snapshot_path=state_review_snapshot_path,
+        branch=snapshot.branch,
+        head_commit=snapshot.head_commit,
+        status_count=len(snapshot.status_lines),
+        local_branch_count=len(snapshot.local_branches),
+        worktree_count=len(snapshot.worktrees),
+        repo_state_file_count=tracked_repo_state_file_count,
+        recent_release_run_count=len(snapshot.recent_release_runs),
+    )
+
+
+def write_state_refresh_summary_artifact(*, summary: StateRefreshSummary, artifacts_dir: Path) -> Path:
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = artifacts_dir / "state_refresh_summary.json"
+    artifact_path.write_text(
+        json.dumps(summary.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     return artifact_path

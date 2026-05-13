@@ -668,6 +668,7 @@ def test_governor_loop_runs_one_epic_and_builds_evidence_manifest(tmp_path) -> N
     objectives_dir = tmp_path / "objectives"
     roadmap_path = tmp_path / "ROADMAP.md"
     roadmap_path.write_text("# Roadmap\n", encoding="utf-8")
+    config_dir = _write_project_config(tmp_path)
 
     plan_path = runs_dir / "backlog_plan.json"
     plan_path.parent.mkdir(parents=True, exist_ok=True)
@@ -732,7 +733,7 @@ def test_governor_loop_runs_one_epic_and_builds_evidence_manifest(tmp_path) -> N
         goal="Run one epic.",
         roadmap_path=roadmap_path,
         selected_epic_id=None,
-        config_dir=tmp_path / "configs",
+        config_dir=config_dir,
         contracts_dir=tmp_path / "contracts",
         runs_dir=runs_dir,
         objectives_dir=objectives_dir,
@@ -763,6 +764,11 @@ def test_governor_loop_runs_one_epic_and_builds_evidence_manifest(tmp_path) -> N
     assert result.evidence_manifest.generated_objective_path == result.objective_path
     assert result.evidence_manifest.contract_plan_path == contract_plan_path
     assert result.evidence_manifest.release_summary_path == release_summary_path
+    assert result.state_refresh_summary_path is not None
+    assert result.state_refresh_summary_path.exists()
+    summary_payload = json.loads(result.state_refresh_summary_path.read_text(encoding="utf-8"))
+    assert summary_payload["state_review_snapshot_path"].endswith("state_review_snapshot.json")
+    assert summary_payload["status_count"] >= 0
 
 
 def test_governor_loop_marks_planning_only_strategy_as_reviewed_not_blocked(tmp_path) -> None:
@@ -772,6 +778,7 @@ def test_governor_loop_marks_planning_only_strategy_as_reviewed_not_blocked(tmp_
     objectives_dir = tmp_path / "objectives"
     roadmap_path = tmp_path / "ROADMAP.md"
     roadmap_path.write_text("# Roadmap\n", encoding="utf-8")
+    config_dir = _write_project_config(tmp_path)
 
     plan_path = runs_dir / "backlog_plan.json"
     plan_path.parent.mkdir(parents=True, exist_ok=True)
@@ -834,7 +841,7 @@ def test_governor_loop_marks_planning_only_strategy_as_reviewed_not_blocked(tmp_
         goal="Run one epic.",
         roadmap_path=roadmap_path,
         selected_epic_id=None,
-        config_dir=tmp_path / "configs",
+        config_dir=config_dir,
         contracts_dir=tmp_path / "contracts",
         runs_dir=runs_dir,
         objectives_dir=objectives_dir,
@@ -870,6 +877,7 @@ def test_governor_loop_runs_multiple_epic_cycles_and_records_state(tmp_path) -> 
     objectives_dir = tmp_path / "objectives"
     roadmap_path = tmp_path / "ROADMAP.md"
     roadmap_path.write_text("# Roadmap\n", encoding="utf-8")
+    config_dir = _write_project_config(tmp_path)
     plan_calls: list[str] = []
     run_calls: list[Path] = []
 
@@ -945,7 +953,7 @@ def test_governor_loop_runs_multiple_epic_cycles_and_records_state(tmp_path) -> 
         roadmap_path=roadmap_path,
         selected_epic_id=None,
         epic_count=2,
-        config_dir=tmp_path / "configs",
+        config_dir=config_dir,
         contracts_dir=tmp_path / "contracts",
         runs_dir=runs_dir,
         objectives_dir=objectives_dir,
@@ -975,6 +983,7 @@ def test_governor_loop_runs_multiple_epic_cycles_and_records_state(tmp_path) -> 
     state = state_store.load()
     assert state.completed_epics == ["epic-0001", "epic-0002"]
     assert [summary.release_id for summary in state.recent_run_summaries] == ["demo-epic-0002", "demo-epic-0001"]
+    assert all(cycle.state_refresh_summary_path is not None for cycle in result.cycles)
 
 
 def test_governor_loop_distinguishes_attempted_and_accepted_counts(tmp_path) -> None:
@@ -984,6 +993,7 @@ def test_governor_loop_distinguishes_attempted_and_accepted_counts(tmp_path) -> 
     objectives_dir = tmp_path / "objectives"
     roadmap_path = tmp_path / "ROADMAP.md"
     roadmap_path.write_text("# Roadmap\n", encoding="utf-8")
+    config_dir = _write_project_config(tmp_path)
 
     plan_path = runs_dir / "epic-0001" / "backlog_plan.json"
     plan_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1039,7 +1049,7 @@ def test_governor_loop_distinguishes_attempted_and_accepted_counts(tmp_path) -> 
         roadmap_path=roadmap_path,
         selected_epic_id=None,
         epic_count=2,
-        config_dir=tmp_path / "configs",
+        config_dir=config_dir,
         contracts_dir=tmp_path / "contracts",
         runs_dir=runs_dir,
         objectives_dir=objectives_dir,
@@ -1068,3 +1078,36 @@ def test_governor_loop_distinguishes_attempted_and_accepted_counts(tmp_path) -> 
 
 def _write_yaml(path: Path, data: dict[str, object]) -> None:
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+
+def _write_project_config(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    if not (repo / ".git").exists():
+        _git(repo, "init", "-b", "main")
+        _git(repo, "config", "user.email", "test@example.com")
+        _git(repo, "config", "user.name", "Test User")
+        (repo / "README.md").write_text("# demo\n", encoding="utf-8")
+        _git(repo, "add", "README.md")
+        _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir(exist_ok=True)
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "worker", "max_walltime_minutes": 5},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    return config_dir
