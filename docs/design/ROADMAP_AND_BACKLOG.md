@@ -200,7 +200,7 @@ Required capabilities:
 
 Current implementation status:
 
-- The governor-control path now has an explicit one-epic `GovernorLoop` service boundary, a typed `StateStore` persistence seam, and a `RepairPolicy` decision seam.
+- The governor-control path now has an explicit one-epic `GovernorLoop` service boundary, a typed `StateStore` persistence seam, a `RepairPolicy` decision seam, and typed supervisor decision records for auditable repair/scheduling choices.
 - `agent-loop plan-backlog --mode strong-model --execute-planner` lets the configured planner agent read bounded documentation, roadmap context, and the repository goal, then emit a validated `BacklogPlan` with prioritized epics and one selected next epic.
 - `BacklogPlan` now carries `roadmap_updates` and `repo_state_updates` so the governor can surface learned roadmap/backlog changes from docs, artifacts, metrics, and validation evidence.
 - Deterministic `plan-backlog` remains available as fallback/test scaffolding, not as the target autonomous governor behavior.
@@ -219,6 +219,7 @@ Current implementation status:
 - The same run showed an observability gap for multi-epic operation: per-release `release.log` files are useful child artifacts, but operators need one top-level `governor.log` to watch backlog planning, objective/contract generation, contract normalization, release execution, repair, finalization, state refresh, and next-epic selection across the whole run.
 - The agentic-feature-review-loop run implemented the release-local semantic review boundary: when `model_roles.reviewer` is configured, `run-release` reviews the integrated feature branch, persists `feature_review.json` and `feature_review_recheck.json`, creates bounded repair contracts for required findings, reruns verification, and gates finalization on unresolved required findings or accepted-with-rationale findings. This is a release-local safety boundary, not the broader multi-epic governor; persistent memory, pre-epic state-review decisioning, and N-epic orchestration remain planned.
 - The persistent-governor-memory dogfood run showed that useful generated contracts can be blocked by deterministic overlap policy even when a high-level supervisor would simply serialize, stack, or re-slice the work. It also showed reviewer churn: multiple useful repair passes can improve quality, but without explicit convergence semantics the reviewer can keep discovering adjacent issues until retry budget exhaustion. These are not reasons to remove safety; they are reasons to move scheduling, repair-loop continuation, and finding deferral into typed supervisor decisions that rerun deterministic validators.
+- Typed supervisor decision records are the immediate implementation seam for those choices; the broader N-epic governor loop that would use them repeatedly remains planned until the state-review and memory layers are fully reliable.
 
 Prioritized Phase 4 epics:
 

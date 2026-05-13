@@ -64,17 +64,18 @@ maintenance.
 
 The target control boundary is typed supervisor decisions, not more procedural
 branches in the release runner. The kernel should emit overlap reports, budget
-signals, reviewer findings, liveness signals, and validation results. A
-supervisor agent should then write auditable decisions such as
+signals, reviewer findings, liveness signals, and validation results. The
+implemented supervisor seam writes auditable decision records such as
 `scheduling_decision`, `review_finding_decision`, `repair_budget_decision`,
 `contract_normalization_decision`, or `environment_repair_decision`. Each
 decision must include evidence paths, rationale, selected action, fallback plan,
 and validators to rerun. The kernel applies only actions that remain inside
-policy and pass deterministic validation.
+policy and pass deterministic validation. The broader N-epic governor loop that
+consumes these decisions across repeated epics is still planned.
 
 ### Runtime Supervisor Behavior
 
-The implemented runtime supervisor accepts structured release events, release summaries, evidence bundles, raw logs, budget ledgers, tuning reports, and backlog-state references. It classifies recoverable failures into verification environment drift, planner contract non-normalization, task scope overbroad, release resumable, long-running worker active, model capability mismatch, repo-state stale, missing credentials, contract boundary violation, unsafe policy expansion, and exhausted retry budget.
+The implemented runtime supervisor accepts structured release events, release summaries, evidence bundles, raw logs, budget ledgers, tuning reports, and backlog-state references. It classifies recoverable failures into verification environment drift, planner contract non-normalization, task scope overbroad, release resumable, long-running worker active, model capability mismatch, repo-state stale, missing credentials, contract boundary violation, unsafe policy expansion, and exhausted retry budget. Those classifications now flow into typed decision records rather than ad hoc procedural branching.
 
 - Retryable classifications only produce a retry decision while retry budget remains; once the budget is exhausted, the supervisor returns a stop decision with `exhausted_retry_budget`.
 - Stop decisions carry structured stop evidence with the action kind, stop kind, and reason so the release can record why repair stopped.

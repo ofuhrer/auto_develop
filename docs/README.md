@@ -10,7 +10,7 @@ This directory contains user, maintainer, and design documentation for `agentic-
 
 ## Project Summary
 
-`agentic-devloop` is an autonomous-first orchestration layer around coding agents. The current governor path is split into a one-epic `GovernorLoop` service, a typed `StateStore` persistence seam, a `RepairPolicy` decision seam, and implemented runtime-supervisor repair/resume seams for structured release failures. Those seams support roadmap/backlog analysis for the current epic, state persistence, bounded repair decisions, contract normalization, governor-level logging, and deterministic state-review snapshot capture (`state_review_snapshot.json`) with contract-plan plumbing through `state_review_snapshot_path`. The target architecture still needs two explicit agentic loops: full pre-epic state-review decisioning that drives epic selection from live repository evidence, and an independent feature-review/repair loop where a reviewer agent inspects the integrated feature branch and repair agents address reviewer findings before finalization. The broader multi-epic governor loop and fully automated state refresh remain planned. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, and configured Git finalization. Coding agents own implementation inside narrow task contracts.
+`agentic-devloop` is an autonomous-first orchestration layer around coding agents. The current governor path is split into a one-epic `GovernorLoop` service, a typed `StateStore` persistence seam, a `RepairPolicy` decision seam, typed supervisor decision records for repair/scheduling/finding adjudication, and implemented runtime-supervisor repair/resume seams for structured release failures. Those seams support roadmap/backlog analysis for the current epic, state persistence, bounded repair decisions, contract normalization, governor-level logging, and deterministic state-review snapshot capture (`state_review_snapshot.json`) with contract-plan plumbing through `state_review_snapshot_path`. The target architecture still needs two explicit agentic loops: full pre-epic state-review decisioning that drives epic selection from live repository evidence, and an independent feature-review/repair loop where a reviewer agent inspects the integrated feature branch and repair agents address reviewer findings before finalization. The broader multi-epic governor loop and fully automated state refresh remain planned. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, and configured Git finalization. Coding agents own implementation inside narrow task contracts.
 
 The project prioritizes:
 
@@ -46,6 +46,7 @@ Implemented capabilities include:
 - `run-task`, `run-release`, `plan-backlog`, `plan-release`, `run-objective`, `status`, and `cleanup` commands;
 - `run-backlog` for chaining backlog planning into objective and release execution;
 - bounded planner-output normalization for repairable generated-contract drift;
+- typed supervisor decision records under `runs/<run-id>/**/supervisor_decisions/` for auditable scheduling, repair, and soft-budget decisions;
 - governor-level log artifacts for `run-backlog` invocations;
 - release-level feature branch integration through `feature/<release>`;
 - dynamic release DAG scheduling from `depends_on` and file-overlap analysis, currently conservative and targeted to evolve into governor-owned overlap risk decisions;
@@ -68,6 +69,7 @@ Important remaining gaps:
 - executor liveness classification from process, output, heartbeat, and file/diff activity rather than elapsed time alone;
 - target-artifact ownership: external targets should keep durable `.auto_develop/repo_state`, objectives, contracts, and compact outcome history in the target repo or a dedicated control repo, not in the `auto_develop` source checkout;
 - broader multi-epic governor automation remains planned;
+- the typed supervisor-decision-record seam is implemented, but the N-epic governor loop that consumes it is still planned;
 - stronger model-based repeated-failure diagnosis backend;
 - richer semantic merge-conflict repair and broader repair strategies;
 - automated pull-request creation;
