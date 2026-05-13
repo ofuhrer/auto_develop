@@ -339,6 +339,52 @@ def test_generate_repair_contracts_for_required_findings_preserves_scope_and_for
     assert repair.depends_on == ["rel-6-0001"]
 
 
+def test_generate_repair_contracts_ignores_generated_evidence_paths_for_scope() -> None:
+    source_contract = TaskContract.model_validate(
+        {
+            "task_id": "rel-6-0001",
+            "release_id": "rel-6",
+            "title": "Main task",
+            "budget_class": "M",
+            "objective": "Implement feature.",
+            "allowed_files": ["src/foo.py"],
+            "required_evidence": ["pytest output"],
+            "verification": {"commands": ["pytest tests/test_feature_review.py"]},
+            "stop_conditions": ["Stop on scope drift."],
+        }
+    )
+    decision = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-6",
+            "reviewer": "strong_model",
+            "summary": "Needs repair with run evidence.",
+            "recommendation": "require_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "finding-required",
+                    "severity": "high",
+                    "summary": "Prior run evidence identifies a source issue.",
+                    "affected_files": [
+                        "runs/20260101T000000Z_rel-6_release/feature_review.json",
+                        "src/foo.py",
+                    ],
+                    "evidence_paths": ["runs/20260101T000000Z_rel-6_release/feature_review.json"],
+                    "required_repairs": ["Repair the source issue described by run evidence."],
+                }
+            ],
+        }
+    )
+
+    generated = generate_repair_contracts_for_required_findings(
+        decision=decision,
+        source_contracts=[source_contract],
+    )
+
+    assert generated[0].suggested_contract.allowed_files == ["src/foo.py"]
+
+
 def test_generate_repair_contracts_for_required_findings_stops_on_unmapped_file() -> None:
     source_contract = TaskContract.model_validate(
         {

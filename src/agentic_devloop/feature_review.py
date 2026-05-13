@@ -408,14 +408,15 @@ def generate_repair_contracts_for_required_findings(
     unsafe_path_to_finding: dict[str, str] = {}
     generated: list[GeneratedContract] = []
     for index, finding in enumerate(selected_findings, start=1):
-        mapped_contracts = _contracts_for_finding(finding, source_contracts=source_contracts)
+        scoped_finding = _repair_scope_finding(finding)
+        mapped_contracts = _contracts_for_finding(scoped_finding, source_contracts=source_contracts)
         _record_unsafe_overlap(
-            finding,
+            scoped_finding,
             unsafe_path_to_finding=unsafe_path_to_finding,
         )
         repair_contract = _build_repair_contract(
             decision=decision,
-            finding=finding,
+            finding=scoped_finding,
             mapped_contracts=mapped_contracts,
             index=index,
         )
@@ -429,6 +430,22 @@ def generate_repair_contracts_for_required_findings(
             )
         )
     return generated
+
+
+def _repair_scope_finding(finding: FeatureReviewFinding) -> FeatureReviewFinding:
+    editable_files = [
+        path
+        for path in finding.affected_files
+        if not _is_generated_evidence_path(path)
+    ]
+    if editable_files == finding.affected_files:
+        return finding
+    if not editable_files:
+        raise FeatureReviewContextError(
+            f"finding {finding.finding_id} only references generated evidence paths; "
+            "repair scope must name editable source or documentation files"
+        )
+    return finding.model_copy(update={"affected_files": editable_files})
 
 
 def _ensure_git_ref(repo_path: Path, ref: str) -> None:
@@ -671,6 +688,11 @@ def _path_matches_allowed_pattern(path: str, pattern: str) -> bool:
     if not normalized_path or not normalized_pattern:
         return False
     return fnmatchcase(normalized_path, normalized_pattern)
+
+
+def _is_generated_evidence_path(path: str) -> bool:
+    normalized = path.strip().lstrip("./")
+    return normalized.startswith("runs/") or normalized.startswith("worktrees/")
 
 
 def _record_unsafe_overlap(
