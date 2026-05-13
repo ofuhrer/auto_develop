@@ -883,7 +883,16 @@ def test_parse_planner_output_stops_with_structured_evidence_for_budget_exceeded
     assert "allowed_files count exceeds project budget" in exc.value.stop_evidence.reason
 
 
-def test_parse_planner_output_normalizes_missing_diff_evidence_and_reruns_admission() -> None:
+def test_parse_planner_output_normalizes_missing_diff_evidence_and_reruns_admission(tmp_path) -> None:
+    planner_prompt_path = tmp_path / "planner_prompt.md"
+    planner_stdout_path = tmp_path / "planner_stdout.log"
+    planner_stderr_path = tmp_path / "planner_stderr.log"
+    planner_metadata_path = tmp_path / "planner_metadata.json"
+    planner_prompt_path.write_text("prompt", encoding="utf-8")
+    planner_stdout_path.write_text("stdout", encoding="utf-8")
+    planner_stderr_path.write_text("stderr", encoding="utf-8")
+    planner_metadata_path.write_text("{}", encoding="utf-8")
+
     plan = parse_planner_output(
         {
             "release_id": "v0.3.5",
@@ -910,6 +919,10 @@ def test_parse_planner_output_normalizes_missing_diff_evidence_and_reruns_admiss
                 }
             ],
             "warnings": [],
+            "planner_prompt_path": str(planner_prompt_path),
+            "planner_stdout_path": str(planner_stdout_path),
+            "planner_stderr_path": str(planner_stderr_path),
+            "planner_metadata_path": str(planner_metadata_path),
         },
         release_id="v0.3.5",
         planner="strong-model",
@@ -926,6 +939,20 @@ def test_parse_planner_output_normalizes_missing_diff_evidence_and_reruns_admiss
     assert payload["validator_rerun_succeeded"] is True
     assert payload["before_snapshot"]["contract"]["required_evidence"] == ["test output"]
     assert "git diff" in payload["after_snapshot"]["contract"]["required_evidence"]
+    supervisor_input = payload["supervisor_input_artifact"]
+    assert supervisor_input["validation_errors"] == [
+        "generated contract must require diff evidence: v0.3.5-0001"
+    ]
+    assert supervisor_input["validators_to_rerun"] == ["ContractPlan", "TaskContract", "validate_generated_contracts"]
+    assert supervisor_input["objective_context"]["generated_objective"] == "Repair missing diff evidence."
+    assert supervisor_input["raw_planner_artifact_paths"] == [
+        str(planner_prompt_path),
+        str(planner_stdout_path),
+        str(planner_stderr_path),
+        str(planner_metadata_path),
+    ]
+    assert "allowed_files_count" in supervisor_input["scope_budget_signals"]
+    assert supervisor_input["policy_constraints"]
 
 
 def test_parse_planner_output_hard_stops_when_normalization_changes_guarded_semantics(monkeypatch) -> None:

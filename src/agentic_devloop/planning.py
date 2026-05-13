@@ -21,6 +21,7 @@ from agentic_devloop.models import (
     ContractPlan,
     GeneratedContract,
     ModelOutputNormalizationActionPayload,
+    PlannerAdmissionFailureSupervisorInput,
     ProjectConfig,
     ReleaseObjective,
     StrictModel,
@@ -750,9 +751,11 @@ def _normalize_contracts_for_admission(
     for generated in plan.generated_contracts:
         single_plan = plan.model_copy(update={"generated_contracts": [generated]})
         should_normalize = True
+        validation_errors: list[str] = []
         try:
             validate_generated_contracts(single_plan, project_config=project_config)
         except ValueError as error:
+            validation_errors = [str(error)]
             if "must require diff evidence" not in str(error):
                 normalized_generated.append(generated)
                 continue
@@ -778,6 +781,13 @@ def _normalize_contracts_for_admission(
             },
         )
         outcome = normalize_contract_request(request, project_config=project_config)
+        supervisor_input_artifact = _build_planner_admission_supervisor_input_artifact(
+            generated=generated,
+            plan=plan,
+            project_config=project_config,
+            validation_errors=validation_errors,
+            validators_to_rerun=_PLANNER_ADMISSION_VALIDATORS_TO_RERUN,
+        )
         if outcome.after_snapshot is None:
             validators_to_rerun = list(_PLANNER_ADMISSION_VALIDATORS_TO_RERUN)
             normalized_evidence.append(
@@ -785,6 +795,7 @@ def _normalize_contracts_for_admission(
                 + json.dumps(
                     {
                         **outcome.model_dump(mode="json"),
+                        "supervisor_input_artifact": supervisor_input_artifact.model_dump(mode="json"),
                         "validators_to_rerun": validators_to_rerun,
                         "validator_rerun_succeeded": False,
                     },
@@ -827,6 +838,7 @@ def _normalize_contracts_for_admission(
             + json.dumps(
                 {
                     **outcome.model_dump(mode="json"),
+                    "supervisor_input_artifact": supervisor_input_artifact.model_dump(mode="json"),
                     "validators_to_rerun": validators_to_rerun,
                     "validator_rerun_succeeded": True,
                 },
@@ -839,6 +851,59 @@ def _normalize_contracts_for_admission(
         update={
             "generated_contracts": normalized_generated,
             "warnings": [*plan.warnings, *normalized_evidence],
+        }
+    )
+
+
+def _build_planner_admission_supervisor_input_artifact(
+    *,
+    generated: GeneratedContract,
+    plan: ContractPlan,
+    project_config: ProjectConfig | None,
+    validation_errors: list[str],
+    validators_to_rerun: list[str],
+) -> PlannerAdmissionFailureSupervisorInput:
+    suggested = generated.suggested_contract
+    raw_artifacts = [
+        path
+        for path in (
+            plan.planner_prompt_path,
+            plan.planner_stdout_path,
+            plan.planner_stderr_path,
+            plan.planner_metadata_path,
+        )
+        if path is not None
+    ]
+    policy_constraints = [
+        "Task contracts must include required diff evidence.",
+        "Task contracts must include scope or verification stop conditions.",
+        "Task contracts must not use whole-repo allowed_files patterns.",
+    ]
+    if project_config is not None:
+        policy_constraints.append("Task contracts must respect project max_changed_files_per_task budget.")
+    scope_budget_signals: dict[str, object] = {
+        "allowed_files_count": len(suggested.allowed_files),
+        "required_evidence_count": len(suggested.required_evidence),
+        "verification_command_count": len(suggested.verification.commands),
+    }
+    if project_config is not None:
+        scope_budget_signals["max_changed_files_per_task"] = project_config.budget.max_changed_files_per_task
+    return PlannerAdmissionFailureSupervisorInput.model_validate(
+        {
+            "release_id": plan.release_id,
+            "task_id": generated.task_id,
+            "validation_errors": validation_errors or ["contract admission validation failed"],
+            "raw_planner_artifact_paths": raw_artifacts,
+            "objective_context": {
+                "generated_title": generated.title,
+                "generated_objective": generated.objective,
+                "generated_rationale": generated.rationale,
+                "suggested_contract_title": suggested.title,
+                "suggested_contract_objective": suggested.objective,
+            },
+            "policy_constraints": policy_constraints,
+            "scope_budget_signals": scope_budget_signals,
+            "validators_to_rerun": list(validators_to_rerun),
         }
     )
 

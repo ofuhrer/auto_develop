@@ -947,9 +947,30 @@ class ModelOutputValidationError(StrictModel):
     error_type: str = Field(min_length=1)
 
 
+class PlannerAdmissionFailureSupervisorInput(StrictModel):
+    release_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    validation_errors: list[str]
+    raw_planner_artifact_paths: list[Path] = Field(default_factory=list)
+    objective_context: dict[str, object] = Field(default_factory=dict)
+    policy_constraints: list[str] = Field(default_factory=list)
+    scope_budget_signals: dict[str, object] = Field(default_factory=dict)
+    validators_to_rerun: list[str]
+
+    @field_validator("validation_errors", "policy_constraints", "validators_to_rerun")
+    @classmethod
+    def list_fields_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if not values:
+            raise ValueError("planner admission supervisor input list fields must not be empty")
+        if any(not value.strip() for value in values):
+            raise ValueError("planner admission supervisor input list fields must not include empty values")
+        return values
+
+
 class ModelOutputNormalizationActionPayload(StrictModel):
     raw_artifact_paths: list[Path] = Field(default_factory=list)
     validation_errors: list[ModelOutputValidationError] = Field(default_factory=list)
+    admission_failure_inputs: list[PlannerAdmissionFailureSupervisorInput] = Field(default_factory=list)
     selected_action: ModelOutputNormalizationAction
     outcome: ModelOutputNormalizationOutcome
     rationale: str = Field(min_length=1)
