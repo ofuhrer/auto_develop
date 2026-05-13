@@ -135,6 +135,45 @@ def test_epic_memory_references_and_counters(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("mark_method", "record_list"),
+    [
+        ("mark_completed_epic", "completed_epic_records"),
+        ("mark_blocked_epic", "blocked_epic_records"),
+        ("mark_skipped_epic", "skipped_epics"),
+    ],
+)
+def test_add_epic_references_reuses_non_active_record(
+    tmp_path: Path,
+    mark_method: str,
+    record_list: str,
+) -> None:
+    state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
+    store = StateStore(state_path)
+    epic_id = "epic-1"
+
+    if mark_method == "mark_skipped_epic":
+        getattr(store, mark_method)(epic_id, status_reason="not-selected")
+    else:
+        getattr(store, mark_method)(epic_id)
+
+    outcome = OutcomeReference(
+        release_id="persistent-governor-memory",
+        task_id="pgm-0001",
+        outcome="accepted",
+        run_summary_path=Path("runs/persistent-governor-memory/review_summary.json"),
+        recorded_at=datetime(2026, 5, 13, 8, 0, tzinfo=UTC),
+    )
+    state = store.add_epic_outcome_reference(epic_id, outcome)
+
+    records = getattr(state, record_list)
+    assert len(records) == 1
+    assert records[0].epic_id == epic_id
+    assert len(records[0].outcome_references) == 1
+    assert records[0].outcome_references[0].release_id == "persistent-governor-memory"
+    assert state.active_epics == []
+
+
 def test_durable_schema_rejects_empty_structured_ids_and_reasons() -> None:
     with pytest.raises(ValueError):
         OutcomeReference(release_id="", outcome="accepted")

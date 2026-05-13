@@ -289,12 +289,23 @@ class StateStore:
         return state
 
     def _get_or_create_epic_record(self, state: BacklogState, epic_id: str) -> EpicMemoryRecord:
-        for record in state.active_epics:
-            if record.epic_id == epic_id:
-                return record
+        for records in self._epic_record_lists(state):
+            for record in records:
+                if record.epic_id == epic_id:
+                    return record
         record = EpicMemoryRecord(epic_id=epic_id, updated_at=datetime.now(UTC))
         state.active_epics.insert(0, record)
         return record
+
+    @staticmethod
+    def _epic_record_lists(state: BacklogState) -> tuple[list[EpicMemoryRecord], ...]:
+        return (
+            state.active_epics,
+            state.reviewed_epics,
+            state.completed_epic_records,
+            state.blocked_epic_records,
+            state.skipped_epics,
+        )
 
     @staticmethod
     def _set_record(records: list[EpicMemoryRecord], record: EpicMemoryRecord) -> None:
