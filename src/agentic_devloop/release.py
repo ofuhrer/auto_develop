@@ -124,7 +124,7 @@ class FeatureReviewLoopResult:
     feature_review_recheck_path: Path | None
     feature_review_decision: FeatureReviewDecision | None
     feature_review_recheck: FeatureReviewRecheckRecord | None
-    feature_review_proposals: list[dict[str, object]]
+    feature_review_proposals: list["FeatureReviewProposalRecord"]
     gating_decision: Decision
 
 
@@ -178,6 +178,23 @@ class ReleaseFinalizationGate(StrictModel):
                 "finalization gate reason='release_decision_not_accepted' requires decision != 'accepted'"
             )
         return self
+
+
+class FeatureReviewProposalRecord(StrictModel):
+    finding_id: str
+    classification: Literal["scope_expansion", "backlog_follow_up"]
+    selected_action: Literal["defer"]
+    decision_artifact_path: str
+    matched_previous_finding_id: str | None = None
+    attempt: int = Field(ge=1)
+
+    @field_validator("finding_id", "decision_artifact_path")
+    @classmethod
+    def required_strings_must_be_non_empty(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("value must be non-empty")
+        return cleaned
 
 
 def make_release_run_id(release_id: str, now: datetime | None = None) -> str:
@@ -388,7 +405,7 @@ def run_release(
     feature_review_recheck_path: Path | None = None
     feature_review_decision: FeatureReviewDecision | None = None
     feature_review_recheck: FeatureReviewRecheckRecord | None = None
-    feature_review_proposals: list[dict[str, object]] = []
+    feature_review_proposals: list[FeatureReviewProposalRecord] = []
 
     task_decision = (
         Decision.ACCEPTED
@@ -1252,7 +1269,7 @@ def _run_feature_review_and_repair_loop(
     previous_review_decisions: list[FeatureReviewDecision] = []
     last_verification_ok = False
     last_verification_log_path: Path | None = None
-    proposal_by_finding_id: dict[str, dict[str, object]] = {}
+    proposal_by_finding_id: dict[str, FeatureReviewProposalRecord] = {}
 
     def allowed_verification_commands() -> list[str]:
         commands: list[str] = []
@@ -1280,10 +1297,10 @@ def _run_feature_review_and_repair_loop(
             ordered.append(normalized)
         return ordered
 
-    def current_proposals() -> list[dict[str, object]]:
+    def current_proposals() -> list[FeatureReviewProposalRecord]:
         return sorted(
             proposal_by_finding_id.values(),
-            key=lambda record: str(record.get("finding_id", "")),
+            key=lambda record: record.finding_id,
         )
 
     def run_review(attempt: int) -> FeatureReviewDecision:
@@ -1516,14 +1533,16 @@ def _run_feature_review_and_repair_loop(
                     release_bundle_path=release_root, decision=stable_record
                 )
                 if item.classification in {"scope_expansion", "backlog_follow_up"} and item.selected_action == "defer":
-                    proposal_by_finding_id[item.finding_id] = {
-                        "finding_id": item.finding_id,
-                        "classification": item.classification,
-                        "selected_action": item.selected_action,
-                        "decision_artifact_path": str(stable_path),
-                        "matched_previous_finding_id": item.matched_previous_finding_id,
-                        "attempt": attempt,
-                    }
+                    proposal_by_finding_id[item.finding_id] = FeatureReviewProposalRecord.model_validate(
+                        {
+                            "finding_id": item.finding_id,
+                            "classification": item.classification,
+                            "selected_action": item.selected_action,
+                            "decision_artifact_path": str(stable_path),
+                            "matched_previous_finding_id": item.matched_previous_finding_id,
+                            "attempt": attempt,
+                        }
+                    )
                 _report(
                     progress,
                     "event=feature_review_non_blocking_finding_classified attempt="
@@ -2448,7 +2467,7 @@ def _write_release_summary(
     release_soft_gate_decision_path: Path | None,
     feature_review_path: Path | None,
     feature_review_recheck_path: Path | None,
-    feature_review_proposals: list[dict[str, object]],
+    feature_review_proposals: list[FeatureReviewProposalRecord],
     finalization_gate: dict[str, object],
 ) -> Path:
     summary_dir = runs_dir / run_id
@@ -2468,7 +2487,7 @@ def _write_release_summary(
         "release_soft_gate_decision_path": str(release_soft_gate_decision_path) if release_soft_gate_decision_path else None,
         "feature_review_path": str(feature_review_path) if feature_review_path else None,
         "feature_review_recheck_path": str(feature_review_recheck_path) if feature_review_recheck_path else None,
-        "feature_review_proposals": feature_review_proposals,
+        "feature_review_proposals": [record.model_dump(mode="json") for record in feature_review_proposals],
         "finalization_gate": finalization_gate,
         "integration_branch": integration_branch,
         "integration_commit": integration_commit,
