@@ -1383,11 +1383,14 @@ def _run_feature_review_and_repair_loop(
             if not finding.required_repairs and finding.optional_follow_ups
         ]
 
-        convergence = classify_feature_review_findings_for_convergence(
-            decision=decision,
-            previous_decisions=previous_review_decisions[:-1],
-            verification_passed=last_verification_ok,
-        )
+        def compute_convergence():
+            return classify_feature_review_findings_for_convergence(
+                decision=decision,
+                previous_decisions=previous_review_decisions[:-1],
+                verification_passed=last_verification_ok,
+            )
+
+        convergence = compute_convergence()
 
         def write_required_finding_classifications(
             *,
@@ -1538,6 +1541,20 @@ def _run_feature_review_and_repair_loop(
                 )
             return written
 
+        if (
+            loop_index >= _FEATURE_REVIEW_MAX_REPAIR_LOOPS
+            and required_findings
+            and decision.recommendation != FeatureReviewRecommendation.ESCALATE
+        ):
+            _report(
+                progress,
+                "event=feature_review_convergence_limit_reached "
+                f"limit={_FEATURE_REVIEW_MAX_REPAIR_LOOPS} unresolved_required_findings="
+                + json.dumps([finding.finding_id for finding in required_findings], sort_keys=True),
+            )
+            rerun_verification(loop_index + 1, decision)
+            convergence = compute_convergence()
+
         write_non_blocking_finding_classifications(attempt=loop_index + 1)
 
         if decision.recommendation == FeatureReviewRecommendation.ESCALATE:
@@ -1602,13 +1619,7 @@ def _run_feature_review_and_repair_loop(
             )
 
         if loop_index >= _FEATURE_REVIEW_MAX_REPAIR_LOOPS:
-            _report(
-                progress,
-                "event=feature_review_convergence_limit_reached "
-                f"limit={_FEATURE_REVIEW_MAX_REPAIR_LOOPS} unresolved_required_findings="
-                + json.dumps([finding.finding_id for finding in required_findings], sort_keys=True),
-            )
-            verification_ok = rerun_verification(loop_index + 1, decision)
+            verification_ok = last_verification_ok
             adjudicated_finding_ids = (
                 _verification_adjudicated_required_finding_ids(required_findings)
                 if verification_ok
