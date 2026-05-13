@@ -90,6 +90,44 @@ def test_mark_reviewed_and_skipped_epic_transitions(tmp_path: Path) -> None:
     assert skipped.blocked_epics == []
 
 
+def test_load_legacy_skipped_epics_string_list_shape(tmp_path: Path) -> None:
+    state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        """
+skipped_epics:
+  - epic-1
+  - epic-2
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    state = StateStore(state_path).load()
+
+    assert [record.epic_id for record in state.skipped_epics] == ["epic-1", "epic-2"]
+
+
+def test_load_legacy_and_typed_epic_record_entries_together(tmp_path: Path) -> None:
+    state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        """
+completed_epic_records:
+  - epic-1
+  - epic_id: epic-2
+    status_reason: reviewed
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    state = StateStore(state_path).load()
+
+    assert [record.epic_id for record in state.completed_epic_records] == ["epic-1", "epic-2"]
+    assert state.completed_epic_records[1].status_reason == "reviewed"
+
+
 def test_epic_memory_references_and_counters(tmp_path: Path) -> None:
     state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
     store = StateStore(state_path)

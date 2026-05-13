@@ -112,6 +112,7 @@ class StateStore:
             parsed = {}
         if not isinstance(parsed, dict):
             raise ValueError(f"backlog state must be a mapping: {self.backlog_state_path}")
+        parsed = self._normalize_legacy_backlog_state(parsed)
 
         return BacklogState.model_validate(parsed)
 
@@ -325,3 +326,23 @@ class StateStore:
     def _set_record(records: list[EpicMemoryRecord], record: EpicMemoryRecord) -> None:
         records[:] = [value for value in records if value.epic_id != record.epic_id]
         records.insert(0, record)
+
+    @staticmethod
+    def _normalize_legacy_backlog_state(parsed: dict[object, object]) -> dict[object, object]:
+        normalized = dict(parsed)
+        legacy_record_keys = (
+            "active_epics",
+            "reviewed_epics",
+            "completed_epic_records",
+            "skipped_epics",
+            "blocked_epic_records",
+        )
+        for key in legacy_record_keys:
+            value = normalized.get(key)
+            if not isinstance(value, list):
+                continue
+            normalized[key] = [
+                {"epic_id": item} if isinstance(item, str) else item
+                for item in value
+            ]
+        return normalized
