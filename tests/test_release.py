@@ -6,12 +6,15 @@ import time
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
+import pytest
 
 from agentic_devloop.git_finalize import FinalizeResult
 from agentic_devloop.models import ExecutorResult, ProjectConfig, TaskContract
 from agentic_devloop.models import Decision, Reviewer, ReviewDecision
+from agentic_devloop.models import FeatureReviewDecision
 from agentic_devloop.orchestrator import TaskRunResult, executor_config_for_task, executor_configs_for_task
 from agentic_devloop.release import (
     collect_release_planning_state_review_snapshot,
@@ -145,6 +148,37 @@ class FlakyVerificationExecutor(FakeExecutor):
         stderr_path.write_text("", encoding="utf-8")
         return ExecutorResult(
             command=["flaky-verification-executor"],
+            exit_code=0,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            duration_seconds=0.01,
+            backend="fake",
+            model=None,
+        )
+
+
+class AllowedFilesExecutor:
+    def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        prompt_text = prompt_path.read_text(encoding="utf-8")
+        match = prompt_text.split("```yaml\n", 1)
+        if len(match) != 2:
+            raise AssertionError("executor prompt missing contract yaml block")
+        contract_yaml, _rest = match[1].split("```", 1)
+        contract = yaml.safe_load(contract_yaml)
+        allowed_files = contract.get("allowed_files") or []
+        if not allowed_files:
+            raise AssertionError("contract missing allowed_files")
+        target = worktree_path / str(allowed_files[0])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("ok\n", encoding="utf-8")
+
+        stdout_path = output_dir / "executor_stdout.log"
+        stderr_path = output_dir / "executor_stderr.log"
+        stdout_path.write_text("allowed files executor\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return ExecutorResult(
+            command=["allowed-files-executor"],
             exit_code=0,
             stdout_path=stdout_path,
             stderr_path=stderr_path,
@@ -619,7 +653,8 @@ def test_run_release_supervisor_repairs_verification_and_resumes(tmp_path) -> No
     assert attempt["applier_applied"] is True
     assert attempt["applier_stop_evidence"] is None
     assert "event=repair_succeeded task=demo-0001 attempt=1" in result.log_path.read_text(encoding="utf-8")
-    assert result.task_results[0].run_id.endswith("_retry2")
+    assert repair["initial_result"]["run_id"] != repair["final_result"]["run_id"]
+    assert result.task_results[0].run_id == repair["final_result"]["run_id"]
 
 
 def test_run_release_continues_with_completed_dependencies_during_repair_resume(tmp_path) -> None:
@@ -1337,6 +1372,114 @@ def test_state_review_snapshot_collector_requires_existing_planning_artifacts_di
         assert "release planning artifacts directory does not exist" in str(error)
     else:
         raise AssertionError("expected missing planning artifacts directory to fail")
+
+
+def test_run_release_feature_review_repair_loop_records_artifacts(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {
+                "worker": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+                "reviewer": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    decisions = [
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Needs a repair.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "finding-1",
+                        "severity": "high",
+                        "summary": "Fix required.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Update docs."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Repairs applied.",
+                "recommendation": "approve",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [],
+            }
+        ),
+    ]
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    def fake_invoke_feature_reviewer(*_args, **_kwargs):
+        if not decisions:
+            raise AssertionError("unexpected reviewer invocation")
+        return FakeBackendResult(decisions.pop(0))
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert result.decision == Decision.ACCEPTED
+    assert summary["feature_review_path"] is not None
+    assert summary["feature_review_recheck_path"] is not None
+    recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
+    assert recheck["stop_reason"] == "resolved"
 
 
 def _task_contract(

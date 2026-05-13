@@ -12,7 +12,18 @@ from typing import Callable
 from agentic_devloop.artifacts import cleanup_task_artifacts
 from agentic_devloop.budget import build_budget_ledger, build_tuning_report
 from agentic_devloop.config import load_project_config
-from agentic_devloop.evidence import write_release_soft_gate_decisions
+from agentic_devloop.evidence import (
+    write_feature_review_decision,
+    write_feature_review_recheck,
+    write_release_soft_gate_decisions,
+)
+from agentic_devloop.feature_review import (
+    FeatureReviewContextError,
+    assemble_feature_review_context,
+    generate_repair_contracts_for_required_findings,
+    invoke_feature_reviewer,
+    render_feature_review_prompt,
+)
 from agentic_devloop.git_finalize import (
     FinalizeResult,
     GitFinalizeError,
@@ -24,6 +35,9 @@ from fnmatch import fnmatch
 
 from agentic_devloop.models import (
     Decision,
+    FeatureReviewDecision,
+    FeatureReviewRecommendation,
+    FeatureReviewRecheckRecord,
     OverlapFinding,
     ReleaseOverlapReport,
     ReleasePlan,
@@ -77,7 +91,18 @@ class ReleaseRunResult:
     finalization: FinalizeResult | None = None
 
 
+@dataclass(frozen=True)
+class FeatureReviewLoopResult:
+    task_results: list[TaskRunResult]
+    feature_review_path: Path | None
+    feature_review_recheck_path: Path | None
+    feature_review_decision: FeatureReviewDecision | None
+    feature_review_recheck: FeatureReviewRecheckRecord | None
+    gating_decision: Decision
+
+
 _RELEASE_BUDGET_SOFT_OVERAGE_RATIO = 0.2
+_FEATURE_REVIEW_MAX_REPAIR_LOOPS = 2
 
 
 def make_release_run_id(release_id: str, now: datetime | None = None) -> str:
@@ -233,7 +258,41 @@ def run_release(
             progress=progress,
         )
 
+    feature_review_path: Path | None = None
+    feature_review_recheck_path: Path | None = None
+    feature_review_decision: FeatureReviewDecision | None = None
+    feature_review_recheck: FeatureReviewRecheckRecord | None = None
+
     task_decision = _release_decision([result.decision for result in task_results])
+    if task_decision == Decision.ACCEPTED and "reviewer" in config.model_roles:
+        feature_review_loop = _run_feature_review_and_repair_loop(
+            project_id=project_id,
+            config=config,
+            release_id=release_id,
+            run_id=run_id,
+            release_root=release_root,
+            runs_dir=runs_dir,
+            config_dir=config_dir,
+            integration_branch=feature_branch,
+            task_results=task_results,
+            source_contracts=selected_tasks,
+            executor=executor,
+            verification_timeout_seconds=verification_timeout_seconds,
+            allow_dirty=allow_dirty,
+            commit_on_accept=commit_on_accept,
+            merge_on_accept=merge_on_accept,
+            push_on_accept=push_on_accept,
+            debug_keep_artifacts=debug_keep_artifacts,
+            progress=progress,
+        )
+        task_results = feature_review_loop.task_results
+        feature_review_path = feature_review_loop.feature_review_path
+        feature_review_recheck_path = feature_review_loop.feature_review_recheck_path
+        feature_review_decision = feature_review_loop.feature_review_decision
+        feature_review_recheck = feature_review_loop.feature_review_recheck
+        task_decision = _release_decision([result.decision for result in task_results])
+        if feature_review_loop.gating_decision != Decision.ACCEPTED:
+            task_decision = feature_review_loop.gating_decision
     release_metrics = _build_release_metrics(
         run_id=run_id,
         release_id=release_id,
@@ -300,6 +359,8 @@ def run_release(
         budget_violations=budget_violations,
         soft_budget_findings=soft_budget_findings,
         release_soft_gate_decision_path=release_soft_gate_decision_path,
+        feature_review_path=feature_review_path,
+        feature_review_recheck_path=feature_review_recheck_path,
     )
     review_path = _write_release_review(
         runs_dir=runs_dir,
@@ -315,6 +376,10 @@ def run_release(
         budget_violations=budget_violations,
         soft_budget_findings=soft_budget_findings,
         release_soft_gate_decision_path=release_soft_gate_decision_path,
+        feature_review_decision=feature_review_decision,
+        feature_review_path=feature_review_path,
+        feature_review_recheck=feature_review_recheck,
+        feature_review_recheck_path=feature_review_recheck_path,
     )
     _report(progress, f"event=release_decision decision={decision}")
     _report(progress, f"event=release_review path={review_path}")
@@ -982,6 +1047,351 @@ def _run_one_release_task(
     return result
 
 
+def _run_feature_review_and_repair_loop(
+    *,
+    project_id: str,
+    config: "ProjectConfig",
+    release_id: str,
+    run_id: str,
+    release_root: Path,
+    runs_dir: Path,
+    config_dir: Path,
+    integration_branch: str,
+    task_results: list[TaskRunResult],
+    source_contracts: list[TaskContract],
+    executor: ExecutorProtocol | None,
+    verification_timeout_seconds: int,
+    allow_dirty: bool,
+    commit_on_accept: bool,
+    merge_on_accept: bool,
+    push_on_accept: bool,
+    debug_keep_artifacts: bool,
+    progress: Callable[[str], None] | None,
+) -> FeatureReviewLoopResult:
+    output_root = release_root / "feature_review"
+    output_root.mkdir(parents=True, exist_ok=True)
+    reviewer_config = config.model_roles.get("reviewer", config.executor)
+
+    gating_decision = Decision.ACCEPTED
+    all_task_results: list[TaskRunResult] = []
+    feature_review_path: Path | None = None
+    feature_review_recheck_path: Path | None = None
+    feature_review_decision: FeatureReviewDecision | None = None
+    feature_review_recheck: FeatureReviewRecheckRecord | None = None
+
+    def run_review(attempt: int) -> FeatureReviewDecision:
+        nonlocal feature_review_path
+        nonlocal feature_review_decision
+        attempt_dir = output_root / f"attempt_{attempt:02d}"
+        _report(progress, f"event=feature_review_started attempt={attempt} output_dir={attempt_dir}")
+        branches_base = config.default_base_branch
+        try:
+            context = assemble_feature_review_context(
+                repo_path=config.repo_path,
+                release_id=release_id,
+                base_branch=branches_base,
+                integration_branch=integration_branch,
+                runs_dir=runs_dir,
+            )
+            prompt = render_feature_review_prompt(
+                context=context,
+                repo_path=config.repo_path,
+                runs_dir=runs_dir,
+            )
+            backend = invoke_feature_reviewer(
+                config=reviewer_config,
+                repo_path=config.repo_path,
+                prompt=prompt,
+                release_id=release_id,
+                output_dir=attempt_dir,
+            )
+            decision = backend.decision
+        except FeatureReviewContextError as error:
+            decision = FeatureReviewDecision.model_validate(
+                {
+                    "release_id": release_id,
+                    "reviewer": "deterministic",
+                    "summary": f"Feature review context failure: {error}",
+                    "recommendation": "escalate",
+                    "accepted_risks": [],
+                    "rerun_verification_commands": [],
+                    "findings": [],
+                }
+            )
+        feature_review_decision = decision
+        feature_review_path = write_feature_review_decision(release_root, decision)
+        _report(progress, f"event=feature_review_completed attempt={attempt} recommendation={decision.recommendation.value}")
+        return decision
+
+    def rerun_verification(attempt: int, decision: FeatureReviewDecision) -> bool:
+        rerun_dir = output_root / f"verification_rerun_{attempt:02d}"
+        rerun_dir.mkdir(parents=True, exist_ok=True)
+        commands = list(config.verification_profiles["default"].commands)
+        if decision.rerun_verification_commands:
+            allowed = set(commands)
+            unknown = [cmd for cmd in decision.rerun_verification_commands if cmd not in allowed]
+            if unknown:
+                raise ValueError(
+                    "feature review requested rerun_verification_commands outside configured verification profile: "
+                    + ", ".join(unknown)
+                )
+        return _run_integration_verification_rerun(
+            repo_path=config.repo_path,
+            integration_branch=integration_branch,
+            worktree_path=rerun_dir / "worktree",
+            commands=commands,
+            timeout_seconds=verification_timeout_seconds,
+            log_path=rerun_dir / "verification.log",
+            progress=progress,
+        )
+
+    all_task_results = list(task_results)
+    decision = run_review(attempt=1)
+
+    for loop_index in range(_FEATURE_REVIEW_MAX_REPAIR_LOOPS + 1):
+        required_findings = [finding for finding in decision.findings if finding.required_repairs]
+        optional_findings = [
+            finding
+            for finding in decision.findings
+            if not finding.required_repairs and finding.optional_follow_ups
+        ]
+
+        if decision.recommendation == FeatureReviewRecommendation.ESCALATE:
+            gating_decision = Decision.ESCALATED
+            feature_review_recheck = FeatureReviewRecheckRecord(
+                release_id=release_id,
+                unresolved_finding_ids=[finding.finding_id for finding in decision.findings] or [f"{release_id}:feature_review_blocked"],
+                resolved_finding_ids=[],
+                accepted_finding_ids=[],
+                stop_reason="blocked_by_hard_gate",
+            )
+            feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+            return FeatureReviewLoopResult(
+                task_results=all_task_results,
+                feature_review_path=feature_review_path,
+                feature_review_recheck_path=feature_review_recheck_path,
+                feature_review_decision=feature_review_decision,
+                feature_review_recheck=feature_review_recheck,
+                gating_decision=gating_decision,
+            )
+
+        if not required_findings:
+            stop_reason = "resolved" if not decision.findings else "accepted_with_rationale"
+            feature_review_recheck = FeatureReviewRecheckRecord(
+                release_id=release_id,
+                unresolved_finding_ids=[],
+                resolved_finding_ids=[finding.finding_id for finding in decision.findings],
+                accepted_finding_ids=[finding.finding_id for finding in optional_findings],
+                stop_reason=stop_reason,
+            )
+            feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+            return FeatureReviewLoopResult(
+                task_results=all_task_results,
+                feature_review_path=feature_review_path,
+                feature_review_recheck_path=feature_review_recheck_path,
+                feature_review_decision=feature_review_decision,
+                feature_review_recheck=feature_review_recheck,
+                gating_decision=gating_decision,
+            )
+
+        if loop_index >= _FEATURE_REVIEW_MAX_REPAIR_LOOPS:
+            gating_decision = Decision.NEEDS_REVISION
+            feature_review_recheck = FeatureReviewRecheckRecord(
+                release_id=release_id,
+                unresolved_finding_ids=[finding.finding_id for finding in required_findings],
+                resolved_finding_ids=[],
+                accepted_finding_ids=[finding.finding_id for finding in optional_findings],
+                stop_reason="blocked_by_retry_budget",
+            )
+            feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+            return FeatureReviewLoopResult(
+                task_results=all_task_results,
+                feature_review_path=feature_review_path,
+                feature_review_recheck_path=feature_review_recheck_path,
+                feature_review_decision=feature_review_decision,
+                feature_review_recheck=feature_review_recheck,
+                gating_decision=gating_decision,
+            )
+
+        generated = generate_repair_contracts_for_required_findings(
+            decision=decision,
+            source_contracts=source_contracts,
+        )
+        if not generated:
+            gating_decision = Decision.NEEDS_REVISION
+            feature_review_recheck = FeatureReviewRecheckRecord(
+                release_id=release_id,
+                unresolved_finding_ids=[finding.finding_id for finding in required_findings],
+                resolved_finding_ids=[],
+                accepted_finding_ids=[finding.finding_id for finding in optional_findings],
+                stop_reason="blocked_by_hard_gate",
+            )
+            feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+            return FeatureReviewLoopResult(
+                task_results=all_task_results,
+                feature_review_path=feature_review_path,
+                feature_review_recheck_path=feature_review_recheck_path,
+                feature_review_decision=feature_review_decision,
+                feature_review_recheck=feature_review_recheck,
+                gating_decision=gating_decision,
+            )
+
+        repair_dir = output_root / f"repairs_{loop_index + 1:02d}"
+        repair_dir.mkdir(parents=True, exist_ok=True)
+        _report(progress, f"event=feature_review_repairs_started attempt={loop_index + 1} repairs={len(generated)}")
+        for contract in generated:
+            contract_path = repair_dir / f"{contract.task_id}.yaml"
+            _write_contract_yaml(contract_path, contract.suggested_contract)
+            result = _run_one_release_task(
+                project_id=project_id,
+                config_repo_path=config.repo_path,
+                config_dir=config_dir,
+                runs_dir=runs_dir,
+                task_base_branch=integration_branch,
+                contract_path=contract_path,
+                task=contract.suggested_contract,
+                executor=executor,
+                verification_timeout_seconds=verification_timeout_seconds,
+                allow_dirty=allow_dirty,
+                commit_on_accept=commit_on_accept,
+                merge_on_accept=merge_on_accept,
+                push_on_accept=push_on_accept,
+                debug_keep_artifacts=debug_keep_artifacts,
+                progress=progress,
+            )
+            all_task_results.append(result)
+            if result.decision.decision != Decision.ACCEPTED:
+                gating_decision = Decision.NEEDS_REVISION
+                feature_review_recheck = FeatureReviewRecheckRecord(
+                    release_id=release_id,
+                    unresolved_finding_ids=[finding.finding_id for finding in required_findings],
+                    resolved_finding_ids=[],
+                    accepted_finding_ids=[finding.finding_id for finding in optional_findings],
+                    stop_reason="blocked_by_hard_gate",
+                )
+                feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+                return FeatureReviewLoopResult(
+                    task_results=all_task_results,
+                    feature_review_path=feature_review_path,
+                    feature_review_recheck_path=feature_review_recheck_path,
+                    feature_review_decision=feature_review_decision,
+                    feature_review_recheck=feature_review_recheck,
+                    gating_decision=gating_decision,
+                )
+
+        verification_ok = rerun_verification(loop_index + 1, decision)
+        if not verification_ok:
+            gating_decision = Decision.NEEDS_REVISION
+            feature_review_recheck = FeatureReviewRecheckRecord(
+                release_id=release_id,
+                unresolved_finding_ids=[finding.finding_id for finding in required_findings],
+                resolved_finding_ids=[],
+                accepted_finding_ids=[finding.finding_id for finding in optional_findings],
+                stop_reason="blocked_by_hard_gate",
+            )
+            feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+            return FeatureReviewLoopResult(
+                task_results=all_task_results,
+                feature_review_path=feature_review_path,
+                feature_review_recheck_path=feature_review_recheck_path,
+                feature_review_decision=feature_review_decision,
+                feature_review_recheck=feature_review_recheck,
+                gating_decision=gating_decision,
+            )
+        decision = run_review(attempt=loop_index + 2)
+
+    gating_decision = Decision.NEEDS_REVISION
+    feature_review_recheck = FeatureReviewRecheckRecord(
+        release_id=release_id,
+        unresolved_finding_ids=[finding.finding_id for finding in decision.findings],
+        resolved_finding_ids=[],
+        accepted_finding_ids=[],
+        stop_reason="blocked_by_retry_budget",
+    )
+    feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+    return FeatureReviewLoopResult(
+        task_results=all_task_results,
+        feature_review_path=feature_review_path,
+        feature_review_recheck_path=feature_review_recheck_path,
+        feature_review_decision=feature_review_decision,
+        feature_review_recheck=feature_review_recheck,
+        gating_decision=gating_decision,
+    )
+
+
+def _write_contract_yaml(path: Path, contract: TaskContract) -> None:
+    import yaml
+
+    path.write_text(yaml.safe_dump(contract.model_dump(mode="json"), sort_keys=False), encoding="utf-8")
+
+
+def _run_integration_verification_rerun(
+    *,
+    repo_path: Path,
+    integration_branch: str,
+    worktree_path: Path,
+    commands: list[str],
+    timeout_seconds: int,
+    log_path: Path,
+    progress: Callable[[str], None] | None,
+) -> bool:
+    repo_path = repo_path.resolve()
+    worktree_path = worktree_path.resolve()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_lines: list[str] = []
+
+    if worktree_path.exists():
+        run_process(
+            ["git", "worktree", "remove", "--force", str(worktree_path)],
+            cwd=repo_path,
+            timeout_seconds=120,
+        )
+
+    add = run_process(
+        ["git", "worktree", "add", "--detach", str(worktree_path), integration_branch],
+        cwd=repo_path,
+        timeout_seconds=120,
+    )
+    log_lines.append(f"$ git worktree add --detach {worktree_path} {integration_branch}")
+    log_lines.append(add.stdout.rstrip())
+    log_lines.append(add.stderr.rstrip())
+    if add.exit_code != 0:
+        log_path.write_text("\n".join(line for line in log_lines if line) + "\n", encoding="utf-8")
+        _report(progress, f"event=feature_review_verification_worktree_failed error={add.stderr.strip() or add.stdout.strip()}")
+        return False
+
+    ok = True
+    for command in commands:
+        parts = shlex.split(command)
+        log_lines.append(f"$ {command}")
+        result = run_process(
+            parts,
+            cwd=worktree_path,
+            timeout_seconds=timeout_seconds,
+        )
+        log_lines.append(result.stdout.rstrip())
+        log_lines.append(result.stderr.rstrip())
+        if result.exit_code != 0:
+            ok = False
+            _report(progress, f"event=feature_review_verification_failed command={json.dumps(command)} exit_code={result.exit_code}")
+            break
+
+    remove = run_process(
+        ["git", "worktree", "remove", "--force", str(worktree_path)],
+        cwd=repo_path,
+        timeout_seconds=120,
+    )
+    log_lines.append(f"$ git worktree remove --force {worktree_path}")
+    log_lines.append(remove.stdout.rstrip())
+    log_lines.append(remove.stderr.rstrip())
+    if remove.exit_code != 0:
+        _report(progress, f"event=feature_review_verification_worktree_cleanup_failed error={remove.stderr.strip() or remove.stdout.strip()}")
+
+    log_path.write_text("\n".join(line for line in log_lines if line) + "\n", encoding="utf-8")
+    _report(progress, f"event=feature_review_verification_completed ok={str(ok).lower()} log={log_path}")
+    return ok
+
+
 def _load_release_plan(config_repo_path: Path, repo_state_path: Path | None) -> ReleasePlan | None:
     if repo_state_path is None:
         return None
@@ -1099,6 +1509,8 @@ def _write_release_summary(
     budget_violations: list[str],
     soft_budget_findings: list[str],
     release_soft_gate_decision_path: Path | None,
+    feature_review_path: Path | None,
+    feature_review_recheck_path: Path | None,
 ) -> Path:
     summary_dir = runs_dir / run_id
     summary_dir.mkdir(parents=True, exist_ok=True)
@@ -1115,6 +1527,8 @@ def _write_release_summary(
         "budget_violations": budget_violations,
         "soft_budget_findings": soft_budget_findings,
         "release_soft_gate_decision_path": str(release_soft_gate_decision_path) if release_soft_gate_decision_path else None,
+        "feature_review_path": str(feature_review_path) if feature_review_path else None,
+        "feature_review_recheck_path": str(feature_review_recheck_path) if feature_review_recheck_path else None,
         "integration_branch": integration_branch,
         "finalization": {
             "merged": finalization.merged,
@@ -1157,6 +1571,10 @@ def _write_release_review(
     budget_violations: list[str],
     soft_budget_findings: list[str],
     release_soft_gate_decision_path: Path | None,
+    feature_review_decision: FeatureReviewDecision | None,
+    feature_review_path: Path | None,
+    feature_review_recheck: FeatureReviewRecheckRecord | None,
+    feature_review_recheck_path: Path | None,
 ) -> Path:
     review_path = runs_dir / run_id / "release_review.md"
     lines = [
@@ -1181,6 +1599,22 @@ def _write_release_review(
         lines.extend(f"- Soft finding: {finding}" for finding in soft_budget_findings)
     if release_soft_gate_decision_path is not None:
         lines.append(f"- Soft decision artifact: `{release_soft_gate_decision_path}`")
+    if feature_review_path is not None:
+        lines.extend(
+            [
+                "",
+                "## Feature Review",
+                "",
+                f"- Artifact: `{feature_review_path}`",
+            ]
+        )
+        if feature_review_decision is not None:
+            lines.append(f"- Recommendation: `{feature_review_decision.recommendation.value}`")
+            lines.append(f"- Findings: `{len(feature_review_decision.findings)}`")
+        if feature_review_recheck_path is not None:
+            lines.append(f"- Recheck artifact: `{feature_review_recheck_path}`")
+        if feature_review_recheck is not None and feature_review_recheck.stop_reason is not None:
+            lines.append(f"- Recheck status: `{feature_review_recheck.stop_reason}`")
     lines.extend([
         "",
         "## Task Results",
