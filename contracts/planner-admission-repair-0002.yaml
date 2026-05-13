@@ -1,0 +1,43 @@
+task_id: planner-admission-repair-0002
+release_id: planner-admission-repair
+title: Add typed admission repair supervisor decisions
+task_type: code_only
+budget_class: M
+objective: Add typed runtime supervisor admission-repair actions for split, narrow,
+  broad-but-mechanical acceptance, replan, and stop, each requiring rationale, fallback
+  plan, evidence paths, and validators to rerun.
+allowed_files:
+- src/agentic_devloop/models.py
+- src/agentic_devloop/runtime_supervisor.py
+- tests/test_runtime_supervisor.py
+- tests/test_supervisor_decision_artifacts.py
+forbidden_changes:
+- Do not alter existing final-review or task-repair decision semantics except where
+  shared helpers are strictly needed.
+- Do not allow supervisor decisions to bypass deterministic validation.
+- Do not invent filesystem paths that are not persisted or asserted in tests.
+- Do not edit planning pipeline control flow in this task.
+required_evidence:
+- git diff
+- test output for runtime supervisor decision tests
+- serialized examples or assertions for all five admission repair action types
+verification:
+  commands:
+  - PYTHONPATH=src .venv/bin/python -m pytest tests/test_runtime_supervisor.py tests/test_supervisor_decision_artifacts.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if action modeling requires weakening existing StrictModel extra-forbid behavior.
+- Stop if broad-but-mechanical acceptance cannot be represented with explicit validators_to_rerun.
+- Stop if verification fails twice for the same reason after targeted fixes.
+non_goals:
+- Do not apply repairs to ContractPlan objects.
+- Do not update release execution continuation logic.
+- Do not add documentation.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- planner-admission-repair-0001

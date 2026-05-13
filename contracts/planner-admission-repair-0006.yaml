@@ -1,0 +1,45 @@
+task_id: planner-admission-repair-0006
+release_id: planner-admission-repair
+title: Document implemented admission repair behavior
+task_type: documentation
+budget_class: S
+objective: Document generated-contract admission repair behavior, evidence artifacts,
+  hard non-bypassable violations, validator reruns, and release continuation rules,
+  while distinguishing implemented behavior from planned reviewer/supervisor normalization
+  extensions.
+allowed_files:
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/design/ARCHITECTURE.md
+- docs/README.md
+forbidden_changes:
+- Do not describe planned reviewer or supervisor normalization extensions as implemented.
+- Do not change CLI examples unless they match implemented behavior from this release.
+- Do not edit source code, tests, configs, objectives, or contract examples.
+required_evidence:
+- git diff
+- documentation review notes or grep output showing implemented-versus-planned distinction
+- test output from documentation-safe smoke checks
+verification:
+  commands:
+  - PYTHONPATH=src .venv/bin/python -m agentic_devloop --help
+  - PYTHONPATH=src .venv/bin/python -m agentic_devloop run-release --help
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if source behavior is not implemented enough to document accurately.
+- Stop if docs would need to claim reviewer/supervisor normalization behavior not
+  covered by this release.
+- Stop if verification fails twice for the same reason after targeted fixes.
+non_goals:
+- Do not modify code or tests.
+- Do not add new examples under configs, objectives, or contracts unless separately
+  requested.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- planner-admission-repair-0004
+- planner-admission-repair-0005

@@ -1,0 +1,44 @@
+task_id: planner-admission-repair-0001
+release_id: planner-admission-repair
+title: Build admission failure supervisor input artifacts
+task_type: code_only
+budget_class: M
+objective: Implement structured supervisor input artifacts for generated-contract
+  admission failures, including validation errors, raw planner artifacts, objective
+  context, policy constraints, scope/budget signals, and validators that must be rerun.
+allowed_files:
+- src/agentic_devloop/models.py
+- src/agentic_devloop/planning.py
+- tests/test_planning.py
+forbidden_changes:
+- Do not change the public ContractPlan JSON shape required from planner backends.
+- Do not weaken TaskContract or ContractPlan strict validation.
+- Do not start release execution after admission failure in this task.
+- Do not edit release orchestration, CLI behavior, docs, configs, or existing contract
+  files.
+required_evidence:
+- git diff
+- test output for tests/test_planning.py
+- artifact payload example or assertion showing validation errors, raw planner paths,
+  objective context, policy constraints, budget/scope signals, and validators_to_rerun
+verification:
+  commands:
+  - PYTHONPATH=src .venv/bin/python -m pytest tests/test_planning.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if the artifact cannot be produced without broadening planner output schema
+  accepted from strong-model backends.
+- Stop if required context is unavailable and would require changing release execution
+  code outside allowed files.
+- Stop if verification fails twice for the same reason after targeted fixes.
+non_goals:
+- Do not implement supervisor action selection.
+- Do not mutate generated contracts as part of this task.
+- Do not persist release-level governor logs.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

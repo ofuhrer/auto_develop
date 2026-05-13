@@ -1,0 +1,45 @@
+task_id: planner-admission-repair-0004
+release_id: planner-admission-repair
+title: Persist admission repair decisions in release objective flows
+task_type: code_only
+budget_class: M
+objective: Update release and objective flows to persist admission-repair decision
+  records and governor log entries for attempts and outcomes, and verify continuation
+  into release execution after successful deterministic admission reruns.
+allowed_files:
+- src/agentic_devloop/objective.py
+- src/agentic_devloop/release.py
+- tests/test_objective.py
+- tests/test_release.py
+forbidden_changes:
+- Do not change task execution semantics after contracts are admitted.
+- Do not delete or overwrite existing run evidence artifacts.
+- Do not weaken stale worktree or stale branch fail-fast behavior.
+- Do not edit planner normalization logic outside the allowed release/objective integration
+  points.
+required_evidence:
+- git diff
+- test output for tests/test_objective.py and targeted tests/test_release.py cases
+- assertions showing persisted supervisor decision records and human-readable governor
+  log entries
+verification:
+  commands:
+  - PYTHONPATH=src .venv/bin/python -m pytest tests/test_objective.py tests/test_release.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if persistence requires changing runtime evidence directory layout incompatibly.
+- Stop if release execution can start without written contracts that passed admission
+  reruns.
+- Stop if verification fails twice for the same reason after targeted fixes.
+non_goals:
+- Do not implement new repair action types.
+- Do not change cleanup behavior.
+- Do not update user documentation.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- planner-admission-repair-0003

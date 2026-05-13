@@ -97,13 +97,16 @@ candidate_epics:
 recent_run_summaries: []
 active_epics:
 - epic_id: planner-admission-repair
+  next_recommendations: []
   retry_count: 0
   repair_count: 0
   outcome_references: []
   finalization_outcome_references: []
   unresolved_finding_references: []
   state_review_snapshot_references: []
-  updated_at: '2026-05-13T21:20:00Z'
+  metrics_snapshot_references: []
+  tuning_report_references: []
+  updated_at: '2026-05-13T21:14:06.178037Z'
 reviewed_epics: []
 completed_epic_records:
 - epic_id: governor-state-refresh
@@ -111,6 +114,7 @@ completed_epic_records:
     after a worktree-local verification-runtime failure; durable state-refresh models,
     post-cycle refresh payloads, state-refresh failure artifacts, continuation metadata,
     docs, and tests are implemented
+  next_recommendations: []
   retry_count: 1
   repair_count: 1
   outcome_references:
@@ -127,11 +131,14 @@ completed_epic_records:
     severity: moderate
     source_path: runs/20260513T210532Z_governor-state-refresh_governor-state-refresh-0005/governor-state-refresh-0005/evidence/verification.log
   state_review_snapshot_references: []
+  metrics_snapshot_references: []
+  tuning_report_references: []
   updated_at: '2026-05-13T21:20:00Z'
 - epic_id: planner-normalization-generalization
   status_reason: completed via feature/planner-normalization-generalization and merged
     into main; reusable typed planner-output normalization decision path, validator
     rerun evidence, bounded repair behavior, docs, and tests are implemented
+  next_recommendations: []
   retry_count: 0
   repair_count: 5
   outcome_references:
@@ -147,12 +154,15 @@ completed_epic_records:
     severity: moderate
     source_path: runs/20260513T195414Z_planner-normalization-generalization_release/feature_review_recheck.json
   state_review_snapshot_references: []
+  metrics_snapshot_references: []
+  tuning_report_references: []
   updated_at: '2026-05-13T20:35:00Z'
 - epic_id: autonomous-finalization-and-cleanup
   status_reason: completed via feature/autonomous-finalization-and-cleanup and merged
     into main; finalization policy models, finalization decision artifacts, PR handoff
     evidence, cleanup eligibility, state-memory finalization updates, and review-repair
     cleanup evidence handling are implemented
+  next_recommendations: []
   retry_count: 0
   repair_count: 1
   outcome_references:
@@ -163,12 +173,15 @@ completed_epic_records:
   finalization_outcome_references: []
   unresolved_finding_references: []
   state_review_snapshot_references: []
+  metrics_snapshot_references: []
+  tuning_report_references: []
   updated_at: '2026-05-13T20:05:00Z'
 - epic_id: integration-review-evidence-handoff
   status_reason: completed via feature/integration-review-evidence-handoff and merged
     into main; final verification evidence, review-context handoff, reviewer limitation
     normalization, continuation-decision artifacts, and artifact-summary links are
     implemented
+  next_recommendations: []
   retry_count: 0
   repair_count: 1
   outcome_references:
@@ -179,11 +192,14 @@ completed_epic_records:
   finalization_outcome_references: []
   unresolved_finding_references: []
   state_review_snapshot_references: []
+  metrics_snapshot_references: []
+  tuning_report_references: []
   updated_at: '2026-05-13T19:05:00Z'
 - epic_id: multi-epic-run-governor-hardening
   status_reason: completed via feature/multi-epic-run-governor-hardening; implementation
     and repair waves completed, final integration evidence was manually verified before
     merge
+  next_recommendations: []
   retry_count: 0
   repair_count: 0
   outcome_references:
@@ -199,6 +215,8 @@ completed_epic_records:
     severity: moderate
     source_path: runs/20260513T155654Z_multi-epic-run-governor-hardening_release/release_review.md
   state_review_snapshot_references: []
+  metrics_snapshot_references: []
+  tuning_report_references: []
   updated_at: '2026-05-13T16:40:00Z'
 skipped_epics: []
 blocked_epic_records: []

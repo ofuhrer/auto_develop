@@ -1,0 +1,44 @@
+task_id: planner-admission-repair-0005
+release_id: planner-admission-repair
+title: Lock non-bypassable admission safety tests
+task_type: code_only
+budget_class: M
+objective: 'Add focused coverage and narrow enforcement fixes so admission repair
+  cannot bypass hard safety violations: forbidden paths, generated artifacts, missing
+  non-derivable evidence, unsafe policy expansion, unknown verification profiles,
+  or changed task intent.'
+allowed_files:
+- src/agentic_devloop/planning.py
+- src/agentic_devloop/contracts.py
+- tests/test_planning.py
+- tests/test_runtime_supervisor.py
+forbidden_changes:
+- Do not relax existing generated-contract admission validators.
+- Do not convert hard violations into broad-but-mechanical acceptances.
+- Do not add fixtures that depend on the developer's local Git state.
+- Do not edit release orchestration or documentation in this task.
+required_evidence:
+- git diff
+- test output for safety-focused planning and supervisor tests
+- negative tests for each listed hard safety violation
+verification:
+  commands:
+  - PYTHONPATH=src .venv/bin/python -m pytest tests/test_planning.py tests/test_runtime_supervisor.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if a hard safety case can only be tested by weakening an existing validator.
+- Stop if changed task intent cannot be detected with available planner and supervisor
+  evidence.
+- Stop if verification fails twice for the same reason after targeted fixes.
+non_goals:
+- Do not add new supervisor action types.
+- Do not change release execution continuation behavior.
+- Do not update docs.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- planner-admission-repair-0003

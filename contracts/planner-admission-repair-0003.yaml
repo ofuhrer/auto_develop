@@ -1,0 +1,48 @@
+task_id: planner-admission-repair-0003
+release_id: planner-admission-repair
+title: Route admission failures through bounded repair and rerun admission
+task_type: code_only
+budget_class: L
+objective: Update the planning pipeline to route generated-contract admission failures
+  through the typed supervisor repair flow, apply supported bounded repairs, and rerun
+  deterministic ContractPlan, TaskContract, and validate_generated_contracts gates
+  before any contracts are written or release execution can continue.
+allowed_files:
+- src/agentic_devloop/planning.py
+- src/agentic_devloop/runtime_supervisor.py
+- tests/test_planning.py
+forbidden_changes:
+- Do not bypass hard safety violations for forbidden paths, generated artifacts, missing
+  non-derivable evidence, unsafe policy expansion, unknown verification profiles,
+  or changed task intent.
+- Do not write generated contracts before deterministic admission reruns pass.
+- Do not change executor, review, cleanup, or CLI behavior in this task.
+- Do not add whole-repo allowed_files patterns.
+required_evidence:
+- git diff
+- test output for tests/test_planning.py
+- tests showing repairable failures continue only after validator reruns
+- tests showing stop decisions prevent contract writing
+verification:
+  commands:
+  - PYTHONPATH=src .venv/bin/python -m pytest tests/test_planning.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if a repair path cannot prove ContractPlan, TaskContract, and validate_generated_contracts
+  reran after mutation or reclassification.
+- Stop if implementation would permit changed task intent or unsafe policy expansion.
+- Stop if verification fails twice for the same reason after targeted fixes.
+non_goals:
+- Do not persist release-level governor log entries beyond planner evidence paths.
+- Do not implement documentation updates.
+- Do not change release merge or execution semantics except preventing execution before
+  admitted plans.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- planner-admission-repair-0001
+- planner-admission-repair-0002

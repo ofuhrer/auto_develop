@@ -1,0 +1,27 @@
+release_id: planner-admission-repair
+title: Make generated-contract admission failures an autonomous continuation state
+objective: Extend the runtime supervisor and planning pipeline so generated-contract
+  admission failures are diagnosed and routed into bounded autonomous repair actions
+  such as split, narrow, reclassify broad-but-mechanical scope, replan, or stop with
+  typed evidence, then rerun deterministic admission before release execution continues.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- Generated contract admission failures produce a structured supervisor input artifact
+  that includes validation errors, raw planner artifacts, objective context, policy
+  constraints, scope/budget signals, and validator rerun requirements.
+- The supervisor can return typed actions for split, narrow, broad-but-mechanical
+  acceptance, replan, or stop, each with rationale, fallback plan, evidence paths,
+  and validators to rerun.
+- Repaired or reclassified contract plans rerun deterministic generated-contract admission
+  before any release execution starts.
+- Hard safety violations remain non-bypassable, including forbidden paths, generated
+  artifacts, missing required evidence that cannot be derived, unsafe policy expansion,
+  unknown verification profiles, and changed task intent.
+- Release/objective flows persist auditable supervisor decision records and human-readable
+  governor log entries for admission repair attempts and outcomes.
+- Focused tests cover repairable admission failures, non-repairable hard violations,
+  validator reruns, state/evidence persistence, and continuation into release execution
+  after successful repair.
+- Documentation distinguishes implemented admission-repair behavior from still-planned
+  reviewer/supervisor normalization extensions.
