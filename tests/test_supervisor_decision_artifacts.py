@@ -17,6 +17,7 @@ from agentic_devloop.supervisor_decisions import (
     FeatureReviewFindingClassification,
     FeatureReviewFindingClassificationDecision,
     FeatureReviewFindingOutcome,
+    LEGACY_VALIDATORS_UNSPECIFIED,
     ModelOutputNormalizationAction,
     ModelOutputNormalizationDecision,
     ModelOutputNormalizationOutcome,
@@ -209,6 +210,42 @@ def test_write_and_load_execution_strategy_artifact_round_trip(tmp_path: Path) -
 
     assert artifact_path.exists()
     assert loaded == decision
+
+
+def test_load_legacy_execution_strategy_artifact_adds_validators_migration_default(
+    tmp_path: Path,
+) -> None:
+    evidence_file = tmp_path / "strategy-evidence.log"
+    evidence_file.write_text("selected one-shot\n", encoding="utf-8")
+    artifact_path = tmp_path / "supervisor_decisions" / "legacy-execution-strategy.json"
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION_V1,
+                "decision_id": "legacy-strategy-001",
+                "release_id": "supervisor-execution-strategy",
+                "decided_at": "2026-05-13T08:00:00",
+                "decided_by": "supervisor-agent",
+                "rationale": "Legacy artifact predates explicit validator rerun storage.",
+                "evidence_paths": ["strategy-evidence.log"],
+                "decision_type": SupervisorDecisionType.EXECUTION_STRATEGY,
+                "risk_level": DecisionRiskLevel.MODERATE,
+                "selected_action": ExecutionStrategyAction.ONE_SHOT,
+                "outcome": ExecutionStrategyOutcome.PROCEED_ONE_SHOT,
+                "fallback_plan": "Decompose to sequential contracts if one-shot verification fails.",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.warns(UserWarning, match="legacy supervisor decision artifact"):
+        loaded = load_supervisor_decision_artifact(artifact_path)
+
+    assert isinstance(loaded, ExecutionStrategyDecision)
+    assert loaded.validators_to_rerun == [LEGACY_VALIDATORS_UNSPECIFIED]
 
 
 def test_write_and_load_model_output_normalization_artifact_round_trip(tmp_path: Path) -> None:

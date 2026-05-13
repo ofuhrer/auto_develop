@@ -33,6 +33,7 @@ from agentic_devloop.supervisor_decisions import (
     SchedulingOutcome,
     SoftBudgetAcceptanceDecision,
     SupervisorDecisionType,
+    LEGACY_VALIDATORS_UNSPECIFIED,
     parse_supervisor_decision,
 )
 
@@ -93,6 +94,22 @@ def test_parse_execution_strategy_decision() -> None:
     assert isinstance(decision, ExecutionStrategyDecision)
     assert decision.decision_type == SupervisorDecisionType.EXECUTION_STRATEGY
     assert decision.selected_action == ExecutionStrategyAction.ONE_SHOT
+
+
+def test_parse_legacy_execution_strategy_decision_adds_validators_migration_default() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.EXECUTION_STRATEGY,
+        "risk_level": DecisionRiskLevel.MODERATE,
+        "selected_action": ExecutionStrategyAction.ONE_SHOT,
+        "outcome": ExecutionStrategyOutcome.PROCEED_ONE_SHOT,
+        "fallback_plan": "Decompose into sequential contracts if one-shot verification fails.",
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, ExecutionStrategyDecision)
+    assert decision.validators_to_rerun == [LEGACY_VALIDATORS_UNSPECIFIED]
 
 
 def test_execution_strategy_rejects_invalid_action_outcome_combination() -> None:

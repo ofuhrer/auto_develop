@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import warnings
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -13,6 +14,7 @@ from agentic_devloop.models import ContractNormalizationRefusalReason, StrictMod
 
 
 SCHEMA_VERSION_V1 = "1.0"
+LEGACY_VALIDATORS_UNSPECIFIED = "legacy_schema_v1_validators_unspecified"
 
 
 class DecisionRiskLevel(StrEnum):
@@ -32,6 +34,13 @@ class SupervisorDecisionType(StrEnum):
     MODEL_OUTPUT_NORMALIZATION = "model_output_normalization"
     ENVIRONMENT_REPAIR = "environment_repair"
     FEATURE_REVIEW_FINDING_CLASSIFICATION = "feature_review_finding_classification"
+
+
+_LEGACY_VALIDATORS_DECISION_TYPES = {
+    SupervisorDecisionType.RELEASE_SCHEDULING.value,
+    SupervisorDecisionType.EXECUTION_STRATEGY.value,
+    SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION.value,
+}
 
 
 class SupervisorDecisionBase(StrictModel):
@@ -453,7 +462,24 @@ _SUPERVISOR_DECISION_ADAPTER = TypeAdapter(SupervisorDecisionRecord)
 
 
 def parse_supervisor_decision(payload: object) -> SupervisorDecisionRecord:
-    return _SUPERVISOR_DECISION_ADAPTER.validate_python(payload)
+    normalized_payload, _ = _normalize_legacy_supervisor_decision_payload(payload)
+    return _SUPERVISOR_DECISION_ADAPTER.validate_python(normalized_payload)
+
+
+def _normalize_legacy_supervisor_decision_payload(payload: object) -> tuple[object, bool]:
+    if not isinstance(payload, dict):
+        return payload, False
+    decision_type = payload.get("decision_type")
+    if (
+        payload.get("schema_version") != SCHEMA_VERSION_V1
+        or decision_type not in _LEGACY_VALIDATORS_DECISION_TYPES
+        or "validators_to_rerun" in payload
+    ):
+        return payload, False
+
+    normalized_payload = dict(payload)
+    normalized_payload["validators_to_rerun"] = [LEGACY_VALIDATORS_UNSPECIFIED]
+    return normalized_payload, True
 
 
 def supervisor_decision_artifact_path(
@@ -504,7 +530,14 @@ def load_supervisor_decision_artifact(path: Path) -> SupervisorDecisionRecord:
     if not path.exists():
         raise FileNotFoundError(f"supervisor decision artifact does not exist: {path}")
     payload = json.loads(path.read_text(encoding="utf-8"))
-    decision = parse_supervisor_decision(payload)
+    normalized_payload, migrated = _normalize_legacy_supervisor_decision_payload(payload)
+    if migrated:
+        warnings.warn(
+            f"loaded legacy supervisor decision artifact without validators_to_rerun: {path}",
+            UserWarning,
+            stacklevel=2,
+        )
+    decision = _SUPERVISOR_DECISION_ADAPTER.validate_python(normalized_payload)
     _validate_evidence_paths(decision=decision, artifact_path=path)
     return decision
 
