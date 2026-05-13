@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -710,11 +711,13 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
     assert '"event_type": "epic_selected"' in events_text
     assert '"event_type": "objective_generation_completed"' in events_text
     assert '"event_type": "contract_generation_completed"' in events_text
+    assert '"event_type": "child_release_started"' in events_text
     assert '"event_type": "child_release_completed"' in events_text
     assert '"event_type": "release_completed"' in events_text
     assert '"event_type": "feature_review_completed"' in events_text
     assert '"event_type": "final_verification_completed"' in events_text
     assert '"event_type": "repair_decision"' in events_text
+    assert '"event_type": "finalization_decision"' in events_text
     assert '"event_type": "finalization_completed"' in events_text
     assert '"event_type": "cleanup_eligibility_evaluated"' in events_text
     assert '"event_type": "stop_reason_recorded"' in events_text
@@ -741,6 +744,30 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
     assert str(cycle.evidence_manifest.finalization_summary_path) in events_text
     assert str(cycle.evidence_manifest.repo_state_proposal_plan_path) in events_text
     assert '"event_type": "governor_completed"' in events_text
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "runs" / run_id / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    child_start = next(record for record in records if record["event_type"] == "child_release_started")
+    assert child_start["context"]["phase"] == "child_release_started"
+    assert child_start["context"]["cycle_index"] == 1
+    assert child_start["context"]["epic_id"] == "epic-1"
+    assert child_start["context"]["release_id"] == "demo-epic-1"
+    finalization_decision = next(
+        record for record in records if record["event_type"] == "finalization_decision"
+    )
+    assert finalization_decision["context"]["phase"] == "finalization_decision"
+    assert finalization_decision["context"]["decision"] == "accepted"
+    assert finalization_decision["context"]["cycle_index"] == 1
+    assert finalization_decision["context"]["epic_id"] == "epic-1"
+    assert finalization_decision["context"]["release_id"] == "demo-epic-1"
+    finalization_completed = next(
+        record for record in records if record["event_type"] == "finalization_completed"
+    )
+    assert finalization_completed["context"]["phase"] == "finalization_completed"
+    assert finalization_completed["context"]["decision"] == "accepted"
+    assert finalization_completed["context"]["outcome"] == "completed"
+    assert finalization_completed["context"]["details"]["mode"] == "push-feature"
 
 
 def test_run_governor_outputs_blocked_finalization_state(monkeypatch, capsys, tmp_path) -> None:

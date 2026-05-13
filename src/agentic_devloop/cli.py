@@ -775,6 +775,9 @@ def main(argv: list[str] | None = None) -> int:
             artifacts: list[Path],
             epic_id: str | None = None,
             release_id: str | None = None,
+            decision: str | None = None,
+            outcome: str | None = None,
+            details: dict[str, str | int | float | bool] | None = None,
         ) -> None:
             governor_writer.write(
                 event_type=event_type,
@@ -785,7 +788,10 @@ def main(argv: list[str] | None = None) -> int:
                     cycle_index=cycle_index,
                     epic_id=epic_id,
                     release_id=release_id,
+                    decision=decision,
+                    outcome=outcome,
                     artifact_count=len(artifacts),
+                    details=details,
                 ),
             )
 
@@ -898,6 +904,20 @@ def main(argv: list[str] | None = None) -> int:
                 )
             if cycle.release is not None:
                 cleanup_handoff_note = ""
+                write_cycle_event(
+                    cycle_index=index,
+                    event_type=GovernorEventType.CHILD_RELEASE_STARTED,
+                    message=f"cycle={index} release_id={cycle.release.release_id} child_release_started",
+                    artifacts=_existing_paths(
+                        [
+                            getattr(manifest, "release_summary_path", None) if manifest is not None else None,
+                            getattr(manifest, "release_log_path", None) if manifest is not None else None,
+                            getattr(manifest, "release_review_path", None) if manifest is not None else None,
+                        ]
+                    ),
+                    epic_id=cycle.selected_epic_id,
+                    release_id=cycle.release.release_id,
+                )
                 child_release_artifacts = _existing_paths(
                     [
                         getattr(manifest, "release_summary_path", None) if manifest is not None else None,
@@ -1003,6 +1023,22 @@ def main(argv: list[str] | None = None) -> int:
                             release_id=cycle.release.release_id,
                         )
                 if args.release_finalize != "none" or getattr(cycle, "finalization_result", None) is not None:
+                    write_cycle_event(
+                        cycle_index=index,
+                        event_type=GovernorEventType.FINALIZATION_DECISION,
+                        message=(
+                            f"cycle={index} release_id={cycle.release.release_id} "
+                            f"mode={args.release_finalize} decision={cycle.release.decision}"
+                        ),
+                        artifacts=cycle_artifacts["decision"] + cycle_artifacts["finalization"],
+                        epic_id=cycle.selected_epic_id,
+                        release_id=cycle.release.release_id,
+                        decision=str(cycle.release.decision),
+                        outcome="blocked"
+                        if getattr(cycle, "blocked_finalization", None) is not None
+                        else "continue",
+                        details={"mode": args.release_finalize},
+                    )
                     governor_writer.write(
                         event_type=GovernorEventType.FINALIZATION_COMPLETED,
                         message=(
@@ -1012,6 +1048,18 @@ def main(argv: list[str] | None = None) -> int:
                             f"{cleanup_handoff_note}"
                         ),
                         artifacts=cycle_artifacts["finalization"] + cycle_artifacts["cleanup"],
+                        context=GovernorEventContext(
+                            phase=GovernorEventType.FINALIZATION_COMPLETED.value,
+                            cycle_index=index,
+                            epic_id=cycle.selected_epic_id,
+                            release_id=cycle.release.release_id,
+                            decision=str(cycle.release.decision),
+                            outcome="blocked"
+                            if getattr(cycle, "blocked_finalization", None) is not None
+                            else "completed",
+                            artifact_count=len(cycle_artifacts["finalization"] + cycle_artifacts["cleanup"]),
+                            details={"mode": args.release_finalize},
+                        ),
                     )
             cycles_for_output.append(cycle_for_output)
 
