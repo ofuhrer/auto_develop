@@ -46,6 +46,7 @@ Implemented capabilities include:
 - `run-task`, `run-release`, `plan-backlog`, `plan-release`, `run-objective`, `status`, and `cleanup` commands;
 - `run-backlog` for chaining backlog planning into objective and release execution;
 - supervisor-owned execution-strategy selection for one-epic releases, including `one_shot`, `sequential_contracts`, `parallel_contracts`, `stacked_branches`, `patch_handoff`, `replan`, and `stop` outcomes;
+- one-shot planning/input materialization: `one_shot` currently writes a bounded `one_shot_execution_input.json` and returns `release: null`; the one-shot worker execution path is still planned, so `run-backlog` keeps executable decomposition as its default until that runner exists;
 - bounded planner-output normalization for repairable generated-contract drift;
 - typed supervisor decision records under `runs/<run-id>/**/supervisor_decisions/` for auditable scheduling, repair, and soft-budget decisions;
 - governor-level log artifacts for `run-backlog` invocations;
@@ -62,7 +63,7 @@ Important remaining gaps:
 
 - normalization/repair of useful planner, reviewer, and supervisor outputs before strict typed validation hard-stops execution;
 - multi-epic governor looping beyond the current one-epic service boundary;
-- the shipped one-epic execution-strategy seam, with the remaining gap being a broader N-epic governor that can consume it across repeated cycles;
+- the shipped one-epic execution-strategy seam, with the remaining gaps being one-shot worker execution and a broader N-epic governor that can consume it across repeated cycles;
 - full pre-epic repository state-review decision pass over source state, branches, docs, repo-state memory, recent runs, metrics, and artifacts before selecting the next epic;
 - multi-epic orchestration of the implemented release-local feature-review/repair loop;
 - top-level governor log stream for monitoring an N-epic run across backlog planning, contract generation, release execution, repair, review, finalization, and state refresh;

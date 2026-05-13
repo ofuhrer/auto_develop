@@ -50,6 +50,19 @@
   snapshots, but it does not yet run a full agent-driven state review before
   prioritization or loop over the next N highest-reward epics.
 
+## Current Gap: one-shot worker execution
+
+- The `supervisor-execution-strategy` dogfood run shipped the typed
+  execution-strategy seam and bounded `one_shot_execution_input.json`
+  materialization.
+- It does not yet execute that one-shot input with a worker, verification,
+  evidence bundle, review, and feature-branch finalization.
+- Until the one-shot runner exists, `run-backlog` should keep executable
+  contract decomposition as its default; explicit `one_shot` selection is a
+  planning/input artifact path and may return `release: null`.
+- The next strategy increment should implement a one-shot worker runner instead
+  of continuing to describe one-shot as fully executable.
+
 ## Current Gap: review-loop convergence
 
 - `release_review.md` is a deterministic evidence summary; semantic review now
