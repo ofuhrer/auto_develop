@@ -1076,6 +1076,200 @@ def test_governor_loop_distinguishes_attempted_and_accepted_counts(tmp_path) -> 
     assert result.stop_reason == GovernorStopReason.RELEASE_NOT_ACCEPTED
 
 
+def test_governor_loop_stops_with_no_actionable_work_for_completed_epic_before_objective_handoff(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    runs_dir = tmp_path / "runs"
+    objectives_dir = tmp_path / "objectives"
+    roadmap_path = tmp_path / "ROADMAP.md"
+    roadmap_path.write_text("# Roadmap\n", encoding="utf-8")
+    config_dir = _write_project_config(tmp_path)
+    run_objective_calls = 0
+
+    plan_path = runs_dir / "epic-0001" / "backlog_plan.json"
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text("{}", encoding="utf-8")
+    plan = parse_backlog_planner_output(
+        {
+            "project_id": "demo",
+            "goal": "Goal.",
+            "roadmap_path": str(roadmap_path),
+            "planner": "deterministic",
+            "selected_epic_id": "epic-0001",
+            "warnings": [],
+            "epics": [
+                {
+                    "epic_id": "epic-0001",
+                    "title": "Epic 1",
+                    "objective": "Do epic 1.",
+                    "rationale": "Because.",
+                    "priority": 1,
+                    "source_refs": ["roadmap:1"],
+                    "acceptance_criteria": ["It works."],
+                    "suggested_release_id": "demo-epic-0001",
+                }
+            ],
+        },
+        project_id="demo",
+    )
+
+    def fake_plan_backlog(**_kwargs):
+        return SimpleNamespace(plan_path=plan_path, plan=plan, objective_path=None)
+
+    def fake_run_objective(**_kwargs):
+        nonlocal run_objective_calls
+        run_objective_calls += 1
+        raise AssertionError("run_objective should not be called for no actionable work")
+
+    state_store = StateStore(tmp_path / "repo_state" / "demo" / "backlog_state.yaml")
+    state_store.mark_completed_epic("epic-0001")
+
+    result = GovernorLoop(
+        plan_backlog=fake_plan_backlog,
+        run_objective=fake_run_objective,
+        state_store=state_store,
+    ).run_epics(
+        project_id="demo",
+        goal="Run one epic.",
+        roadmap_path=roadmap_path,
+        selected_epic_id=None,
+        epic_count=1,
+        config_dir=config_dir,
+        contracts_dir=tmp_path / "contracts",
+        runs_dir=runs_dir,
+        objectives_dir=objectives_dir,
+        mode="deterministic",
+        planner_backend=None,
+        objective_planner_backend=FakeObjectivePlannerBackend(),
+        executor=FakeExecutor(),
+        verification_timeout_seconds=60,
+        allow_dirty=True,
+        commit_on_accept=False,
+        merge_on_accept=False,
+        push_on_accept=False,
+        release_finalize="none",
+        integration_branch=None,
+        stop_on_failure=True,
+        execution_mode="sequential",
+        debug_keep_artifacts=False,
+        progress=None,
+        now=datetime(2026, 5, 12, 12, 0, tzinfo=UTC),
+    )
+
+    assert run_objective_calls == 0
+    assert result.stop_reason == "no_actionable_work"
+    assert result.attempted_epic_count == 1
+    assert result.accepted_epic_count == 0
+    assert len(result.cycles) == 1
+    assert result.cycles[0].release is None
+    assert result.cycles[0].backlog_plan_path == plan_path
+    assert result.cycles[0].state_refresh_summary_path is not None
+    assert result.cycles[0].evidence_manifest is not None
+    assert result.cycles[0].evidence_manifest.state_refresh_summary_path is not None
+
+
+def test_governor_loop_stops_on_repeated_epic_when_no_state_store_guard_exists(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    runs_dir = tmp_path / "runs"
+    objectives_dir = tmp_path / "objectives"
+    roadmap_path = tmp_path / "ROADMAP.md"
+    roadmap_path.write_text("# Roadmap\n", encoding="utf-8")
+    config_dir = _write_project_config(tmp_path)
+
+    def plan_for(index: int):
+        plan_path = runs_dir / f"epic-{index}" / "backlog_plan.json"
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text("{}", encoding="utf-8")
+        return SimpleNamespace(
+            plan_path=plan_path,
+            objective_path=None,
+            plan=parse_backlog_planner_output(
+                {
+                    "project_id": "demo",
+                    "goal": "Goal.",
+                    "roadmap_path": str(roadmap_path),
+                    "planner": "deterministic",
+                    "selected_epic_id": "epic-0001",
+                    "warnings": [],
+                    "epics": [
+                        {
+                            "epic_id": "epic-0001",
+                            "title": "Epic 1",
+                            "objective": "Do epic 1.",
+                            "rationale": "Because.",
+                            "priority": 1,
+                            "source_refs": ["roadmap:1"],
+                            "acceptance_criteria": ["It works."],
+                            "suggested_release_id": "demo-epic-0001",
+                        }
+                    ],
+                },
+                project_id="demo",
+            ),
+        )
+
+    plans = [plan_for(1), plan_for(2)]
+    call_count = 0
+
+    def fake_plan_backlog(**_kwargs):
+        nonlocal call_count
+        planned = plans[call_count]
+        call_count += 1
+        return planned
+
+    def fake_run_objective(**kwargs):
+        objective_path = kwargs["objective_path"]
+        release_id = objective_path.stem
+        release_summary_path = runs_dir / release_id / "release_summary.json"
+        release_summary_path.parent.mkdir(parents=True, exist_ok=True)
+        release_summary_path.write_text("{}", encoding="utf-8")
+        return SimpleNamespace(
+            release_id=release_id,
+            planning=SimpleNamespace(plan_path=runs_dir / release_id / "contract_plan.json"),
+            release=SimpleNamespace(
+                release_id=release_id,
+                summary_path=release_summary_path,
+                metrics_path=runs_dir / release_id / "release_metrics.json",
+                budget_path=runs_dir / release_id / "release_budget.json",
+                tuning_path=runs_dir / release_id / "release_tuning.md",
+                decision="accepted",
+            ),
+        )
+
+    result = GovernorLoop(plan_backlog=fake_plan_backlog, run_objective=fake_run_objective).run_epics(
+        project_id="demo",
+        goal="Run repeated epic.",
+        roadmap_path=roadmap_path,
+        selected_epic_id=None,
+        epic_count=2,
+        config_dir=config_dir,
+        contracts_dir=tmp_path / "contracts",
+        runs_dir=runs_dir,
+        objectives_dir=objectives_dir,
+        mode="deterministic",
+        planner_backend=None,
+        objective_planner_backend=FakeObjectivePlannerBackend(),
+        executor=FakeExecutor(),
+        verification_timeout_seconds=60,
+        allow_dirty=True,
+        commit_on_accept=False,
+        merge_on_accept=False,
+        push_on_accept=False,
+        release_finalize="none",
+        integration_branch=None,
+        stop_on_failure=True,
+        execution_mode="sequential",
+        debug_keep_artifacts=False,
+        progress=None,
+        now=datetime(2026, 5, 12, 12, 0, tzinfo=UTC),
+    )
+
+    assert result.attempted_epic_count == 2
+    assert result.accepted_epic_count == 2
+    assert result.stop_reason == GovernorStopReason.REPEATED_EPIC_SELECTED
+
+
 def _write_yaml(path: Path, data: dict[str, object]) -> None:
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
 

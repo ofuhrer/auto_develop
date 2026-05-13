@@ -156,7 +156,7 @@ class GovernorLoop:
 
         cycles: list[BacklogRunResult] = []
         seen_epic_ids: set[str] = set()
-        stop_reason = GovernorStopReason.REQUESTED_EPIC_COUNT_REACHED
+        stop_reason: GovernorStopReason | str = GovernorStopReason.REQUESTED_EPIC_COUNT_REACHED
         for cycle_index in range(1, epic_count + 1):
             if progress is not None:
                 progress(f"event=governor_cycle_started cycle={cycle_index} epic_count={epic_count}")
@@ -187,6 +187,9 @@ class GovernorLoop:
                 now=now,
             )
             cycles.append(result)
+            if result.release is None and result.release_id == "no_actionable_work":
+                stop_reason = "no_actionable_work"
+                break
 
             if result.selected_epic_id in seen_epic_ids:
                 stop_reason = GovernorStopReason.REPEATED_EPIC_SELECTED
@@ -307,7 +310,40 @@ class GovernorLoop:
                 "state_refresh_summary_path": plan_result.plan.state_refresh_summary_path or state_refresh_summary_path,
             }
         )
-        epic = select_epic(plan, selected_epic_id=selected_epic_id)
+        explicit_epic_id = selected_epic_id
+        epic_id = explicit_epic_id or plan.selected_epic_id
+        if epic_id is None:
+            return self._no_actionable_result(
+                plan=plan,
+                plan_path=plan_result.plan_path,
+                state_refresh_summary_path=state_refresh_summary_path,
+                state_review_snapshot_path=state_review_snapshot_path,
+                reason="no-actionable-work:backlog plan did not select an epic",
+            )
+        epic = next((item for item in plan.epics if item.epic_id == epic_id), None)
+        if epic is None:
+            if explicit_epic_id is not None:
+                raise ValueError(f"selected_epic_id not found in backlog plan: {epic_id}")
+            return self._no_actionable_result(
+                plan=plan,
+                plan_path=plan_result.plan_path,
+                state_refresh_summary_path=state_refresh_summary_path,
+                state_review_snapshot_path=state_review_snapshot_path,
+                reason=f"no-actionable-work:planner selected missing epic {epic_id}",
+            )
+        no_actionable_reason = self._no_actionable_reason_for_selected_epic(
+            epic_id=epic.epic_id,
+            selected_epic_id=selected_epic_id,
+        )
+        if no_actionable_reason is not None:
+            return self._no_actionable_result(
+                plan=plan,
+                plan_path=plan_result.plan_path,
+                state_refresh_summary_path=state_refresh_summary_path,
+                state_review_snapshot_path=state_review_snapshot_path,
+                reason=no_actionable_reason,
+                epic=epic,
+            )
         if self._state_store is not None:
             self._state_store.mark_active_epic(epic.epic_id)
         objective, objective_path, created_objective = ensure_objective_for_epic(
@@ -399,6 +435,74 @@ class GovernorLoop:
             release_metrics_path=release.metrics_path if release is not None else None,
             release_budget_path=release.budget_path if release is not None else None,
             release_tuning_path=release.tuning_path if release is not None else None,
+            evidence_manifest=evidence_manifest,
+            state_refresh_summary_path=plan.state_refresh_summary_path,
+        )
+
+    def _no_actionable_reason_for_selected_epic(
+        self,
+        *,
+        epic_id: str,
+        selected_epic_id: str | None,
+    ) -> str | None:
+        if selected_epic_id is not None:
+            return None
+        state = self._state_store.load() if self._state_store is not None else None
+        if state is None:
+            return None
+        if any(record.epic_id == epic_id for record in state.skipped_epics):
+            return f"no-actionable-work:epic {epic_id} already skipped"
+        if epic_id in state.completed_epics:
+            return f"no-actionable-work:epic {epic_id} already completed"
+        if epic_id in state.blocked_epics:
+            return f"no-actionable-work:epic {epic_id} currently blocked"
+        if any(record.epic_id == epic_id for record in state.reviewed_epics):
+            return f"no-actionable-work:epic {epic_id} already reviewed in prior cycles"
+        if any(record.epic_id == epic_id for record in state.active_epics):
+            return f"no-actionable-work:epic {epic_id} already attempted in active memory"
+        return None
+
+    def _no_actionable_result(
+        self,
+        *,
+        plan: BacklogPlan,
+        plan_path: Path,
+        state_refresh_summary_path: Path | None,
+        state_review_snapshot_path: Path | None,
+        reason: str,
+        epic: BacklogEpic | None = None,
+    ) -> BacklogRunResult:
+        selected_epic_id = epic.epic_id if epic is not None else (plan.selected_epic_id or "no-actionable-work")
+        if self._state_store is not None and epic is not None:
+            self._state_store.mark_skipped_epic(
+                epic.epic_id,
+                status_reason=(
+                    f"{reason}; backlog_plan_path={plan_path}; "
+                    f"state_refresh_summary_path={state_refresh_summary_path}; "
+                    f"state_review_snapshot_path={state_review_snapshot_path}"
+                ),
+            )
+        placeholder_objective = ReleaseObjective(
+            release_id="no_actionable_work",
+            title="No actionable work",
+            objective="Governor stopped before objective handoff because no actionable epic was available.",
+            non_goals=[],
+            acceptance_criteria=["No release objective is handed off when no actionable epic is available."],
+        )
+        evidence_manifest = BacklogEvidenceManifest(
+            backlog_plan_path=plan_path,
+            state_review_snapshot_path=plan.state_review_snapshot_path,
+            state_refresh_summary_path=plan.state_refresh_summary_path,
+        )
+        return BacklogRunResult(
+            selected_epic_id=selected_epic_id,
+            plan_path=plan_path,
+            backlog_plan_path=plan_path,
+            plan=plan,
+            objective_path=Path("no_actionable_work.yaml"),
+            objective=placeholder_objective,
+            release_id="no_actionable_work",
+            release=None,
             evidence_manifest=evidence_manifest,
             state_refresh_summary_path=plan.state_refresh_summary_path,
         )
