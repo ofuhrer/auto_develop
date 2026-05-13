@@ -1,0 +1,54 @@
+task_id: planner-normalization-generalization-0005
+release_id: planner-normalization-generalization
+title: Document implemented planner normalization path and remaining extensions
+task_type: documentation
+budget_class: S
+objective: Update docs and repo-state notes to describe the implemented shared typed
+  normalization decision path for planner-output normalization, including decision
+  artifact contents, raw artifact references, validation errors, selected action,
+  fallback plan, validators rerun, normalized artifact references, refusal behavior,
+  and strict hard-gate reruns. Clearly mark reviewer-output and supervisor-output
+  normalization extensions as planned unless they are already implemented in code.
+allowed_files:
+- docs/README.md
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/design/SUPERVISOR_DECISIONS.md
+- docs/design/ARCHITECTURE.md
+- docs/design/ROADMAP_AND_BACKLOG.md
+- repo_state/auto_develop/backlog_state.yaml
+- repo_state/auto_develop/architecture_summary.md
+forbidden_changes:
+- Do not describe planned reviewer or supervisor normalization extensions as implemented
+  unless production code and tests in this release implement them.
+- Do not remove existing operational guidance for release logs, review artifacts, or
+  strict supervisor decision loading.
+- Do not edit source code or tests in this documentation task.
+- Do not add generated runtime evidence under runs/.
+required_evidence:
+- git diff
+- changed-files list
+- Documentation review note identifying implemented behavior versus planned extensions
+- git diff --check output
+verification:
+  commands:
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if documentation would need to claim unimplemented behavior to satisfy the
+  acceptance criteria.
+- Stop if repo-state updates conflict with current backlog focus or completed-release
+  notes.
+- Stop if documentation changes require source behavior changes outside this contract.
+non_goals:
+- Do not modify normalization implementation in this task.
+- Do not add new contracts or objectives.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- planner-normalization-generalization-0001
+- planner-normalization-generalization-0002
+- planner-normalization-generalization-0003

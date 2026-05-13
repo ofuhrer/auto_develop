@@ -1,0 +1,64 @@
+task_id: planner-normalization-generalization-0002
+release_id: planner-normalization-generalization
+title: Move planner schema-drift repairs behind reusable normalization path
+task_type: code_only
+budget_class: L
+objective: Refactor planner-output parsing and contract normalization so bounded
+  planner repairs flow through the reusable supervisor normalization path introduced
+  by planner-normalization-generalization-0001. Preserve existing bounded repairs
+  for wrapper fields, enum aliases, depends_on placement on generated contracts,
+  narrow JSON tail defects, missing required_evidence defaults, and worktree-local
+  verification runtime rewrites. The normalized planner output must be strict ContractPlan/TaskContract
+  data before admission.
+allowed_files:
+- src/agentic_devloop/planning.py
+- src/agentic_devloop/contracts.py
+- src/agentic_devloop/runtime_supervisor.py
+- src/agentic_devloop/supervisor_decisions.py
+- src/agentic_devloop/models.py
+- tests/test_planning.py
+- tests/test_contract_normalization.py
+- tests/test_runtime_supervisor.py
+forbidden_changes:
+- Do not broaden allowed_files, forbidden_changes, depends_on, task intent, or release_id
+  during normalization.
+- Do not invent hard evidence beyond deterministic defaults for git diff and changed-files
+  list.
+- Do not weaken verification commands, remove verification commands, or replace focused
+  verification with less strict checks.
+- Do not accept ambiguous schema drift where canonical and alias fields conflict.
+- Do not change planner prompt requirements or ContractPlan JSON shape except to record
+  normalization evidence in warnings where already supported.
+required_evidence:
+- git diff
+- changed-files list
+- Focused pytest output for planner parsing and contract normalization tests
+- Test evidence that each supported repair type still succeeds through the shared
+  normalization path
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_planning.py tests/test_contract_normalization.py tests/test_runtime_supervisor.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if preserving current repair behavior requires accepting semantic changes to
+  task scope or intent.
+- Stop if normalization can mutate allowed_files, forbidden_changes, or depends_on
+  after strict contract construction.
+- Stop if JSON tail repair becomes a broad invalid-JSON recovery mechanism instead
+  of a narrow known defect repair.
+- Stop if worktree runtime repair cannot identify a safe runtime without preserving
+  or refusing the original command explicitly.
+non_goals:
+- Do not implement reviewer-output or supervisor-output normalization extensions beyond
+  shared helper shape.
+- Do not modify release execution scheduling.
+- Do not update docs in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- planner-normalization-generalization-0001

@@ -1,0 +1,61 @@
+task_id: planner-normalization-generalization-0003
+release_id: planner-normalization-generalization
+title: Record validator rerun evidence before contract admission continues
+task_type: code_only
+budget_class: M
+objective: Wire generated contract admission so normalized planner output is admitted
+  only after the shared normalization decision records validators_to_rerun and the
+  deterministic validators are rerun. Persist or surface validator rerun evidence
+  in release planning artifacts before release execution can continue. Refusals must
+  stop planning with PlannerNormalizationError and typed stop evidence.
+allowed_files:
+- src/agentic_devloop/planning.py
+- src/agentic_devloop/release.py
+- src/agentic_devloop/artifacts.py
+- src/agentic_devloop/evidence.py
+- src/agentic_devloop/models.py
+- tests/test_planning.py
+- tests/test_release.py
+- tests/test_supervisor_decision_artifacts.py
+forbidden_changes:
+- Do not let release execution continue after failed ContractPlan, TaskContract, or
+  validate_generated_contracts reruns.
+- Do not convert hard validation failures into warnings.
+- Do not bypass stale worktree, stale branch, unsafe overlap, or allowed-file policy
+  gates.
+- Do not change accepted contract file format except for existing warning/evidence
+  fields that can already carry normalization artifact references.
+required_evidence:
+- git diff
+- changed-files list
+- Focused pytest output for planning and release admission tests
+- Test evidence showing applied normalization writes a decision artifact and reruns
+  validators before contracts are written
+- Test evidence showing refused normalization stops before contract writing or release
+  execution
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_planning.py tests/test_release.py tests/test_supervisor_decision_artifacts.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if validator rerun evidence cannot be made inspectable without broad release
+  artifact redesign.
+- Stop if normalized output can be written to contracts before validate_generated_contracts
+  succeeds.
+- Stop if refusal behavior loses PlannerNormalizationError stop evidence.
+- Stop if release execution behavior changes for planner output that already validates
+  strictly.
+non_goals:
+- Do not add new normalization repair categories in this task.
+- Do not alter finalization or cleanup behavior.
+- Do not update user documentation in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- planner-normalization-generalization-0001
+- planner-normalization-generalization-0002

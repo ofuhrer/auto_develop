@@ -1,0 +1,24 @@
+release_id: planner-normalization-generalization
+title: Generalize Planner Output Normalization
+objective: Move bounded planner-output normalization behind a reusable typed supervisor
+  decision/action path that can repair common schema drift before strict contract
+  admission, while preserving deterministic hard gates and validator reruns.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- A typed supervisor normalization decision artifact exists for planner-output normalization
+  attempts, including raw artifact references, validation errors, selected repair
+  action, rationale, fallback plan, and validators rerun.
+- Normalization supports bounded repairs for wrapper fields, enum aliases, dependency
+  placement drift, JSON tail defects, missing required evidence defaults, and verification
+  runtime assumptions when meaning and scope are unchanged.
+- Strict deterministic validation still rejects normalization that broadens scope,
+  changes task intent, invents missing hard evidence, weakens verification, or violates
+  allowed-file/forbidden-change policy.
+- Generated contract admission consumes normalized planner output through the shared
+  decision path and records validator rerun evidence before release execution continues.
+- Focused tests cover successful bounded normalization, refusal on unsafe semantic
+  changes, artifact persistence, validator reruns, and preservation of existing planner-output
+  normalization behavior.
+- Documentation and repo-state notes distinguish the implemented generalized normalization
+  path from remaining planned reviewer/supervisor normalization extensions.

@@ -6,7 +6,7 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
 current_focus: planner-normalization-generalization
-active_epic: null
+active_epic: planner-normalization-generalization
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -85,7 +85,15 @@ candidate_epics:
   priority: 10
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
-active_epics: []
+active_epics:
+- epic_id: planner-normalization-generalization
+  retry_count: 0
+  repair_count: 0
+  outcome_references: []
+  finalization_outcome_references: []
+  unresolved_finding_references: []
+  state_review_snapshot_references: []
+  updated_at: '2026-05-13T19:50:31.822771Z'
 reviewed_epics: []
 completed_epic_records:
 - epic_id: autonomous-finalization-and-cleanup
@@ -100,6 +108,7 @@ completed_epic_records:
     outcome: accepted
     run_summary_path: runs/20260513T191351Z_autonomous-finalization-and-cleanup_release/release_summary.json
     recorded_at: '2026-05-13T20:05:00Z'
+  finalization_outcome_references: []
   unresolved_finding_references: []
   state_review_snapshot_references: []
   updated_at: '2026-05-13T20:05:00Z'
@@ -115,6 +124,7 @@ completed_epic_records:
     outcome: accepted
     run_summary_path: runs/20260513T182346Z_integration-review-evidence-handoff_release/release_summary.json
     recorded_at: '2026-05-13T19:05:00Z'
+  finalization_outcome_references: []
   unresolved_finding_references: []
   state_review_snapshot_references: []
   updated_at: '2026-05-13T19:05:00Z'
@@ -129,6 +139,7 @@ completed_epic_records:
     outcome: accepted
     run_summary_path: runs/20260513T155654Z_multi-epic-run-governor-hardening_release/release_summary.json
     recorded_at: '2026-05-13T16:40:00Z'
+  finalization_outcome_references: []
   unresolved_finding_references:
   - finding_id: integration-review-evidence-handoff
     summary: Final integration review needs first-class full-context and verification

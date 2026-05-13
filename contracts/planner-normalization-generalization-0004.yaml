@@ -1,0 +1,56 @@
+task_id: planner-normalization-generalization-0004
+release_id: planner-normalization-generalization
+title: Add focused normalization safety and regression tests
+task_type: code_only
+budget_class: M
+objective: Add or update focused tests for planner-output normalization through the
+  shared supervisor decision path. Tests must cover successful bounded repairs for
+  wrapper fields, enum aliases, dependency placement drift, JSON tail defects, missing
+  evidence defaults, and verification runtime assumptions; refusal for unsafe semantic
+  changes including broadened allowed_files, changed intent, invented hard evidence,
+  weakened verification, and allowed-file/forbidden-change policy violations; persisted
+  artifacts for applied and refused decisions; validator rerun metadata and rerun
+  behavior; and preservation of existing planner-output normalization behavior.
+allowed_files:
+- tests/test_planning.py
+- tests/test_contract_normalization.py
+- tests/test_supervisor_decision_artifacts.py
+- tests/test_runtime_supervisor.py
+- tests/test_release.py
+- tests/fixtures/**
+forbidden_changes:
+- Do not modify production source except if a test exposes a small bug that blocks
+  this test contract; in that case stop and request a follow-up implementation contract.
+- Do not use the developer's local Git state or persistent runs directory in tests.
+- Do not create broad golden fixtures that obscure the specific behavior under test.
+- Do not weaken existing assertions to fit the refactor.
+required_evidence:
+- git diff
+- changed-files list
+- Focused pytest output for all modified test modules
+- A short test coverage note listing each acceptance criterion behavior covered by
+  a test name
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_planning.py tests/test_contract_normalization.py tests/test_supervisor_decision_artifacts.py
+    tests/test_runtime_supervisor.py tests/test_release.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if required coverage needs production changes outside the test allowed_files.
+- Stop if tests require network access or non-temporary repositories.
+- Stop if fixture updates would encode generated runtime evidence from runs/.
+- Stop if a failure indicates normalization is weakening a deterministic hard gate.
+non_goals:
+- Do not implement new production normalization logic in this test-focused task.
+- Do not update documentation in this task.
+scientific_assumptions: []
+fixture_changes_allowed: true
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- planner-normalization-generalization-0001
+- planner-normalization-generalization-0002
+- planner-normalization-generalization-0003

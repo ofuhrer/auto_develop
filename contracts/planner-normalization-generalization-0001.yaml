@@ -1,0 +1,53 @@
+task_id: planner-normalization-generalization-0001
+release_id: planner-normalization-generalization
+title: Add reusable model-output normalization decision API
+task_type: code_only
+budget_class: M
+objective: Add or refactor a reusable model-output normalization decision/action
+  API for planner-output normalization. It must preserve the existing ModelOutputNormalizationDecision
+  schema requirements and expose enough typed structure for callers to record raw
+  planner artifacts, validation errors, selected action, rationale, fallback plan,
+  validators_to_rerun, normalized_artifact_path, and refusal_reason. Persist decisions
+  through write_supervisor_decision_artifact and keep load-time evidence validation
+  strict.
+allowed_files:
+- src/agentic_devloop/supervisor_decisions.py
+- src/agentic_devloop/runtime_supervisor.py
+- src/agentic_devloop/models.py
+- tests/test_supervisor_decision_artifacts.py
+- tests/test_runtime_supervisor.py
+forbidden_changes:
+- Do not weaken existing supervisor decision schema validation or evidence-path validation.
+- Do not remove or rename existing decision_type enum values.
+- Do not make legacy validators_to_rerun sentinels count as runnable validators for
+  applied normalization.
+- Do not change release scheduling, execution strategy, feature review, or finalization
+  decision semantics except for shared helper reuse required by this task.
+required_evidence:
+- git diff
+- changed-files list
+- Focused pytest output for supervisor decision artifact and runtime supervisor tests
+- Example serialized applied normalization decision and refused normalization decision
+  from tests
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_supervisor_decision_artifacts.py tests/test_runtime_supervisor.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if the reusable API requires broad rewrites outside supervisor decision/runtime
+  supervisor/model definitions.
+- Stop if an applied normalization decision can be created without concrete validators_to_rerun.
+- Stop if refusal records can omit refusal_reason.
+- Stop if existing supervisor decision artifact round-trip tests regress.
+non_goals:
+- Do not implement new planner repair rules in this task.
+- Do not change generated contract admission behavior in this task.
+- Do not update documentation in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []
