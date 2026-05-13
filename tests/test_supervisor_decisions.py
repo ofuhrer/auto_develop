@@ -12,6 +12,9 @@ from agentic_devloop.supervisor_decisions import (
     DecisionRiskLevel,
     EnvironmentRepairDecision,
     EnvironmentRepairOutcome,
+    ExecutionStrategyAction,
+    ExecutionStrategyDecision,
+    ExecutionStrategyOutcome,
     FindingAdjudicationOutcome,
     FindingSeverity,
     ReleaseSchedulingDecision,
@@ -65,6 +68,67 @@ def test_parse_release_scheduling_decision() -> None:
     assert decision.selected_action == ReleaseSchedulingAction.SEQUENTIAL
     assert decision.fallback_plan.startswith("Rerun overlap analysis")
     assert isinstance(decision.staleness_inputs, ReleaseSchedulingStalenessInputs)
+
+
+def test_parse_execution_strategy_decision() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.EXECUTION_STRATEGY,
+        "risk_level": DecisionRiskLevel.MODERATE,
+        "selected_action": ExecutionStrategyAction.ONE_SHOT,
+        "outcome": ExecutionStrategyOutcome.PROCEED_ONE_SHOT,
+        "fallback_plan": "Decompose into sequential contracts if one-shot verification fails.",
+        "validators_to_rerun": ["contract_plan", "verification"],
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, ExecutionStrategyDecision)
+    assert decision.decision_type == SupervisorDecisionType.EXECUTION_STRATEGY
+    assert decision.selected_action == ExecutionStrategyAction.ONE_SHOT
+
+
+def test_execution_strategy_rejects_invalid_action_outcome_combination() -> None:
+    with pytest.raises(ValidationError, match="selected_action must match outcome"):
+        ExecutionStrategyDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.EXECUTION_STRATEGY,
+                "risk_level": DecisionRiskLevel.MODERATE,
+                "selected_action": ExecutionStrategyAction.PARALLEL_CONTRACTS,
+                "outcome": ExecutionStrategyOutcome.PROCEED_SEQUENTIAL,
+                "fallback_plan": "Retry strategy selection with updated coupling evidence.",
+                "validators_to_rerun": ["contract_plan", "verification"],
+            }
+        )
+
+
+def test_execution_strategy_requires_fallback_and_validators() -> None:
+    with pytest.raises(ValidationError):
+        ExecutionStrategyDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.EXECUTION_STRATEGY,
+                "risk_level": DecisionRiskLevel.MODERATE,
+                "selected_action": ExecutionStrategyAction.REPLAN,
+                "outcome": ExecutionStrategyOutcome.REPLAN,
+                "fallback_plan": "",
+                "validators_to_rerun": ["contract_plan"],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="validators to rerun must not be empty"):
+        ExecutionStrategyDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.EXECUTION_STRATEGY,
+                "risk_level": DecisionRiskLevel.MODERATE,
+                "selected_action": ExecutionStrategyAction.REPLAN,
+                "outcome": ExecutionStrategyOutcome.REPLAN,
+                "fallback_plan": "Escalate to replanning.",
+                "validators_to_rerun": [],
+            }
+        )
 
 
 def test_repair_loop_attempt_must_not_exceed_max_attempts() -> None:
@@ -197,6 +261,22 @@ def test_invalid_schema_version_is_rejected() -> None:
         "risk_level": DecisionRiskLevel.LOW,
         "overlap_findings": [],
         "outcome": SchedulingOutcome.PROCEED_PARALLEL,
+    }
+
+    with pytest.raises(ValidationError):
+        parse_supervisor_decision(payload)
+
+
+def test_execution_strategy_invalid_schema_version_is_rejected() -> None:
+    payload = {
+        **BASE,
+        "schema_version": "2.0",
+        "decision_type": SupervisorDecisionType.EXECUTION_STRATEGY,
+        "risk_level": DecisionRiskLevel.LOW,
+        "selected_action": ExecutionStrategyAction.REPLAN,
+        "outcome": ExecutionStrategyOutcome.REPLAN,
+        "fallback_plan": "Escalate strategy selection for manual review.",
+        "validators_to_rerun": ["contract_plan"],
     }
 
     with pytest.raises(ValidationError):

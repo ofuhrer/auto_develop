@@ -9,10 +9,13 @@ from pydantic import ValidationError
 
 from agentic_devloop.evidence import supervisor_decisions_artifacts_dir
 from agentic_devloop.supervisor_decisions import (
-    ReleaseSchedulingAction,
-    SCHEMA_VERSION_V1,
     DecisionRiskLevel,
+    ExecutionStrategyAction,
+    ExecutionStrategyDecision,
+    ExecutionStrategyOutcome,
+    ReleaseSchedulingAction,
     ReleaseSchedulingDecision,
+    SCHEMA_VERSION_V1,
     SchedulingOutcome,
     SupervisorDecisionType,
     load_supervisor_decision_artifact,
@@ -46,6 +49,26 @@ def _decision(*, evidence_paths: list[Path]) -> ReleaseSchedulingDecision:
                 "base_branch_head_commit": "deadbeef",
                 "release_inputs_sha256": "f00d",
             },
+        }
+    )
+
+
+def _execution_strategy_decision(*, evidence_paths: list[Path]) -> ExecutionStrategyDecision:
+    return ExecutionStrategyDecision.model_validate(
+        {
+            "schema_version": SCHEMA_VERSION_V1,
+            "decision_id": "strategy-001",
+            "release_id": "supervisor-execution-strategy",
+            "decided_at": datetime(2026, 5, 13, 8, 0, 0),
+            "decided_by": "supervisor-agent",
+            "rationale": "Cohesive implementation and shared verification indicate one-shot execution.",
+            "evidence_paths": evidence_paths,
+            "decision_type": SupervisorDecisionType.EXECUTION_STRATEGY,
+            "risk_level": DecisionRiskLevel.MODERATE,
+            "selected_action": ExecutionStrategyAction.ONE_SHOT,
+            "outcome": ExecutionStrategyOutcome.PROCEED_ONE_SHOT,
+            "fallback_plan": "Decompose to sequential contracts if one-shot verification fails.",
+            "validators_to_rerun": ["contract_plan", "verification"],
         }
     )
 
@@ -87,6 +110,21 @@ def test_write_and_load_supervisor_decision_artifact_round_trip(tmp_path: Path) 
     evidence_file = tmp_path / "verification.log"
     evidence_file.write_text("ok\n", encoding="utf-8")
     decision = _decision(evidence_paths=[evidence_file])
+
+    artifact_path = write_supervisor_decision_artifact(
+        release_bundle_path=tmp_path,
+        decision=decision,
+    )
+    loaded = load_supervisor_decision_artifact(artifact_path)
+
+    assert artifact_path.exists()
+    assert loaded == decision
+
+
+def test_write_and_load_execution_strategy_artifact_round_trip(tmp_path: Path) -> None:
+    evidence_file = tmp_path / "strategy-evidence.log"
+    evidence_file.write_text("selected one-shot\n", encoding="utf-8")
+    decision = _execution_strategy_decision(evidence_paths=[evidence_file])
 
     artifact_path = write_supervisor_decision_artifact(
         release_bundle_path=tmp_path,
@@ -165,4 +203,15 @@ def test_load_supervisor_decision_artifact_rejects_relative_evidence_path_traver
     )
 
     with pytest.raises(ValueError, match="escapes artifact directory"):
+        load_supervisor_decision_artifact(artifact_path)
+
+
+def test_execution_strategy_load_fails_for_missing_evidence_path(tmp_path: Path) -> None:
+    decision = _execution_strategy_decision(evidence_paths=[Path("missing-strategy-evidence.log")])
+    artifact_path = write_supervisor_decision_artifact(
+        release_bundle_path=tmp_path,
+        decision=decision,
+    )
+
+    with pytest.raises(ValueError, match="missing evidence path"):
         load_supervisor_decision_artifact(artifact_path)

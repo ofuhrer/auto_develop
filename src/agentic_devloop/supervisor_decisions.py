@@ -24,6 +24,7 @@ class DecisionRiskLevel(StrEnum):
 
 class SupervisorDecisionType(StrEnum):
     RELEASE_SCHEDULING = "release_scheduling"
+    EXECUTION_STRATEGY = "execution_strategy"
     REPAIR_LOOP_CONTINUATION = "repair_loop_continuation"
     REVIEW_FINDING_ADJUDICATION = "review_finding_adjudication"
     SOFT_BUDGET_ACCEPTANCE = "soft_budget_acceptance"
@@ -122,6 +123,55 @@ class ReleaseSchedulingDecision(SupervisorDecisionBase):
             ReleaseSchedulingAction.STACKED: SchedulingOutcome.STACKED_BRANCHES,
             ReleaseSchedulingAction.REPLAN: SchedulingOutcome.REPLAN,
             ReleaseSchedulingAction.STOP: SchedulingOutcome.STOP,
+        }
+        expected_outcome = outcome_by_action[self.selected_action]
+        if self.outcome != expected_outcome:
+            raise ValueError("selected_action must match outcome")
+        return self
+
+
+class ExecutionStrategyOutcome(StrEnum):
+    PROCEED_ONE_SHOT = "proceed_one_shot"
+    PROCEED_SEQUENTIAL = "proceed_sequential"
+    PROCEED_PARALLEL = "proceed_parallel"
+    PROCEED_STACKED = "proceed_stacked"
+    PROCEED_PATCH_HANDOFF = "proceed_patch_handoff"
+    REPLAN = "replan"
+
+
+class ExecutionStrategyAction(StrEnum):
+    ONE_SHOT = "one_shot"
+    SEQUENTIAL_CONTRACTS = "sequential_contracts"
+    PARALLEL_CONTRACTS = "parallel_contracts"
+    STACKED_BRANCHES = "stacked_branches"
+    PATCH_HANDOFF = "patch_handoff"
+    REPLAN = "replan"
+
+
+class ExecutionStrategyDecision(SupervisorDecisionBase):
+    decision_type: Literal[SupervisorDecisionType.EXECUTION_STRATEGY] = SupervisorDecisionType.EXECUTION_STRATEGY
+    risk_level: DecisionRiskLevel
+    selected_action: ExecutionStrategyAction
+    outcome: ExecutionStrategyOutcome
+    fallback_plan: str = Field(min_length=1)
+    validators_to_rerun: list[str] = Field(default_factory=list)
+
+    @field_validator("validators_to_rerun")
+    @classmethod
+    def validators_to_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if not values or any(not value.strip() for value in values):
+            raise ValueError("validators to rerun must not be empty")
+        return values
+
+    @model_validator(mode="after")
+    def selected_action_must_match_outcome(self) -> "ExecutionStrategyDecision":
+        outcome_by_action = {
+            ExecutionStrategyAction.ONE_SHOT: ExecutionStrategyOutcome.PROCEED_ONE_SHOT,
+            ExecutionStrategyAction.SEQUENTIAL_CONTRACTS: ExecutionStrategyOutcome.PROCEED_SEQUENTIAL,
+            ExecutionStrategyAction.PARALLEL_CONTRACTS: ExecutionStrategyOutcome.PROCEED_PARALLEL,
+            ExecutionStrategyAction.STACKED_BRANCHES: ExecutionStrategyOutcome.PROCEED_STACKED,
+            ExecutionStrategyAction.PATCH_HANDOFF: ExecutionStrategyOutcome.PROCEED_PATCH_HANDOFF,
+            ExecutionStrategyAction.REPLAN: ExecutionStrategyOutcome.REPLAN,
         }
         expected_outcome = outcome_by_action[self.selected_action]
         if self.outcome != expected_outcome:
@@ -256,6 +306,7 @@ class EnvironmentRepairDecision(SupervisorDecisionBase):
 SupervisorDecisionRecord = Annotated[
     (
         ReleaseSchedulingDecision
+        | ExecutionStrategyDecision
         | RepairLoopContinuationDecision
         | ReviewFindingAdjudicationDecision
         | SoftBudgetAcceptanceDecision
