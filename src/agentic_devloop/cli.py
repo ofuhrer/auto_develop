@@ -996,7 +996,7 @@ def _backlog_multi_run_result(result) -> dict[str, object]:
         "requested_epic_count": result.requested_epic_count,
         "attempted_epic_count": result.attempted_epic_count,
         "accepted_epic_count": result.accepted_epic_count,
-        "stop_reason": result.stop_reason,
+        "stop_reason": str(result.stop_reason),
         "cycles": [_backlog_run_result(cycle) for cycle in result.cycles],
     }
 

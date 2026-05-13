@@ -16,7 +16,7 @@ from agentic_devloop.execution_strategy import (
     ExecutionStrategySelection,
 )
 from agentic_devloop.governor import GovernorLoop
-from agentic_devloop.models import ExecutorResult
+from agentic_devloop.models import ExecutorResult, GovernorStopReason
 from agentic_devloop.state_store import StateStore
 
 
@@ -977,7 +977,7 @@ def test_governor_loop_runs_multiple_epic_cycles_and_records_state(tmp_path) -> 
 
     assert result.attempted_epic_count == 2
     assert result.accepted_epic_count == 2
-    assert result.stop_reason == "requested_epic_count_reached"
+    assert result.stop_reason == GovernorStopReason.REQUESTED_EPIC_COUNT_REACHED
     assert [cycle.selected_epic_id for cycle in result.cycles] == ["epic-0001", "epic-0002"]
     assert [path.stem for path in run_calls] == ["demo-epic-0001", "demo-epic-0002"]
     state = state_store.load()
@@ -1073,7 +1073,7 @@ def test_governor_loop_distinguishes_attempted_and_accepted_counts(tmp_path) -> 
 
     assert result.attempted_epic_count == 1
     assert result.accepted_epic_count == 0
-    assert result.stop_reason == "release_not_accepted"
+    assert result.stop_reason == GovernorStopReason.RELEASE_NOT_ACCEPTED
 
 
 def _write_yaml(path: Path, data: dict[str, object]) -> None:

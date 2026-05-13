@@ -189,6 +189,13 @@ class BacklogEvidenceManifest(StrictModel):
     state_refresh_summary_path: Path | None = None
 
 
+class GovernorStopReason(StrEnum):
+    REQUESTED_EPIC_COUNT_REACHED = "requested_epic_count_reached"
+    REPEATED_EPIC_SELECTED = "repeated_epic_selected"
+    PLANNING_ONLY_STRATEGY = "planning_only_strategy"
+    RELEASE_NOT_ACCEPTED = "release_not_accepted"
+
+
 class StateReviewSnapshot(StrictModel):
     captured_at: datetime
     repo_path: Path

@@ -11,6 +11,7 @@ from agentic_devloop.models import (
     BacklogEpic,
     BacklogEvidenceManifest,
     BacklogPlan,
+    GovernorStopReason,
     ReleaseObjective,
 )
 from agentic_devloop.orchestrator import ExecutorProtocol
@@ -155,7 +156,7 @@ class GovernorLoop:
 
         cycles: list[BacklogRunResult] = []
         seen_epic_ids: set[str] = set()
-        stop_reason = "requested_epic_count_reached"
+        stop_reason = GovernorStopReason.REQUESTED_EPIC_COUNT_REACHED
         for cycle_index in range(1, epic_count + 1):
             if progress is not None:
                 progress(f"event=governor_cycle_started cycle={cycle_index} epic_count={epic_count}")
@@ -188,7 +189,7 @@ class GovernorLoop:
             cycles.append(result)
 
             if result.selected_epic_id in seen_epic_ids:
-                stop_reason = "repeated_epic_selected"
+                stop_reason = GovernorStopReason.REPEATED_EPIC_SELECTED
                 if self._state_store is not None:
                     self._state_store.mark_skipped_epic(
                         result.selected_epic_id,
@@ -201,11 +202,11 @@ class GovernorLoop:
             seen_epic_ids.add(result.selected_epic_id)
 
             if result.release is None:
-                stop_reason = "planning_only_strategy"
+                stop_reason = GovernorStopReason.PLANNING_ONLY_STRATEGY
                 break
             if not _release_was_accepted(result.release):
                 if stop_on_failure:
-                    stop_reason = "release_not_accepted"
+                    stop_reason = GovernorStopReason.RELEASE_NOT_ACCEPTED
                     break
             if self._state_store is not None and result.release_summary_path is not None:
                 self._state_store.record_recent_run_summary(

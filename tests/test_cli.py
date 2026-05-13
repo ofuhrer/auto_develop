@@ -7,7 +7,7 @@ import pytest
 
 from agentic_devloop import cli as cli_module
 from agentic_devloop.cli import main
-from agentic_devloop.models import ContractPlan, GeneratedContract, TaskContract
+from agentic_devloop.models import ContractPlan, GeneratedContract, GovernorStopReason, TaskContract
 from agentic_devloop.planning import ContractPlanResult
 
 
@@ -570,7 +570,7 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
         requested_epic_count=2,
         attempted_epic_count=1,
         accepted_epic_count=1,
-        stop_reason="release_not_accepted",
+        stop_reason=GovernorStopReason.RELEASE_NOT_ACCEPTED,
         cycles=[cycle],
     )
 

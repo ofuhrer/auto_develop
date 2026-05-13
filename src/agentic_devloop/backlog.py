@@ -12,7 +12,13 @@ from pydantic import ValidationError
 
 from agentic_devloop.budget import reserve_strong_model_call
 from agentic_devloop.config import load_project_config
-from agentic_devloop.models import BacklogEpic, BacklogEvidenceManifest, BacklogPlan, ReleaseObjective
+from agentic_devloop.models import (
+    BacklogEpic,
+    BacklogEvidenceManifest,
+    BacklogPlan,
+    GovernorStopReason,
+    ReleaseObjective,
+)
 from agentic_devloop.objective import run_objective
 from agentic_devloop.orchestrator import ExecutorProtocol
 from agentic_devloop.planning import PlannerBackend
@@ -58,7 +64,7 @@ class BacklogMultiRunResult:
     attempted_epic_count: int
     accepted_epic_count: int
     cycles: list[BacklogRunResult]
-    stop_reason: str
+    stop_reason: GovernorStopReason
 
 
 @dataclass(frozen=True)
