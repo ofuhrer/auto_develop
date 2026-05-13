@@ -22,8 +22,8 @@ required_evidence:
 - test output from documentation-safe smoke checks
 verification:
   commands:
-  - PYTHONPATH=src .venv/bin/python -m agentic_devloop --help
-  - PYTHONPATH=src .venv/bin/python -m agentic_devloop run-release --help
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop --help
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop run-release --help
   - git diff --check
   profile: null
 stop_conditions:

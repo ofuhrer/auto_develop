@@ -23,7 +23,7 @@ required_evidence:
 - serialized examples or assertions for all five admission repair action types
 verification:
   commands:
-  - PYTHONPATH=src .venv/bin/python -m pytest tests/test_runtime_supervisor.py tests/test_supervisor_decision_artifacts.py
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_runtime_supervisor.py tests/test_supervisor_decision_artifacts.py
   - git diff --check
   profile: null
 stop_conditions:

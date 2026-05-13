@@ -23,7 +23,7 @@ required_evidence:
 - negative tests for each listed hard safety violation
 verification:
   commands:
-  - PYTHONPATH=src .venv/bin/python -m pytest tests/test_planning.py tests/test_runtime_supervisor.py
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_planning.py tests/test_runtime_supervisor.py
   - git diff --check
   profile: null
 stop_conditions:
