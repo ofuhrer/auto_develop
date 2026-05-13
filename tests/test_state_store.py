@@ -174,6 +174,36 @@ def test_add_epic_references_reuses_non_active_record(
     assert state.active_epics == []
 
 
+def test_epic_transition_preserves_existing_memory_record_fields(tmp_path: Path) -> None:
+    state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
+    store = StateStore(state_path)
+    epic_id = "epic-1"
+
+    store.increment_epic_retry_count(epic_id, amount=2)
+    store.increment_epic_repair_count(epic_id, amount=3)
+    store.add_epic_outcome_reference(
+        epic_id,
+        OutcomeReference(
+            release_id="persistent-governor-memory",
+            task_id="pgm-0002",
+            outcome="accepted",
+            run_summary_path=Path("runs/persistent-governor-memory/review_summary.json"),
+            recorded_at=datetime(2026, 5, 13, 8, 0, tzinfo=UTC),
+        ),
+    )
+
+    store.mark_completed_epic(epic_id)
+    blocked = store.mark_blocked_epic(epic_id, blocked_reason="awaiting-dependent-epic")
+    blocked_record = blocked.blocked_epic_records[0]
+
+    assert blocked_record.epic_id == epic_id
+    assert blocked_record.retry_count == 2
+    assert blocked_record.repair_count == 3
+    assert len(blocked_record.outcome_references) == 1
+    assert blocked_record.outcome_references[0].task_id == "pgm-0002"
+    assert blocked_record.blocked_reason == "awaiting-dependent-epic"
+
+
 def test_durable_schema_rejects_empty_structured_ids_and_reasons() -> None:
     with pytest.raises(ValueError):
         OutcomeReference(release_id="", outcome="accepted")
