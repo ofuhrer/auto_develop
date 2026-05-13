@@ -9,6 +9,7 @@ import pytest
 from agentic_devloop.feature_review import (
     MAX_FEATURE_REVIEW_ARTIFACT_CHARS,
     MAX_FEATURE_REVIEW_DIFF_CHARS,
+    FeatureReviewClassificationError,
     FeatureReviewContext,
     assemble_feature_review_context,
     classify_feature_review_findings_for_convergence,
@@ -720,3 +721,36 @@ def test_classify_feature_review_findings_for_convergence_marks_scope_expansion_
     assert finding.selected_action == "defer"
     assert finding.matched_previous_finding_id is None
     assert result.deferred_finding_ids == ["new-optional-2"]
+
+
+def test_classify_feature_review_findings_for_convergence_rejects_finding_without_actions() -> None:
+    decision = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-13",
+            "reviewer": "strong_model",
+            "summary": "No-action finding.",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "no-actions-1",
+                    "severity": "low",
+                    "summary": "This finding omitted all action fields.",
+                    "affected_files": ["src/parser.py"],
+                    "required_repairs": [],
+                    "optional_follow_ups": [],
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(
+        FeatureReviewClassificationError,
+        match="must include required_repairs or optional_follow_ups",
+    ):
+        classify_feature_review_findings_for_convergence(
+            decision=decision,
+            previous_decisions=[],
+            verification_passed=True,
+        )

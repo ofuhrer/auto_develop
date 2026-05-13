@@ -21,6 +21,7 @@ from agentic_devloop.evidence import (
     write_release_soft_gate_decisions,
 )
 from agentic_devloop.feature_review import (
+    FeatureReviewClassificationError,
     FeatureReviewContextError,
     assemble_feature_review_context,
     classify_feature_review_findings_for_convergence,
@@ -1407,7 +1408,37 @@ def _run_feature_review_and_repair_loop(
                 verification_passed=last_verification_ok,
             )
 
-        convergence = compute_convergence()
+        try:
+            convergence = compute_convergence()
+        except FeatureReviewClassificationError as error:
+            gating_decision = Decision.ESCALATED
+            decision = decision.model_copy(
+                update={
+                    "reviewer": "deterministic",
+                    "summary": f"Feature review finding classification failed: {error}",
+                    "recommendation": "escalate",
+                }
+            )
+            feature_review_decision = decision
+            feature_review_path = write_feature_review_decision(release_root, decision)
+            feature_review_recheck = FeatureReviewRecheckRecord(
+                release_id=release_id,
+                unresolved_finding_ids=[finding.finding_id for finding in decision.findings]
+                or [f"{release_id}:feature_review_classification_failed"],
+                resolved_finding_ids=[],
+                accepted_finding_ids=[],
+                stop_reason="blocked_by_hard_gate",
+            )
+            feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+            return FeatureReviewLoopResult(
+                task_results=all_task_results,
+                feature_review_path=feature_review_path,
+                feature_review_recheck_path=feature_review_recheck_path,
+                feature_review_decision=feature_review_decision,
+                feature_review_recheck=feature_review_recheck,
+                feature_review_proposals=current_proposals(),
+                gating_decision=gating_decision,
+            )
 
         def write_required_finding_classifications(
             *,
@@ -1573,7 +1604,37 @@ def _run_feature_review_and_repair_loop(
                 + json.dumps([finding.finding_id for finding in required_findings], sort_keys=True),
             )
             rerun_verification(loop_index + 1, decision)
-            convergence = compute_convergence()
+            try:
+                convergence = compute_convergence()
+            except FeatureReviewClassificationError as error:
+                gating_decision = Decision.ESCALATED
+                decision = decision.model_copy(
+                    update={
+                        "reviewer": "deterministic",
+                        "summary": f"Feature review finding classification failed: {error}",
+                        "recommendation": "escalate",
+                    }
+                )
+                feature_review_decision = decision
+                feature_review_path = write_feature_review_decision(release_root, decision)
+                feature_review_recheck = FeatureReviewRecheckRecord(
+                    release_id=release_id,
+                    unresolved_finding_ids=[finding.finding_id for finding in decision.findings]
+                    or [f"{release_id}:feature_review_classification_failed"],
+                    resolved_finding_ids=[],
+                    accepted_finding_ids=[],
+                    stop_reason="blocked_by_hard_gate",
+                )
+                feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+                return FeatureReviewLoopResult(
+                    task_results=all_task_results,
+                    feature_review_path=feature_review_path,
+                    feature_review_recheck_path=feature_review_recheck_path,
+                    feature_review_decision=feature_review_decision,
+                    feature_review_recheck=feature_review_recheck,
+                    feature_review_proposals=current_proposals(),
+                    gating_decision=gating_decision,
+                )
 
         write_non_blocking_finding_classifications(attempt=loop_index + 1)
 

@@ -27,6 +27,10 @@ class FeatureReviewContextError(ValueError):
     pass
 
 
+class FeatureReviewClassificationError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class FeatureReviewBranches:
     base_branch: str
@@ -494,6 +498,11 @@ def classify_feature_review_findings_for_convergence(
     classified: list[FeatureReviewFindingConvergenceResult] = []
     required_repair_ids: set[str] = set()
     for finding in decision.findings:
+        if not finding.required_repairs and not finding.optional_follow_ups:
+            raise FeatureReviewClassificationError(
+                "feature review finding "
+                f"{finding.finding_id} must include required_repairs or optional_follow_ups"
+            )
         if finding.required_repairs:
             required_repair_ids.add(finding.finding_id)
         previous_match, repeated_by_id, adjacent_similarity = _match_previous_finding(
