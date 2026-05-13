@@ -1124,6 +1124,7 @@ def _run_feature_review_and_repair_loop(
     feature_review_recheck_path: Path | None = None
     feature_review_decision: FeatureReviewDecision | None = None
     feature_review_recheck: FeatureReviewRecheckRecord | None = None
+    outstanding_required_finding_ids: set[str] = set()
 
     def run_review(attempt: int) -> FeatureReviewDecision:
         nonlocal feature_review_path
@@ -1199,6 +1200,8 @@ def _run_feature_review_and_repair_loop(
 
     for loop_index in range(_FEATURE_REVIEW_MAX_REPAIR_LOOPS + 1):
         required_findings = [finding for finding in decision.findings if finding.required_repairs]
+        if required_findings:
+            outstanding_required_finding_ids.update(finding.finding_id for finding in required_findings)
         optional_findings = [
             finding
             for finding in decision.findings
@@ -1207,9 +1210,12 @@ def _run_feature_review_and_repair_loop(
 
         if decision.recommendation == FeatureReviewRecommendation.ESCALATE:
             gating_decision = Decision.ESCALATED
+            unresolved_finding_ids = [finding.finding_id for finding in decision.findings]
+            if not unresolved_finding_ids and outstanding_required_finding_ids:
+                unresolved_finding_ids = sorted(outstanding_required_finding_ids)
             feature_review_recheck = FeatureReviewRecheckRecord(
                 release_id=release_id,
-                unresolved_finding_ids=[finding.finding_id for finding in decision.findings] or [f"{release_id}:feature_review_blocked"],
+                unresolved_finding_ids=unresolved_finding_ids or [f"{release_id}:feature_review_blocked"],
                 resolved_finding_ids=[],
                 accepted_finding_ids=[],
                 stop_reason="blocked_by_hard_gate",
