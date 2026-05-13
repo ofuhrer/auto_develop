@@ -413,6 +413,17 @@ class EvidenceBundle(StrictModel):
     soft_gate_decision_path: Path | None = None
 
 
+class FinalIntegrationVerificationEvidence(StrictModel):
+    release_id: str = Field(min_length=1)
+    integration_branch: str = Field(min_length=1)
+    integration_commit: str = Field(min_length=1)
+    verification_log_path: Path
+    worktree_log_path: Path
+    command_results: list[CommandResult] = Field(default_factory=list)
+    success: bool
+    verified_at: datetime
+
+
 class FailureDiagnosisInput(StrictModel):
     name: str = Field(min_length=1)
     value: str = Field(min_length=1)
@@ -742,6 +753,64 @@ class GovernorFeatureReviewContinuation(StrictModel):
                 raise ValueError("accepted_with_rationale requires accepted_risks")
             if self.feature_review_path is None or self.feature_review_recheck_path is None:
                 raise ValueError("accepted_with_rationale requires serialized feature review and recheck paths")
+        return self
+
+
+class FinalReviewContinuationOutcome(StrEnum):
+    BLOCKER = "blocker"
+    ACCEPTED_RISK = "accepted_risk"
+    BACKLOG_FOLLOW_UP = "backlog_follow_up"
+    HARD_STOP = "hard_stop"
+
+
+class FinalReviewContinuationDecision(StrictModel):
+    release_id: str = Field(min_length=1)
+    outcome: FinalReviewContinuationOutcome
+    feature_review_path: Path | None = None
+    feature_review_recheck_path: Path | None = None
+    final_integration_verification_path: Path | None = None
+    finding_ids: list[str] = Field(default_factory=list)
+    rerun_validator_evidence_paths: list[Path] = Field(default_factory=list)
+    generated_repair_contract_paths: list[Path] = Field(default_factory=list)
+    backlog_follow_up_proposal_paths: list[Path] = Field(default_factory=list)
+    accepted_risk_rationale: str | None = None
+    hard_stop_reason: str | None = None
+
+    @field_validator("finding_ids", mode="before")
+    @classmethod
+    def normalize_finding_ids(cls, values: object) -> object:
+        return _normalize_non_empty_string_list(
+            values,
+            error_message="final review continuation finding IDs must not be empty",
+        )
+
+    @field_validator("finding_ids")
+    @classmethod
+    def finding_ids_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("final review continuation finding IDs must not be empty")
+        return values
+
+    @model_validator(mode="after")
+    def validate_outcome_requirements(self) -> "FinalReviewContinuationDecision":
+        if self.outcome == FinalReviewContinuationOutcome.BLOCKER:
+            if not self.finding_ids:
+                raise ValueError("blocker continuation requires finding_ids")
+            if not self.generated_repair_contract_paths:
+                raise ValueError("blocker continuation requires generated_repair_contract_paths")
+        if self.outcome == FinalReviewContinuationOutcome.ACCEPTED_RISK:
+            if not self.finding_ids:
+                raise ValueError("accepted_risk continuation requires finding_ids")
+            if self.accepted_risk_rationale is None or not self.accepted_risk_rationale.strip():
+                raise ValueError("accepted_risk continuation requires accepted_risk_rationale")
+            if not self.rerun_validator_evidence_paths:
+                raise ValueError("accepted_risk continuation requires rerun_validator_evidence_paths")
+        if self.outcome == FinalReviewContinuationOutcome.BACKLOG_FOLLOW_UP:
+            if not self.backlog_follow_up_proposal_paths:
+                raise ValueError("backlog_follow_up continuation requires backlog_follow_up_proposal_paths")
+        if self.outcome == FinalReviewContinuationOutcome.HARD_STOP:
+            if self.hard_stop_reason is None or not self.hard_stop_reason.strip():
+                raise ValueError("hard_stop continuation requires hard_stop_reason")
         return self
 
 

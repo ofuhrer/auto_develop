@@ -112,7 +112,6 @@ verification_profiles:
       - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
 
 unsafe_overlap_paths:
-  - src/agentic_devloop/release.py
   - repo_state/**
   - contracts/**
   - objectives/**

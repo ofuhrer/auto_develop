@@ -11,6 +11,7 @@ from agentic_devloop.feature_review import (
     MAX_FEATURE_REVIEW_DIFF_CHARS,
     FeatureReviewClassificationError,
     FeatureReviewContext,
+    _collect_changed_file_excerpts,
     assemble_feature_review_context,
     classify_feature_review_findings_for_convergence,
     generate_repair_contracts_for_required_findings,
@@ -138,11 +139,31 @@ def test_assemble_feature_review_context_selects_latest_release_run_and_diff(tmp
     )
     summary_payload = json.loads((run_new / "release_summary.json").read_text(encoding="utf-8"))
     summary_payload["integration_commit"] = integration_commit
+    summary_payload["feature_review_path"] = str(run_new / "feature_review.json")
+    summary_payload["feature_review_recheck_path"] = str(run_new / "feature_review_recheck.json")
+    summary_payload["feature_review_proposals"] = [
+        {
+            "finding_id": "optional-1",
+            "classification": "backlog_follow_up",
+            "selected_action": "defer",
+        }
+    ]
+    summary_payload["final_integration_verification_path"] = str(run_new / "final_integration_verification.json")
+    summary_payload["final_integration_verification"] = {
+        "verification_log_path": str(run_new / "final_integration_verification" / "verification.log"),
+        "worktree_log_path": str(run_new / "final_integration_verification" / "worktree.log"),
+    }
     (run_new / "release_summary.json").write_text(json.dumps(summary_payload, indent=2) + "\n", encoding="utf-8")
     (run_new / "release_review.md").write_text("# review\n", encoding="utf-8")
     (run_new / "release_metrics.json").write_text('{"ok": true}\n', encoding="utf-8")
     (run_new / "release_budget.json").write_text('{"budget": "ok"}\n', encoding="utf-8")
     (run_new / "release_tuning.md").write_text("tuning\n", encoding="utf-8")
+    (run_new / "feature_review.json").write_text('{"ok": true}\n', encoding="utf-8")
+    (run_new / "feature_review_recheck.json").write_text('{"ok": true}\n', encoding="utf-8")
+    (run_new / "final_integration_verification.json").write_text('{"ok": true}\n', encoding="utf-8")
+    (run_new / "final_integration_verification").mkdir(parents=True, exist_ok=True)
+    (run_new / "final_integration_verification" / "verification.log").write_text("verify\n", encoding="utf-8")
+    (run_new / "final_integration_verification" / "worktree.log").write_text("worktree\n", encoding="utf-8")
 
     context = assemble_feature_review_context(
         repo_path=repo_path,
@@ -151,11 +172,18 @@ def test_assemble_feature_review_context_selects_latest_release_run_and_diff(tmp
         integration_branch=integration_branch,
         runs_dir=Path("runs"),
         docs_design_dir=Path("docs/design"),
+        release_objective="Ship bounded integration handoff context.",
     )
 
     assert context.latest_release_run_dir == run_new
     assert context.release_summary_path == run_new / "release_summary.json"
     assert context.release_review_path == run_new / "release_review.md"
+    assert context.release_objective == "Ship bounded integration handoff context."
+    assert context.prior_feature_review_path == run_new / "feature_review.json"
+    assert context.prior_feature_review_recheck_path == run_new / "feature_review_recheck.json"
+    assert context.final_integration_verification_path == run_new / "final_integration_verification.json"
+    assert context.final_integration_verification_log_path == run_new / "final_integration_verification" / "verification.log"
+    assert context.accepted_repair_history
     assert "hello.txt" in context.changed_files
     assert "+feature" in context.diff_text
     assert context.docs_design_paths
@@ -168,6 +196,11 @@ def test_assemble_feature_review_context_selects_latest_release_run_and_diff(tmp
     )
     assert release_id in prompt
     assert "Git diff" in prompt
+    assert "Integration diff summary" in prompt
+    assert "Release objective: Ship bounded integration handoff context." in prompt
+    assert "final_integration_verification_log_path" in prompt
+    assert "Accepted repair history" in prompt
+    assert "Relevant changed-file excerpts" in prompt
 
 
 def test_render_feature_review_prompt_truncates_large_diff_and_artifacts(tmp_path: Path) -> None:
@@ -201,6 +234,61 @@ def test_render_feature_review_prompt_truncates_large_diff_and_artifacts(tmp_pat
     assert "feature review context truncated: release_summary.json exceeded" in prompt
     assert "Inspect full evidence at git diff --patch main..feature/rel-3" in prompt
     assert "Inspect full evidence at runs/20260101T000000Z_rel-3_release/release_summary.json" in prompt
+
+
+def test_render_feature_review_prompt_truncates_diff_summaries_and_changed_file_excerpts(tmp_path: Path) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    context = FeatureReviewContext(
+        release_id="rel-3",
+        base_branch="main",
+        integration_branch="feature/rel-3",
+        base_commit="a" * 40,
+        integration_commit="b" * 40,
+        changed_files=["src/agentic_devloop/feature_review.py"],
+        diff_text="ok",
+        docs_design_paths=[],
+        latest_release_run_dir=None,
+        release_summary_path=None,
+        release_review_path=None,
+        release_metrics_path=None,
+        release_budget_path=None,
+        release_tuning_path=None,
+        diff_stat_text="S" * 20_000,
+        diff_numstat_text="N" * 20_000,
+        changed_file_excerpts=[
+            ("src/agentic_devloop/feature_review.py", "E" * 10_000),
+        ],
+    )
+
+    prompt = render_feature_review_prompt(context=context, repo_path=repo_path)
+
+    assert "feature review context truncated: git diff --stat exceeded" in prompt
+    assert "feature review context truncated: git diff --numstat exceeded" in prompt
+    assert "feature review context truncated: excerpt src/agentic_devloop/feature_review.py exceeded" in prompt
+
+
+def test_changed_file_excerpts_omit_sensitive_paths(tmp_path: Path) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    _git(repo_path, "init")
+    _git(repo_path, "config", "user.email", "test@example.com")
+    _git(repo_path, "config", "user.name", "Test User")
+    (repo_path / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+    (repo_path / "src").mkdir()
+    (repo_path / "src" / "app.py").write_text("print('ok')\n", encoding="utf-8")
+    _git(repo_path, "add", ".")
+    _git(repo_path, "commit", "-m", "initial")
+    _git(repo_path, "checkout", "-b", "feature/demo")
+
+    excerpts = _collect_changed_file_excerpts(
+        repo_path=repo_path,
+        integration_branch="feature/demo",
+        changed_files=[".env", "src/app.py"],
+    )
+
+    assert (".env", "excerpt omitted: path may contain secrets or credentials") in excerpts
+    assert any(path == "src/app.py" and "print('ok')" in excerpt for path, excerpt in excerpts)
 
 
 def test_invoke_feature_reviewer_parses_decision_and_writes_artifacts(monkeypatch, tmp_path: Path) -> None:

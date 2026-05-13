@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import shlex
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
@@ -53,6 +53,16 @@ class FeatureReviewContext:
     release_metrics_path: Path | None
     release_budget_path: Path | None
     release_tuning_path: Path | None
+    release_objective: str | None = None
+    diff_stat_text: str = ""
+    diff_numstat_text: str = ""
+    changed_file_excerpts: list[tuple[str, str]] = field(default_factory=list)
+    accepted_repair_history: list[str] = field(default_factory=list)
+    prior_feature_review_path: Path | None = None
+    prior_feature_review_recheck_path: Path | None = None
+    final_integration_verification_path: Path | None = None
+    final_integration_verification_log_path: Path | None = None
+    final_integration_worktree_log_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -110,6 +120,9 @@ UNSAFE_REPAIR_DIRNAMES: frozenset[str] = frozenset({"migrations", "generated"})
 
 MAX_FEATURE_REVIEW_DIFF_CHARS = 120_000
 MAX_FEATURE_REVIEW_ARTIFACT_CHARS = 40_000
+MAX_FEATURE_REVIEW_DIFF_SUMMARY_CHARS = 12_000
+MAX_FEATURE_REVIEW_CHANGED_FILE_EXCERPTS = 8
+MAX_FEATURE_REVIEW_CHANGED_FILE_EXCERPT_CHARS = 3_000
 
 
 def determine_feature_review_branches(
@@ -149,6 +162,7 @@ def assemble_feature_review_context(
     integration_branch: str,
     runs_dir: Path = Path("runs"),
     docs_design_dir: Path = Path("docs/design"),
+    release_objective: str | None = None,
 ) -> FeatureReviewContext:
     repo_path = repo_path.resolve()
     runs_root = (repo_path / runs_dir).resolve()
@@ -160,12 +174,19 @@ def assemble_feature_review_context(
     base_commit = _git_rev(repo_path, base_branch)
     integration_commit = _git_rev(repo_path, integration_branch)
     diff_text = git_text(repo_path, ["diff", "--patch", f"{base_branch}..{integration_branch}"])
+    diff_stat_text = git_text(repo_path, ["diff", "--stat", f"{base_branch}..{integration_branch}"])
+    diff_numstat_text = git_text(repo_path, ["diff", "--numstat", f"{base_branch}..{integration_branch}"])
     changed_files = [
         line
         for line in git_text(repo_path, ["diff", "--name-only", f"{base_branch}..{integration_branch}"])
         .splitlines()
         if line.strip()
     ]
+    changed_file_excerpts = _collect_changed_file_excerpts(
+        repo_path=repo_path,
+        integration_branch=integration_branch,
+        changed_files=changed_files,
+    )
 
     docs_design_paths = sorted(_safe_glob_files(docs_design_root, pattern="**/*"))
 
@@ -180,11 +201,25 @@ def assemble_feature_review_context(
         metrics_path = None
         budget_path = None
         tuning_path = None
+        accepted_repair_history: list[str] = []
+        prior_feature_review_path = None
+        prior_feature_review_recheck_path = None
+        final_integration_verification_path = None
+        final_integration_verification_log_path = None
+        final_integration_worktree_log_path = None
     else:
         release_review_path = _safe_optional(latest_release_run_dir / "release_review.md", runs_root)
         metrics_path = _safe_optional(latest_release_run_dir / "release_metrics.json", runs_root)
         budget_path = _safe_optional(latest_release_run_dir / "release_budget.json", runs_root)
         tuning_path = _safe_optional(latest_release_run_dir / "release_tuning.md", runs_root)
+        (
+            accepted_repair_history,
+            prior_feature_review_path,
+            prior_feature_review_recheck_path,
+            final_integration_verification_path,
+            final_integration_verification_log_path,
+            final_integration_worktree_log_path,
+        ) = _release_review_artifact_context(latest_release_run_dir=latest_release_run_dir, runs_root=runs_root)
 
     return FeatureReviewContext(
         release_id=release_id,
@@ -201,6 +236,16 @@ def assemble_feature_review_context(
         release_metrics_path=metrics_path,
         release_budget_path=budget_path,
         release_tuning_path=tuning_path,
+        release_objective=release_objective.strip() if isinstance(release_objective, str) and release_objective.strip() else None,
+        diff_stat_text=diff_stat_text,
+        diff_numstat_text=diff_numstat_text,
+        changed_file_excerpts=changed_file_excerpts,
+        accepted_repair_history=accepted_repair_history,
+        prior_feature_review_path=prior_feature_review_path,
+        prior_feature_review_recheck_path=prior_feature_review_recheck_path,
+        final_integration_verification_path=final_integration_verification_path,
+        final_integration_verification_log_path=final_integration_verification_log_path,
+        final_integration_worktree_log_path=final_integration_worktree_log_path,
     )
 
 
@@ -243,6 +288,18 @@ def render_feature_review_prompt(
     release_metrics = read(context.release_metrics_path)
     release_budget = read(context.release_budget_path)
     release_tuning = read(context.release_tuning_path)
+    diff_stat = _bounded_review_text(
+        context.diff_stat_text,
+        max_chars=MAX_FEATURE_REVIEW_DIFF_SUMMARY_CHARS,
+        evidence_path=f"git diff --stat {context.base_branch}..{context.integration_branch}",
+        label="git diff --stat",
+    )
+    diff_numstat = _bounded_review_text(
+        context.diff_numstat_text,
+        max_chars=MAX_FEATURE_REVIEW_DIFF_SUMMARY_CHARS,
+        evidence_path=f"git diff --numstat {context.base_branch}..{context.integration_branch}",
+        label="git diff --numstat",
+    )
 
     schema = {
         "release_id": "<str>",
@@ -275,9 +332,15 @@ def render_feature_review_prompt(
             f"Release: {context.release_id}",
             f"Base branch: {context.base_branch} @ {context.base_commit}",
             f"Integration branch: {context.integration_branch} @ {context.integration_commit}",
+            f"Release objective: {context.release_objective or '(not provided)'}",
             "",
             "Changed files (base..integration):",
             *([f"- {path}" for path in context.changed_files] or ["- (none)"]),
+            "",
+            "Integration diff summary:",
+            f"git diff --stat:\n{diff_stat}".rstrip(),
+            "",
+            f"git diff --numstat:\n{diff_numstat}".rstrip(),
             "",
             "Git diff (base..integration):",
             diff_text,
@@ -292,6 +355,38 @@ def render_feature_review_prompt(
             f"release_budget.json:\n{release_budget}".rstrip(),
             "",
             f"release_tuning.md:\n{release_tuning}".rstrip(),
+            "",
+            "Prior review/recheck artifacts (latest matching release run):",
+            f"- feature_review_path: {context.prior_feature_review_path or '(missing)'}",
+            f"- feature_review_recheck_path: {context.prior_feature_review_recheck_path or '(missing)'}",
+            f"- final_integration_verification_path: {context.final_integration_verification_path or '(missing)'}",
+            f"- final_integration_verification_log_path: {context.final_integration_verification_log_path or '(missing)'}",
+            f"- final_integration_worktree_log_path: {context.final_integration_worktree_log_path or '(missing)'}",
+            "",
+            "Accepted repair history (latest matching release run):",
+            *([f"- {line}" for line in context.accepted_repair_history] or ["- (none)"]),
+            "",
+            "Relevant changed-file excerpts (bounded):",
+            *(
+                ["- (none)"]
+                if not context.changed_file_excerpts
+                else [
+                    block
+                    for path, excerpt in context.changed_file_excerpts
+                    for block in (
+                        (
+                            f"{path}:\n"
+                            + _bounded_review_text(
+                                excerpt,
+                                max_chars=MAX_FEATURE_REVIEW_CHANGED_FILE_EXCERPT_CHARS,
+                                evidence_path=f"git show {context.integration_branch}:{path}",
+                                label=f"excerpt {path}",
+                            )
+                        ).rstrip(),
+                        "",
+                    )
+                ]
+            ),
             "",
             docs_section,
             "",
@@ -741,6 +836,112 @@ def _render_docs_design_section(
             ),
         ]
     ).rstrip()
+
+
+def _collect_changed_file_excerpts(
+    *,
+    repo_path: Path,
+    integration_branch: str,
+    changed_files: list[str],
+) -> list[tuple[str, str]]:
+    excerpts: list[tuple[str, str]] = []
+    for relative_path in changed_files[:MAX_FEATURE_REVIEW_CHANGED_FILE_EXCERPTS]:
+        if _should_omit_changed_file_excerpt(relative_path):
+            excerpts.append((relative_path, "excerpt omitted: path may contain secrets or credentials"))
+            continue
+        content = _git_show_file(repo_path, integration_branch=integration_branch, relative_path=relative_path)
+        if content is None:
+            continue
+        bounded = _bounded_review_text(
+            content,
+            max_chars=MAX_FEATURE_REVIEW_CHANGED_FILE_EXCERPT_CHARS,
+            evidence_path=f"git show {integration_branch}:{relative_path}",
+            label=f"excerpt {relative_path}",
+        )
+        excerpts.append((relative_path, bounded))
+    return excerpts
+
+
+def _should_omit_changed_file_excerpt(relative_path: str) -> bool:
+    normalized = relative_path.strip().lower()
+    name = Path(normalized).name
+    sensitive_suffixes = (".env", ".pem", ".key", ".p12", ".pfx")
+    sensitive_terms = ("secret", "credential", "credentials", "private_key", "apikey", "api_key")
+    return name.endswith(sensitive_suffixes) or any(term in normalized for term in sensitive_terms)
+
+
+def _git_show_file(repo_path: Path, *, integration_branch: str, relative_path: str) -> str | None:
+    normalized = relative_path.strip().lstrip("./")
+    if not normalized:
+        return None
+    try:
+        text = git_text(repo_path, ["show", f"{integration_branch}:{normalized}"])
+    except RuntimeError:
+        return None
+    if "\x00" in text:
+        return None
+    return text
+
+
+def _release_review_artifact_context(
+    *,
+    latest_release_run_dir: Path,
+    runs_root: Path,
+) -> tuple[list[str], Path | None, Path | None, Path | None, Path | None, Path | None]:
+    summary_path = _safe_optional(latest_release_run_dir / "release_summary.json", runs_root)
+    if summary_path is None:
+        return [], None, None, None, None, None
+    try:
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return [], None, None, None, None, None
+    accepted_history: list[str] = []
+    for item in payload.get("feature_review_proposals", []):
+        if not isinstance(item, dict):
+            continue
+        finding_id = str(item.get("finding_id") or "").strip()
+        classification = str(item.get("classification") or "").strip()
+        action = str(item.get("selected_action") or "").strip()
+        if not finding_id:
+            continue
+        accepted_history.append(
+            f"finding_id={finding_id} classification={classification or 'unknown'} action={action or 'unknown'}"
+        )
+    prior_feature_review_path = _optional_runs_artifact_path(payload.get("feature_review_path"), runs_root)
+    prior_feature_review_recheck_path = _optional_runs_artifact_path(
+        payload.get("feature_review_recheck_path"), runs_root
+    )
+    final_integration_verification_path = _optional_runs_artifact_path(
+        payload.get("final_integration_verification_path"), runs_root
+    )
+    final_integration_verification_log_path: Path | None = None
+    final_integration_worktree_log_path: Path | None = None
+    final_integration_verification = payload.get("final_integration_verification")
+    if isinstance(final_integration_verification, dict):
+        log_raw = final_integration_verification.get("verification_log_path")
+        worktree_raw = final_integration_verification.get("worktree_log_path")
+        final_integration_verification_log_path = _optional_runs_artifact_path(log_raw, runs_root)
+        final_integration_worktree_log_path = _optional_runs_artifact_path(worktree_raw, runs_root)
+    return (
+        accepted_history,
+        prior_feature_review_path,
+        prior_feature_review_recheck_path,
+        final_integration_verification_path,
+        final_integration_verification_log_path,
+        final_integration_worktree_log_path,
+    )
+
+
+def _optional_runs_artifact_path(raw_value: object, runs_root: Path) -> Path | None:
+    if not isinstance(raw_value, str):
+        return None
+    cleaned = raw_value.strip()
+    if not cleaned:
+        return None
+    try:
+        return _safe_optional(Path(cleaned), runs_root)
+    except FeatureReviewContextError:
+        return None
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:

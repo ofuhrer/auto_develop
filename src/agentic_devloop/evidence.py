@@ -11,6 +11,7 @@ from agentic_devloop.models import (
     EvidenceBundle,
     FailureDiagnosis,
     ExecutorResult,
+    FinalIntegrationVerificationEvidence,
     FeatureReviewDecision,
     FeatureReviewRecheckRecord,
     ReleaseSoftGateDecisionRecord,
@@ -328,6 +329,18 @@ def write_feature_review_recheck(
     }
     feature_review_recheck_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return feature_review_recheck_path
+
+
+def write_final_integration_verification_evidence(
+    release_bundle_path: Path,
+    evidence: FinalIntegrationVerificationEvidence,
+) -> Path:
+    evidence_path = release_bundle_path / "final_integration_verification.json"
+    evidence_path.write_text(
+        json.dumps(evidence.model_dump(mode="json"), indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return evidence_path
 
 
 def _decision_yaml(decision: ReviewDecision) -> str:
