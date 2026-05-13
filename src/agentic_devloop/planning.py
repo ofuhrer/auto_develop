@@ -10,16 +10,31 @@ from typing import Any, Protocol
 from agentic_devloop.budget import reserve_strong_model_call
 from agentic_devloop.config import load_project_config
 from agentic_devloop.contracts import normalize_contract_request, normalize_task_contract_payload
+from agentic_devloop.execution_strategy import (
+    ExecutionStrategyAction as SelectorExecutionStrategyAction,
+    ExecutionStrategySelection,
+    ExecutionStrategySelectorInput,
+    select_execution_strategy,
+)
 from agentic_devloop.models import (
     ContractNormalizationRequest,
     ContractPlan,
     GeneratedContract,
     ProjectConfig,
     ReleaseObjective,
+    StrictModel,
     TaskContract,
 )
 from agentic_devloop.planner_backend import PlannerBackendResult
 from agentic_devloop.runtime_supervisor import RuntimeSupervisor, RuntimeSupervisorApplierStopKind
+from agentic_devloop.supervisor_decisions import (
+    DecisionRiskLevel,
+    ExecutionStrategyAction as SupervisorExecutionStrategyAction,
+    ExecutionStrategyDecision,
+    ExecutionStrategyOutcome,
+    SupervisorDecisionType,
+    write_supervisor_decision_artifact,
+)
 from agentic_devloop.yaml_io import load_yaml_model, write_yaml_model
 
 
@@ -29,6 +44,30 @@ class ContractPlanResult:
     plan_path: Path
     plan: ContractPlan
     written_contract_paths: list[Path] = field(default_factory=list)
+    execution_strategy_selection: ExecutionStrategySelection | None = None
+    execution_strategy_selection_path: Path | None = None
+    supervisor_decision_path: Path | None = None
+    one_shot_execution_input_path: Path | None = None
+
+
+class OneShotExecutionInput(StrictModel):
+    schema_version: str = "1.0"
+    release_id: str
+    created_at: datetime
+    created_by: str
+
+    objective_path: Path
+    objective: ReleaseObjective
+    project_id: str | None = None
+    config_dir: Path | None = None
+    budget: dict[str, Any] | None = None
+    verification_profiles: dict[str, Any] | None = None
+
+    scope: dict[str, Any]
+    evidence_requirements: list[str]
+    stop_conditions: list[str]
+    selector_inputs: ExecutionStrategySelectorInput
+    selector_selection: ExecutionStrategySelection
 
 
 @dataclass(frozen=True)
@@ -72,6 +111,7 @@ def plan_release_contracts(
     planner_backend: PlannerBackend | None = None,
     now: datetime | None = None,
     state_review_snapshot_path: Path | None = None,
+    execution_strategy_inputs: ExecutionStrategySelectorInput | dict[str, Any] | None = None,
 ) -> ContractPlanResult:
     objective = load_yaml_model(objective_path, ReleaseObjective)
     existing_contracts = _contracts_for_release(objective.release_id, contracts_dir)
@@ -83,6 +123,89 @@ def plan_release_contracts(
     config = load_project_config(project_id, config_dir, validate_repo=True) if project_id is not None else None
     if mode not in {"deterministic", "strong-model"}:
         raise ValueError(f"unsupported planning mode: {mode}")
+
+    plan_dir = runs_dir / make_plan_id(objective.release_id, now)
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    execution_strategy_selection: ExecutionStrategySelection | None = None
+    execution_strategy_selection_path: Path | None = None
+    supervisor_decision_path: Path | None = None
+    one_shot_execution_input_path: Path | None = None
+    selector_inputs: ExecutionStrategySelectorInput | None = None
+    if execution_strategy_inputs is not None:
+        selector_inputs = ExecutionStrategySelectorInput.model_validate(execution_strategy_inputs)
+        if selector_inputs.release_id != objective.release_id:
+            raise ValueError(
+                "execution strategy selector release_id "
+                f"{selector_inputs.release_id!r} did not match objective release_id {objective.release_id!r}"
+            )
+        execution_strategy_selection = select_execution_strategy(selector_inputs)
+        execution_strategy_selection_path = plan_dir / "execution_strategy_selection.json"
+        execution_strategy_selection_path.write_text(
+            json.dumps(execution_strategy_selection.model_dump(mode="json"), indent=2) + "\n",
+            encoding="utf-8",
+        )
+        supervisor_decision = _build_execution_strategy_decision(
+            decision_id=plan_dir.name,
+            objective=objective,
+            selector_inputs=selector_inputs,
+            selection=execution_strategy_selection,
+            plan_dir=plan_dir,
+            state_review_snapshot_path=state_review_snapshot_path,
+            now=now,
+        )
+        if supervisor_decision is not None:
+            supervisor_decision_path = write_supervisor_decision_artifact(
+                release_bundle_path=plan_dir,
+                decision=supervisor_decision,
+            )
+
+        if execution_strategy_selection.selected_action in {
+            SelectorExecutionStrategyAction.ONE_SHOT,
+            SelectorExecutionStrategyAction.REPLAN,
+            SelectorExecutionStrategyAction.STOP,
+        }:
+            warnings.append(
+                "Execution strategy selection skipped contract generation: "
+                f"{execution_strategy_selection.selected_action.value} ({execution_strategy_selection.reason.value})"
+            )
+            if execution_strategy_selection.selected_action == SelectorExecutionStrategyAction.ONE_SHOT:
+                one_shot_execution_input_path = _write_one_shot_execution_input(
+                    plan_dir=plan_dir,
+                    objective=objective,
+                    objective_path=objective_path,
+                    project_id=project_id,
+                    config_dir=config_dir if project_id is not None else None,
+                    project_config=config,
+                    selector_inputs=selector_inputs,
+                    selection=execution_strategy_selection,
+                    state_review_snapshot_path=state_review_snapshot_path,
+                    now=now,
+                )
+            plan = ContractPlan(
+                release_id=objective.release_id,
+                planner=f"{mode}-gated",
+                generated_contracts=[],
+                warnings=warnings,
+                budget_ledger_path=None,
+                planner_prompt_path=None,
+                state_review_snapshot_path=state_review_snapshot_path,
+            )
+            plan_path = plan_dir / "contract_plan.json"
+            plan_path.write_text(
+                json.dumps(plan.model_dump(mode="json"), indent=2) + "\n",
+                encoding="utf-8",
+            )
+            return ContractPlanResult(
+                release_id=objective.release_id,
+                plan_path=plan_path,
+                plan=plan,
+                written_contract_paths=[],
+                execution_strategy_selection=execution_strategy_selection,
+                execution_strategy_selection_path=execution_strategy_selection_path,
+                supervisor_decision_path=supervisor_decision_path,
+                one_shot_execution_input_path=one_shot_execution_input_path,
+            )
+
     if mode == "strong-model":
         if config is None:
             raise ValueError("strong-model planning requires --project")
@@ -100,9 +223,6 @@ def plan_release_contracts(
             warnings.append(
                 "Strong-model planning backend was not executed; budget was reserved and a planner prompt was written."
             )
-
-    plan_dir = runs_dir / make_plan_id(objective.release_id, now)
-    plan_dir.mkdir(parents=True, exist_ok=True)
     plan: ContractPlan | None = None
     if mode == "strong-model":
         planner_prompt_path = plan_dir / "planner_prompt.md"
@@ -193,7 +313,150 @@ def plan_release_contracts(
         plan_path=plan_path,
         plan=plan,
         written_contract_paths=written_contract_paths,
+        execution_strategy_selection=execution_strategy_selection,
+        execution_strategy_selection_path=execution_strategy_selection_path,
+        supervisor_decision_path=supervisor_decision_path,
+        one_shot_execution_input_path=one_shot_execution_input_path,
     )
+
+
+def _build_execution_strategy_decision(
+    *,
+    decision_id: str,
+    objective: ReleaseObjective,
+    selector_inputs: ExecutionStrategySelectorInput,
+    selection: ExecutionStrategySelection,
+    plan_dir: Path,
+    state_review_snapshot_path: Path | None,
+    now: datetime | None,
+) -> ExecutionStrategyDecision | None:
+    action_mapping: dict[SelectorExecutionStrategyAction, SupervisorExecutionStrategyAction] = {
+        SelectorExecutionStrategyAction.ONE_SHOT: SupervisorExecutionStrategyAction.ONE_SHOT,
+        SelectorExecutionStrategyAction.SEQUENTIAL_CONTRACTS: SupervisorExecutionStrategyAction.SEQUENTIAL_CONTRACTS,
+        SelectorExecutionStrategyAction.PARALLEL_CONTRACTS: SupervisorExecutionStrategyAction.PARALLEL_CONTRACTS,
+        SelectorExecutionStrategyAction.STACKED_BRANCHES: SupervisorExecutionStrategyAction.STACKED_BRANCHES,
+        SelectorExecutionStrategyAction.PATCH_HANDOFF: SupervisorExecutionStrategyAction.PATCH_HANDOFF,
+        SelectorExecutionStrategyAction.REPLAN: SupervisorExecutionStrategyAction.REPLAN,
+    }
+    if selection.selected_action not in action_mapping:
+        return None
+
+    selected_action = action_mapping[selection.selected_action]
+    outcome_mapping: dict[SupervisorExecutionStrategyAction, ExecutionStrategyOutcome] = {
+        SupervisorExecutionStrategyAction.ONE_SHOT: ExecutionStrategyOutcome.PROCEED_ONE_SHOT,
+        SupervisorExecutionStrategyAction.SEQUENTIAL_CONTRACTS: ExecutionStrategyOutcome.PROCEED_SEQUENTIAL,
+        SupervisorExecutionStrategyAction.PARALLEL_CONTRACTS: ExecutionStrategyOutcome.PROCEED_PARALLEL,
+        SupervisorExecutionStrategyAction.STACKED_BRANCHES: ExecutionStrategyOutcome.PROCEED_STACKED,
+        SupervisorExecutionStrategyAction.PATCH_HANDOFF: ExecutionStrategyOutcome.PROCEED_PATCH_HANDOFF,
+        SupervisorExecutionStrategyAction.REPLAN: ExecutionStrategyOutcome.REPLAN,
+    }
+    outcome = outcome_mapping[selected_action]
+    evidence_paths: list[Path] = []
+    if state_review_snapshot_path is not None and state_review_snapshot_path.exists():
+        evidence_paths.append(state_review_snapshot_path)
+    if plan_dir.exists():
+        selection_path = plan_dir / "execution_strategy_selection.json"
+        if selection_path.exists():
+            evidence_paths.append(selection_path.relative_to(plan_dir))
+
+    risk_level = DecisionRiskLevel.MODERATE
+    if selection.selected_action == SelectorExecutionStrategyAction.REPLAN:
+        risk_level = DecisionRiskLevel.HIGH
+    if selection.selected_action == SelectorExecutionStrategyAction.ONE_SHOT:
+        risk_level = DecisionRiskLevel.MODERATE
+
+    fallback_plan = "Replan the release into bounded contracts and rerun planning gates before execution."
+    if selection.selected_action == SelectorExecutionStrategyAction.ONE_SHOT:
+        fallback_plan = "Fallback to sequential contract decomposition if one-shot execution cannot stay cohesive."
+
+    validators_to_rerun = ["objective_scope", "verification"]
+    return ExecutionStrategyDecision.model_validate(
+        {
+            "decision_type": SupervisorDecisionType.EXECUTION_STRATEGY,
+            "decision_id": decision_id,
+            "release_id": objective.release_id,
+            "decided_at": now or datetime.now(UTC),
+            "decided_by": "execution_strategy_selector",
+            "rationale": (
+                f"Selected {selection.selected_action.value} because {selection.reason.value}. "
+                f"Objective title={objective.title!r} task_ids={selector_inputs.task_ids!r}."
+            ),
+            "evidence_paths": [str(path) for path in evidence_paths],
+            "risk_level": risk_level,
+            "selected_action": selected_action,
+            "outcome": outcome,
+            "fallback_plan": fallback_plan,
+            "validators_to_rerun": validators_to_rerun,
+        }
+    )
+
+
+def _write_one_shot_execution_input(
+    *,
+    plan_dir: Path,
+    objective: ReleaseObjective,
+    objective_path: Path,
+    project_id: str | None,
+    config_dir: Path | None,
+    project_config: ProjectConfig | None,
+    selector_inputs: ExecutionStrategySelectorInput,
+    selection: ExecutionStrategySelection,
+    state_review_snapshot_path: Path | None,
+    now: datetime | None,
+) -> Path:
+    evidence = [
+        "git diff",
+        "git status --short --branch",
+        "pytest output",
+        "contract plan JSON",
+        "supervisor decision record",
+    ]
+    stop_conditions = [
+        "Forbidden paths change detected.",
+        "Generated artifacts change detected.",
+        "Lockfile change detected.",
+        "Migration change detected.",
+        "Unsafe policy expansion detected.",
+        "Missing required evidence.",
+        "Verification failed.",
+        "Finalization policy blocked.",
+        "Objective scope expands beyond bounded one-shot intent.",
+    ]
+    scope = {
+        "strategy": "one_shot",
+        "task_ids": selector_inputs.task_ids,
+        "objective_title": objective.title,
+        "objective_summary": objective.objective,
+        "acceptance_criteria": objective.acceptance_criteria,
+        "non_goals": objective.non_goals,
+        "state_review_snapshot_path": str(state_review_snapshot_path) if state_review_snapshot_path else None,
+    }
+    payload = OneShotExecutionInput(
+        release_id=objective.release_id,
+        created_at=now or datetime.now(UTC),
+        created_by="plan_release_contracts",
+        objective_path=objective_path,
+        objective=objective,
+        project_id=project_id,
+        config_dir=config_dir,
+        budget=project_config.budget.model_dump(mode="json") if project_config is not None else None,
+        verification_profiles=(
+            {name: profile.model_dump(mode="json") for name, profile in project_config.verification_profiles.items()}
+            if project_config is not None
+            else None
+        ),
+        scope=scope,
+        evidence_requirements=evidence,
+        stop_conditions=stop_conditions,
+        selector_inputs=selector_inputs,
+        selector_selection=selection,
+    )
+    target_path = plan_dir / "one_shot_execution_input.json"
+    target_path.write_text(
+        json.dumps(payload.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return target_path
 
 
 def _contracts_for_release(release_id: str, contracts_dir: Path) -> list[TaskContract]:

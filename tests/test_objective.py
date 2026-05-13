@@ -121,6 +121,7 @@ def test_run_objective_plans_writes_contracts_and_runs_release(tmp_path) -> None
 
     assert result.release_id == "v1.2.0"
     assert result.planning.written_contract_paths == [tmp_path / "contracts" / "objective-0001.yaml"]
+    assert result.release is not None
     assert result.release.decision == "accepted"
     assert result.release.task_results[0].decision.task_id == "objective-0001"
 

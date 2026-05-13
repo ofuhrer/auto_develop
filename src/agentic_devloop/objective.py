@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Callable
 
 from agentic_devloop.orchestrator import ExecutorProtocol
+from agentic_devloop.execution_strategy import ExecutionStrategySelectorInput
 from agentic_devloop.planning import ContractPlanResult, PlannerBackend, plan_release_contracts
 from agentic_devloop.release import ReleaseRunResult, run_release
 
@@ -13,7 +14,7 @@ from agentic_devloop.release import ReleaseRunResult, run_release
 class ObjectiveRunResult:
     release_id: str
     planning: ContractPlanResult
-    release: ReleaseRunResult
+    release: ReleaseRunResult | None
 
 
 def run_objective(
@@ -37,6 +38,7 @@ def run_objective(
     execution_mode: str = "sequential",
     debug_keep_artifacts: bool = False,
     progress: Callable[[str], None] | None = None,
+    execution_strategy_inputs: ExecutionStrategySelectorInput | dict | None = None,
 ) -> ObjectiveRunResult:
     planning = plan_release_contracts(
         objective_path=objective_path,
@@ -47,8 +49,11 @@ def run_objective(
         project_id=project_id,
         config_dir=config_dir,
         planner_backend=planner_backend,
+        execution_strategy_inputs=execution_strategy_inputs,
     )
     if not planning.written_contract_paths:
+        if planning.execution_strategy_selection is not None:
+            return ObjectiveRunResult(release_id=planning.release_id, planning=planning, release=None)
         raise ValueError("objective planning produced no runnable contracts")
 
     release = run_release(

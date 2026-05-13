@@ -229,6 +229,168 @@ def test_strong_model_plan_records_state_review_snapshot_path_with_backend_outpu
     assert plan["state_review_snapshot_path"] == str(state_review_snapshot_path)
 
 
+def test_one_shot_strategy_skips_planner_backend_and_contract_writes(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# demo\n", encoding="utf-8")
+    objective_path = tmp_path / "objective.yaml"
+    _write_yaml(
+        objective_path,
+        {
+            "release_id": "v1.0.0",
+            "title": "Cohesive objective",
+            "objective": "Implement a cohesive change.",
+            "acceptance_criteria": ["One-shot input exists."],
+        },
+    )
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "worker", "max_walltime_minutes": 5},
+            "model_roles": {
+                "planner": {"type": "codex_cli", "model": "gpt-5.5", "max_walltime_minutes": 5}
+            },
+            "model_routing": {"default_role": "planner"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 1,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    class ExplodingPlannerBackend:
+        def generate(self, **_: object) -> dict[str, object]:
+            raise AssertionError("planner backend must not be invoked for one-shot strategy")
+
+    proposed_dir = tmp_path / "proposed-contracts"
+    result = plan_release_contracts(
+        objective_path=objective_path,
+        contracts_dir=tmp_path / "contracts",
+        runs_dir=tmp_path / "runs",
+        write_contracts_dir=proposed_dir,
+        mode="strong-model",
+        project_id="demo",
+        config_dir=config_dir,
+        planner_backend=ExplodingPlannerBackend(),
+        execution_strategy_inputs={
+            "release_id": "v1.0.0",
+            "task_ids": ["v1-0-0-0001"],
+            "cohesive_scope": True,
+        },
+    )
+
+    assert result.written_contract_paths == []
+    assert result.execution_strategy_selection is not None
+    assert result.execution_strategy_selection.selected_action.value == "one_shot"
+    assert result.execution_strategy_selection_path is not None
+    assert result.execution_strategy_selection_path.exists()
+    assert result.supervisor_decision_path is not None
+    assert result.supervisor_decision_path.exists()
+    assert result.one_shot_execution_input_path is not None
+    assert result.one_shot_execution_input_path.exists()
+
+
+def test_decomposition_strategy_still_runs_planner_backend_and_writes_contracts(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# demo\n", encoding="utf-8")
+    objective_path = tmp_path / "objective.yaml"
+    _write_yaml(
+        objective_path,
+        {
+            "release_id": "v1.0.1",
+            "title": "Decomposed objective",
+            "objective": "Implement independent tasks.",
+            "acceptance_criteria": ["Contracts exist."],
+        },
+    )
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "worker", "max_walltime_minutes": 5},
+            "model_roles": {
+                "planner": {"type": "codex_cli", "model": "gpt-5.5", "max_walltime_minutes": 5}
+            },
+            "model_routing": {"default_role": "planner"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 1,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    proposed_dir = tmp_path / "proposed-contracts"
+
+    called = {"planner": False}
+
+    class StubPlannerBackend:
+        def generate(self, **_: object) -> dict[str, object]:
+            called["planner"] = True
+            return {
+                "release_id": "v1.0.1",
+                "planner": "strong-model",
+                "generated_contracts": [
+                    {
+                        "task_id": "v1-0-1-0001",
+                        "title": "Bounded task",
+                        "objective": "Implement a bounded change.",
+                        "rationale": "Decomposition requires at least one task.",
+                        "suggested_contract": {
+                            "task_id": "v1-0-1-0001",
+                            "release_id": "v1.0.1",
+                            "title": "Bounded task",
+                            "task_type": "documentation",
+                            "budget_class": "S",
+                            "objective": "Write docs/bounded.md.",
+                            "allowed_files": ["docs/bounded.md"],
+                            "forbidden_changes": ["Do not edit source files."],
+                            "required_evidence": ["git diff", "test output"],
+                            "verification": {"commands": ["true"]},
+                            "stop_conditions": ["Verification fails."],
+                        },
+                    }
+                ],
+                "warnings": [],
+            }
+
+    result = plan_release_contracts(
+        objective_path=objective_path,
+        contracts_dir=tmp_path / "contracts",
+        runs_dir=tmp_path / "runs",
+        write_contracts_dir=proposed_dir,
+        mode="strong-model",
+        project_id="demo",
+        config_dir=config_dir,
+        planner_backend=StubPlannerBackend(),
+        execution_strategy_inputs={
+            "release_id": "v1.0.1",
+            "task_ids": ["v1-0-1-0001", "v1-0-1-0002"],
+            "coupled_tasks": True,
+        },
+    )
+
+    assert called["planner"] is True
+    assert result.written_contract_paths == [proposed_dir / "v1-0-1-0001.yaml"]
+    assert (proposed_dir / "v1-0-1-0001.yaml").exists()
+
+
 def test_parse_planner_output_validates_nested_task_contracts() -> None:
     plan = parse_planner_output(
         json.dumps(
