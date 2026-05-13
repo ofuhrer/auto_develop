@@ -22,6 +22,9 @@ from agentic_devloop.models import (
     GeneratedContract,
     ModelOutputNormalizationActionPayload,
     PlannerAdmissionFailureSupervisorInput,
+    PlannerAdmissionRepairAction,
+    PlannerAdmissionRepairActionPayload,
+    PlannerAdmissionRepairOutcome,
     ProjectConfig,
     ReleaseObjective,
     StrictModel,
@@ -626,6 +629,14 @@ def parse_planner_output(
         validate_generated_contracts(plan, project_config=project_config)
     except ValueError as error:
         message = str(error)
+        _persist_planner_admission_repair_stop(
+            plan=plan,
+            planner=planner,
+            bundle_path=normalization_bundle_path,
+            project_config=project_config,
+            failure_message=message,
+            validators_to_rerun=_PLANNER_ADMISSION_VALIDATORS_TO_RERUN,
+        )
         if "unsafe whole-repo allowed_files patterns" in message:
             raise PlannerNormalizationError(
                 message,
@@ -642,8 +653,124 @@ def parse_planner_output(
                     reason=message,
                 ),
             ) from error
-        raise
+        raise PlannerNormalizationError(
+            message,
+            stop_evidence=PlannerNormalizationStopEvidence(
+                kind=RuntimeSupervisorApplierStopKind.BYPASSES_HARD_GATE,
+                reason=message,
+            ),
+        ) from error
     return plan
+
+
+def _persist_planner_admission_repair_stop(
+    *,
+    plan: ContractPlan,
+    planner: str,
+    bundle_path: Path | None,
+    project_config: ProjectConfig | None,
+    failure_message: str,
+    validators_to_rerun: list[str],
+) -> None:
+    if bundle_path is None:
+        return
+    matching = _match_generated_contract_for_admission_error(plan, failure_message)
+    failure_inputs: list[PlannerAdmissionFailureSupervisorInput] = []
+    if matching is not None:
+        failure_inputs.append(
+            _build_planner_admission_supervisor_input_artifact(
+                generated=matching,
+                plan=plan,
+                project_config=project_config,
+                validation_errors=[failure_message],
+                validators_to_rerun=validators_to_rerun,
+            )
+        )
+    else:
+        raw_paths = [
+            path
+            for path in (
+                plan.planner_prompt_path,
+                plan.planner_stdout_path,
+                plan.planner_stderr_path,
+                plan.planner_metadata_path,
+            )
+            if path is not None
+        ]
+        failure_inputs.append(
+            PlannerAdmissionFailureSupervisorInput.model_validate(
+                {
+                    "release_id": plan.release_id,
+                    "task_id": "unknown",
+                    "validation_errors": [failure_message],
+                    "raw_planner_artifact_paths": raw_paths,
+                    "objective_context": {},
+                    "policy_constraints": [
+                        "Contract admission must pass deterministic validators before writing generated contracts."
+                    ],
+                    "scope_budget_signals": {},
+                    "validators_to_rerun": list(validators_to_rerun),
+                }
+            )
+        )
+    evidence_paths = [
+        path
+        for path in (
+            plan.planner_prompt_path,
+            plan.planner_stdout_path,
+            plan.planner_stderr_path,
+            plan.planner_metadata_path,
+        )
+        if path is not None
+    ]
+    if not evidence_paths:
+        evidence_paths = [Path("in_memory_planner_output.json")]
+    action_payload = PlannerAdmissionRepairActionPayload.model_validate(
+        {
+            "admission_failure_inputs": failure_inputs,
+            "selected_action": PlannerAdmissionRepairAction.STOP,
+            "outcome": PlannerAdmissionRepairOutcome.STOP_AND_ESCALATE,
+            "rationale": (
+                "Planner-generated contracts failed deterministic admission. "
+                "No bounded deterministic repair applies without changing task intent or policy."
+            ),
+            "fallback_plan": "Stop planning and require a bounded planner rerun that satisfies admission constraints.",
+            "validators_to_rerun": list(validators_to_rerun),
+            "evidence_paths": [path.resolve() for path in evidence_paths],
+            "stop_reason": failure_message,
+        }
+    )
+    supervisor = RuntimeSupervisor()
+    supervisor_result = supervisor.apply_planner_admission_repair_action(
+        source_evidence_paths=tuple(path.resolve() for path in evidence_paths),
+        action_payload=action_payload,
+    )
+    target_path = bundle_path / "planner_admission_repair_stop.json"
+    target_path.write_text(
+        json.dumps(
+            {
+                "planner": planner,
+                "applied": supervisor_result.applied,
+                "action_kind": supervisor_result.action_kind.value,
+                "action_payload": action_payload.model_dump(mode="json"),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _match_generated_contract_for_admission_error(
+    plan: ContractPlan, message: str
+) -> GeneratedContract | None:
+    for generated in plan.generated_contracts:
+        if generated.task_id in message:
+            return generated
+        if generated.suggested_contract.task_id in message:
+            return generated
+    return None
 
 
 def _repair_planner_json_tail(raw_output: str) -> dict[str, Any] | None:
@@ -831,7 +958,20 @@ def _normalize_contracts_for_admission(
         normalized_generated_contract = generated.model_copy(update={"suggested_contract": normalized_contract})
         rerun_plan = plan.model_copy(update={"generated_contracts": [normalized_generated_contract]})
         validators_to_rerun = list(_PLANNER_ADMISSION_VALIDATORS_TO_RERUN)
+        ContractPlan.model_validate(rerun_plan.model_dump(mode="python"))
         validate_generated_contracts(rerun_plan, project_config=project_config)
+        repair_action_payload = _build_planner_admission_repair_action_payload(
+            generated=generated,
+            plan=plan,
+            supervisor_input=supervisor_input_artifact,
+            normalization_outcome=outcome,
+            validators_to_rerun=validators_to_rerun,
+        )
+        supervisor = RuntimeSupervisor()
+        supervisor_result = supervisor.apply_planner_admission_repair_action(
+            source_evidence_paths=tuple(path.resolve() for path in repair_action_payload.evidence_paths),
+            action_payload=repair_action_payload,
+        )
         normalized_generated.append(normalized_generated_contract)
         normalized_evidence.append(
             "planner_contract_normalization="
@@ -841,6 +981,8 @@ def _normalize_contracts_for_admission(
                     "supervisor_input_artifact": supervisor_input_artifact.model_dump(mode="json"),
                     "validators_to_rerun": validators_to_rerun,
                     "validator_rerun_succeeded": True,
+                    "planner_admission_repair_action": repair_action_payload.model_dump(mode="json"),
+                    "planner_admission_repair_applied": supervisor_result.applied,
                 },
                 sort_keys=True,
             )
@@ -851,6 +993,52 @@ def _normalize_contracts_for_admission(
         update={
             "generated_contracts": normalized_generated,
             "warnings": [*plan.warnings, *normalized_evidence],
+        }
+    )
+
+
+def _build_planner_admission_repair_action_payload(
+    *,
+    generated: GeneratedContract,
+    plan: ContractPlan,
+    supervisor_input: PlannerAdmissionFailureSupervisorInput,
+    normalization_outcome: object,
+    validators_to_rerun: list[str],
+) -> PlannerAdmissionRepairActionPayload:
+    evidence_paths = [
+        path
+        for path in (
+            plan.planner_prompt_path,
+            plan.planner_stdout_path,
+            plan.planner_stderr_path,
+            plan.planner_metadata_path,
+        )
+        if path is not None
+    ]
+    if not evidence_paths:
+        evidence_paths = [Path("in_memory_planner_output.json")]
+    changed_fields = getattr(normalization_outcome, "changed_fields", None)
+    scope_notes: list[str] = []
+    if changed_fields:
+        for field in changed_fields:
+            path = getattr(field, "path", None)
+            if isinstance(path, str) and path.strip():
+                scope_notes.append(f"normalized:{path}")
+    if not scope_notes:
+        scope_notes = ["normalized:no_semantic_changes"]
+    return PlannerAdmissionRepairActionPayload.model_validate(
+        {
+            "admission_failure_inputs": [supervisor_input],
+            "selected_action": PlannerAdmissionRepairAction.ACCEPT_BROAD_BUT_MECHANICAL,
+            "outcome": PlannerAdmissionRepairOutcome.ACCEPT_WITH_MECHANICAL_GUARDS,
+            "rationale": (
+                "Applied bounded deterministic normalization for a repairable admission failure without changing "
+                "allowed_files, forbidden_changes, or depends_on."
+            ),
+            "fallback_plan": "Stop planning and require a bounded planner rerun that satisfies admission constraints.",
+            "validators_to_rerun": list(validators_to_rerun),
+            "evidence_paths": [path.resolve() for path in evidence_paths],
+            "accepted_scope_notes": scope_notes,
         }
     )
 
