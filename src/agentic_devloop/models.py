@@ -568,7 +568,7 @@ class FeatureReviewFinding(StrictModel):
             if isinstance(value, str):
                 item = value.strip()
                 if not item:
-                    raise ValueError("feature review evidence paths must not be empty")
+                    continue
                 normalized.append(item)
                 continue
             normalized.append(value)
