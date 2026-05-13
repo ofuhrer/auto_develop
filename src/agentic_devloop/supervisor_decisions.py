@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -211,11 +212,24 @@ def supervisor_decision_artifact_path(
     decision_type: SupervisorDecisionType,
     decision_id: str,
 ) -> Path:
-    normalized_decision_id = decision_id.strip()
-    if not normalized_decision_id:
-        raise ValueError("decision_id must not be empty")
+    normalized_decision_id = _safe_decision_filename_token(decision_id)
     filename = f"{decision_type.value}__{normalized_decision_id}.json"
     return release_bundle_path / "supervisor_decisions" / filename
+
+
+def _safe_decision_filename_token(decision_id: str) -> str:
+    normalized_decision_id = decision_id.strip()
+    if (
+        not normalized_decision_id
+        or "/" in normalized_decision_id
+        or "\\" in normalized_decision_id
+        or ".." in normalized_decision_id
+    ):
+        raise ValueError("decision_id must be a non-empty filename token without path separators or '..'")
+    safe_token = re.sub(r"[^A-Za-z0-9._-]+", "_", normalized_decision_id).strip("._")
+    if not safe_token:
+        raise ValueError("decision_id must not be empty")
+    return safe_token
 
 
 def write_supervisor_decision_artifact(

@@ -82,6 +82,14 @@ from agentic_devloop.worktree import create_worktree
 from agentic_devloop.yaml_io import load_yaml_model
 
 
+@dataclass(frozen=True)
+class _SoftBudgetDetails:
+    budget_name: str
+    configured_limit: float
+    actual: float
+    parsed: bool
+
+
 class ExecutorProtocol(Protocol):
     def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
         ...
@@ -463,7 +471,7 @@ def _apply_budget_soft_gate_decision(
             ]
         }
     )
-    budget_name, configured_limit, actual = _soft_budget_details_from_finding(finding.risk, finding_id=finding.finding_id)
+    budget_details = _soft_budget_details_from_finding(finding.risk, finding_id=finding.finding_id)
     if severe:
         outcome = SoftGateDecisionOutcome.REJECT
         final_decision = Decision.NEEDS_REVISION
@@ -476,6 +484,8 @@ def _apply_budget_soft_gate_decision(
         rationale = "Minor budget overage accepted because hard invariants and verification passed."
         fallback_plan = "Escalate to task split if overage repeats in the next attempt."
         supervisor_outcome = BudgetAcceptanceOutcome.ACCEPT_OVERAGE
+    if not budget_details.parsed:
+        rationale = f"{rationale} Raw budget risk was unparseable and recorded for audit: {finding.risk}"
 
     bundle = write_task_soft_gate_decision(
         bundle,
@@ -512,9 +522,9 @@ def _apply_budget_soft_gate_decision(
                     soft_gate_path,
                 ],
                 "decision_type": SupervisorDecisionType.SOFT_BUDGET_ACCEPTANCE,
-                "budget_name": budget_name,
-                "configured_limit": configured_limit,
-                "actual": actual,
+                "budget_name": budget_details.budget_name,
+                "configured_limit": budget_details.configured_limit,
+                "actual": budget_details.actual,
                 "outcome": supervisor_outcome,
             }
         ),
@@ -542,7 +552,7 @@ _SOFT_BUDGET_RISK_PATTERN = re.compile(
 )
 
 
-def _soft_budget_details_from_finding(risk: str, *, finding_id: str) -> tuple[str, float, float]:
+def _soft_budget_details_from_finding(risk: str, *, finding_id: str) -> _SoftBudgetDetails:
     budget_name = "soft_budget"
     if finding_id.endswith(":changed_files_budget"):
         budget_name = "max_changed_files_per_task"
@@ -551,16 +561,29 @@ def _soft_budget_details_from_finding(risk: str, *, finding_id: str) -> tuple[st
 
     match = _SOFT_BUDGET_RISK_PATTERN.search(risk)
     if match is None:
-        raise ValueError(f"unparseable soft budget finding risk: {risk}")
+        return _SoftBudgetDetails(
+            budget_name=f"{budget_name}_unparsed",
+            configured_limit=1.0,
+            actual=1.0,
+            parsed=False,
+        )
 
     actual = float(match.group("actual"))
     configured_limit = float(match.group("limit"))
-    if configured_limit <= 0:
-        raise ValueError(f"soft budget limit must be positive: {configured_limit}")
-    if actual < configured_limit:
-        raise ValueError(f"soft budget actual must reach limit: {actual} < {configured_limit}")
+    if configured_limit <= 0 or actual < configured_limit:
+        return _SoftBudgetDetails(
+            budget_name=f"{budget_name}_unparsed",
+            configured_limit=1.0,
+            actual=1.0,
+            parsed=False,
+        )
 
-    return budget_name, configured_limit, actual
+    return _SoftBudgetDetails(
+        budget_name=budget_name,
+        configured_limit=configured_limit,
+        actual=actual,
+        parsed=True,
+    )
 
 
 def _verification_commands(config: ProjectConfig, task: TaskContract) -> list[str]:

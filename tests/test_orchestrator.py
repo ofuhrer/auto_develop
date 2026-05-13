@@ -18,7 +18,7 @@ from agentic_devloop.models import (
     ProjectConfig,
 )
 from agentic_devloop import orchestrator as orchestrator_module
-from agentic_devloop.orchestrator import run_task
+from agentic_devloop.orchestrator import _soft_budget_details_from_finding, run_task
 from agentic_devloop.state_review import collect_state_review_snapshot, write_state_review_snapshot_artifact
 from agentic_devloop.supervisor_decisions import (
     BudgetAcceptanceOutcome,
@@ -363,6 +363,18 @@ def test_run_task_writes_typed_soft_budget_acceptance_decision(tmp_path) -> None
     assert loaded.budget_name == "max_changed_files_per_task"
     assert loaded.configured_limit == 10.0
     assert loaded.actual == 11.0
+
+
+def test_soft_budget_details_fallback_for_unparseable_risk() -> None:
+    details = _soft_budget_details_from_finding(
+        "budget pressure exists, but this text is intentionally not parseable",
+        finding_id="demo-0001:changed_files_budget",
+    )
+
+    assert details.budget_name == "max_changed_files_per_task_unparsed"
+    assert details.configured_limit == 1.0
+    assert details.actual == 1.0
+    assert details.parsed is False
 
 
 def test_executor_attempts_stream_codex_output_to_progress(tmp_path, monkeypatch) -> None:
