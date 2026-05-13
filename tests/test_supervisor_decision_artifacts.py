@@ -48,6 +48,28 @@ def test_supervisor_decision_artifact_path_is_deterministic(tmp_path: Path) -> N
     assert supervisor_decisions_artifacts_dir(tmp_path) == tmp_path / "supervisor_decisions"
 
 
+@pytest.mark.parametrize("decision_id", ["../escape", "nested/path", r"nested\path", "safe..but-bad"])
+def test_supervisor_decision_artifact_path_rejects_path_like_decision_ids(
+    tmp_path: Path, decision_id: str
+) -> None:
+    with pytest.raises(ValueError, match="path separators"):
+        supervisor_decision_artifact_path(
+            release_bundle_path=tmp_path,
+            decision_type=SupervisorDecisionType.REPAIR_LOOP_CONTINUATION,
+            decision_id=decision_id,
+        )
+
+
+def test_supervisor_decision_artifact_path_sanitizes_filename_token(tmp_path: Path) -> None:
+    path = supervisor_decision_artifact_path(
+        release_bundle_path=tmp_path,
+        decision_type=SupervisorDecisionType.REPAIR_LOOP_CONTINUATION,
+        decision_id="repair 003:retry",
+    )
+
+    assert path == tmp_path / "supervisor_decisions" / "repair_loop_continuation__repair_003_retry.json"
+
+
 def test_write_and_load_supervisor_decision_artifact_round_trip(tmp_path: Path) -> None:
     evidence_file = tmp_path / "verification.log"
     evidence_file.write_text("ok\n", encoding="utf-8")

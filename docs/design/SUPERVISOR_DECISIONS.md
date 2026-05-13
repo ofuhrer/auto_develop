@@ -2,7 +2,9 @@
 
 This document defines the typed, versioned supervisor decision records introduced for `supervisor-decision-records`.
 
-Status: implemented schema models only. Runtime persistence/consumption wiring is intentionally out of scope for this increment.
+Status: schema models and deterministic artifact IO are implemented. The runtime currently emits and reloads
+`soft_budget_acceptance` decision artifacts for task-level soft-budget exceptions. Other decision types are
+schema-ready but not yet wired into runtime control flow.
 
 ## Versioning
 
@@ -65,5 +67,6 @@ These fields capture identity, timing, provenance, and evidence linkage for all 
 ## Design Constraints
 
 - Strict parsing is enabled (`extra="forbid"`) via shared `StrictModel` conventions.
-- Runtime behavior is not changed in this increment.
-- Deterministic hard validators remain authoritative; these schemas only define decision record shape and invariants.
+- Decision artifacts are written below `supervisor_decisions/` using sanitized filename tokens; path-like decision IDs are rejected.
+- Loading artifacts validates both schema shape and referenced evidence paths.
+- Deterministic hard validators remain authoritative; supervisor decisions record and bound soft judgment but do not override hard gates.
