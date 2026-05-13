@@ -54,6 +54,10 @@ from agentic_devloop.runtime_supervisor import (
     RuntimeSupervisorInput,
     TuningReportPaths,
 )
+from agentic_devloop.state_review import (
+    collect_state_review_snapshot,
+    write_state_review_snapshot_artifact,
+)
 from agentic_devloop.yaml_io import load_yaml_model
 
 
@@ -366,6 +370,30 @@ def _select_contracts(
         if task.release_id == release_id:
             contracts.append(path)
     return contracts
+
+
+def collect_release_planning_state_review_snapshot(
+    *,
+    config_repo_path: Path,
+    repo_state_path: Path | None,
+    runs_dir: Path,
+    planning_artifacts_dir: Path,
+    now: datetime | None = None,
+) -> Path:
+    if not planning_artifacts_dir.exists():
+        raise ValueError(
+            f"release planning artifacts directory does not exist: {planning_artifacts_dir}"
+        )
+    snapshot = collect_state_review_snapshot(
+        repo_path=config_repo_path,
+        repo_state_path=repo_state_path,
+        runs_dir=runs_dir,
+        now=now,
+    )
+    return write_state_review_snapshot_artifact(
+        snapshot=snapshot,
+        artifacts_dir=planning_artifacts_dir,
+    )
 
 
 def _run_release_sequential(

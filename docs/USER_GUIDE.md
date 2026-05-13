@@ -290,7 +290,7 @@ acceptance_criteria:
 
 Use objectives for planning. Use contracts for execution.
 
-The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the current governor service chooses one epic at a time, produces an objective, and feeds the existing objective/contract/release machinery. The runtime supervisor now records structured repair/resume evidence for recoverable release failures. The broader multi-epic governor loop, live pre-epic repository state review, independent feature-review agent, reviewer-comment repair loop, and always-on state refresh remain planned beyond the current one-epic governor boundary.
+The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the current governor service chooses one epic at a time, produces an objective, and feeds the existing objective/contract/release machinery. The runtime supervisor now records structured repair/resume evidence for recoverable release failures. The codebase now also supports deterministic state-review snapshot artifacts (`state_review_snapshot.json`) and contract-plan references (`state_review_snapshot_path`) as bounded evidence inputs. The broader multi-epic governor loop, fully agent-driven pre-epic state-review decisioning, independent feature-review agent, reviewer-comment repair loop, and always-on state refresh remain planned beyond the current one-epic governor boundary.
 
 Use backlog planning first:
 
@@ -708,7 +708,7 @@ Key options:
 - `--mode strong-model --execute-planner`: have the configured planner agent choose and prioritize epics from the documentation, roadmap, and goal.
 - `--write-objective`: write the selected epic into `objectives/`.
 
-Use this command before `plan-release` or `run-objective` when the next development epic should be selected by the roadmap-governor agent instead of manually supplied. Deterministic mode is only a fallback and test scaffold. The current governor path can use bounded docs, roadmap, repo-state memory, run artifacts, validation findings, metrics, and tuning reports to inform the next one-epic cycle. It does not yet perform a full live repository review over source layout, branch state, unresolved findings, and compact release history before selection; that state-review pass is planned for the multi-epic governor.
+Use this command before `plan-release` or `run-objective` when the next development epic should be selected by the roadmap-governor agent instead of manually supplied. Deterministic mode is only a fallback and test scaffold. The current governor path can use bounded docs, roadmap, repo-state memory, run artifacts, validation findings, metrics, and tuning reports to inform the next one-epic cycle. It now has a deterministic state-review snapshot artifact path (`state_review_snapshot.json` persisted into planning artifacts and surfaced as `state_review_snapshot_path` in contract-plan payloads), but it does not yet run a full agent-driven pre-epic state-review decision loop over live repository findings before epic selection.
 
 Key options:
 
@@ -1081,7 +1081,7 @@ Current important limits:
 - The strongest workflow still depends on well-written objectives and contracts.
 - Fully dynamic model-driven orchestration is still evolving.
 - The broader multi-epic governor loop remains planned.
-- Full live state-review before backlog selection remains planned.
+- Full agent-driven pre-epic state-review decisioning before backlog selection remains planned.
 - Independent reviewer-agent plus reviewer-comment repair loop remains planned.
 - Pull request creation is not yet automated by the CLI.
 - Remote execution adapters, such as cluster or SLURM execution, are still project-specific work.

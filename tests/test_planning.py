@@ -52,6 +52,34 @@ def test_plan_release_contracts_writes_conservative_draft_when_no_contracts_exis
     assert plan["warnings"]
 
 
+def test_plan_release_contracts_records_state_review_snapshot_path(tmp_path) -> None:
+    objective_path = tmp_path / "objective.yaml"
+    _write_yaml(
+        objective_path,
+        {
+            "release_id": "v0.2.0",
+            "title": "Small release",
+            "objective": "Ship one bounded increment.",
+            "acceptance_criteria": ["Contract evidence exists."],
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    state_review_snapshot_path = tmp_path / "planning_artifacts" / "state_review_snapshot.json"
+    state_review_snapshot_path.parent.mkdir(parents=True)
+    state_review_snapshot_path.write_text("{}", encoding="utf-8")
+
+    result = plan_release_contracts(
+        objective_path=objective_path,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        state_review_snapshot_path=state_review_snapshot_path,
+    )
+
+    plan = json.loads(result.plan_path.read_text(encoding="utf-8"))
+    assert plan["state_review_snapshot_path"] == str(state_review_snapshot_path)
+
+
 def test_plan_release_contracts_writes_validated_proposed_contracts(tmp_path) -> None:
     objective_path = tmp_path / "objective.yaml"
     _write_yaml(
@@ -135,6 +163,72 @@ def test_strong_model_plan_reserves_budget_and_writes_prompt(tmp_path) -> None:
     assert result.plan.planner_prompt_path.exists()
 
 
+def test_strong_model_plan_records_state_review_snapshot_path_with_backend_output(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# demo\n", encoding="utf-8")
+    objective_path = tmp_path / "objective.yaml"
+    _write_yaml(
+        objective_path,
+        {
+            "release_id": "v0.3.4",
+            "title": "Small release",
+            "objective": "Ship one bounded increment.",
+            "acceptance_criteria": ["Contract evidence exists."],
+        },
+    )
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "worker", "max_walltime_minutes": 5},
+            "model_roles": {
+                "planner": {"type": "codex_cli", "model": "gpt-5.5", "max_walltime_minutes": 5}
+            },
+            "model_routing": {"default_role": "planner"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 1,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    state_review_snapshot_path = tmp_path / "planning_artifacts" / "state_review_snapshot.json"
+    state_review_snapshot_path.parent.mkdir(parents=True)
+    state_review_snapshot_path.write_text("{}", encoding="utf-8")
+
+    class StubPlannerBackend:
+        def generate(self, **_: object) -> dict[str, object]:
+            return {
+                "release_id": "v0.3.4",
+                "planner": "strong-model",
+                "generated_contracts": [],
+                "warnings": [],
+            }
+
+    result = plan_release_contracts(
+        objective_path=objective_path,
+        contracts_dir=tmp_path / "contracts",
+        runs_dir=tmp_path / "runs",
+        mode="strong-model",
+        project_id="demo",
+        config_dir=config_dir,
+        planner_backend=StubPlannerBackend(),
+        state_review_snapshot_path=state_review_snapshot_path,
+    )
+
+    assert result.plan.state_review_snapshot_path == state_review_snapshot_path
+    plan = json.loads(result.plan_path.read_text(encoding="utf-8"))
+    assert plan["state_review_snapshot_path"] == str(state_review_snapshot_path)
+
+
 def test_parse_planner_output_validates_nested_task_contracts() -> None:
     plan = parse_planner_output(
         json.dumps(
@@ -189,6 +283,22 @@ def test_parse_planner_output_accepts_fenced_json() -> None:
     )
 
     assert plan.release_id == "v0.3.1"
+
+
+def test_parse_planner_output_accepts_state_review_snapshot_path() -> None:
+    plan = parse_planner_output(
+        {
+            "release_id": "v0.3.1",
+            "planner": "strong-model",
+            "generated_contracts": [],
+            "warnings": [],
+            "state_review_snapshot_path": "runs/demo/state_review_snapshot.json",
+        },
+        release_id="v0.3.1",
+        planner="strong-model",
+    )
+
+    assert plan.state_review_snapshot_path == Path("runs/demo/state_review_snapshot.json")
 
 
 def test_parse_planner_output_rejects_invalid_schema() -> None:

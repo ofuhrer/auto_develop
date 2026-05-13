@@ -160,6 +160,7 @@ class BacklogPlan(StrictModel):
     planner_stdout_path: Path | None = None
     planner_stderr_path: Path | None = None
     planner_metadata_path: Path | None = None
+    state_review_snapshot_path: Path | None = None
 
 
 class BacklogEvidenceManifest(StrictModel):
@@ -170,6 +171,20 @@ class BacklogEvidenceManifest(StrictModel):
     release_metrics_path: Path | None = None
     release_budget_path: Path | None = None
     release_tuning_path: Path | None = None
+    state_review_snapshot_path: Path | None = None
+
+
+class StateReviewSnapshot(StrictModel):
+    captured_at: datetime
+    repo_path: Path
+    repo_state_path: Path | None = None
+    branch: str = Field(min_length=1)
+    head_commit: str = Field(min_length=1)
+    status_lines: list[str] = Field(default_factory=list)
+    local_branches: list[str] = Field(default_factory=list)
+    worktrees: list[dict[str, str]] = Field(default_factory=list)
+    repo_state_files: dict[str, str | None] = Field(default_factory=dict)
+    recent_release_runs: list[str] = Field(default_factory=list)
 
 
 class ReleasePlan(StrictModel):
@@ -512,6 +527,7 @@ class ContractPlan(StrictModel):
     planner_stdout_path: Path | None = None
     planner_stderr_path: Path | None = None
     planner_metadata_path: Path | None = None
+    state_review_snapshot_path: Path | None = None
 
 
 class ContractNormalizationDecision(StrEnum):

@@ -1,6 +1,6 @@
 # Architecture Summary
 
-`agentic-devloop` is an autonomous-first local Python CLI that orchestrates agentic software development in Git worktrees. The runtime-supervisor repair/resume seam is now implemented above the deterministic release kernel so recoverable release failures can be diagnosed, repaired, and resumed without human intervention. Planner-output normalization and one-epic governor logging are implemented. The broader N-epic governor loop, live pre-epic repository state review, and independent feature-review/repair loop remain planned until they are actually implemented.
+`agentic-devloop` is an autonomous-first local Python CLI that orchestrates agentic software development in Git worktrees. The runtime-supervisor repair/resume seam is now implemented above the deterministic release kernel so recoverable release failures can be diagnosed, repaired, and resumed without human intervention. Planner-output normalization, one-epic governor logging, and deterministic state-review snapshot capture are implemented. The broader N-epic governor loop, full agent-driven pre-epic state-review decisioning, and independent feature-review/repair loop remain planned until they are actually implemented.
 
 Current flow:
 
@@ -16,10 +16,11 @@ Current flow:
 10. The supervisor applies bounded repair actions such as environment repair, planner-contract normalization, task splitting or scope narrowing, release resume, long-running worker inspection, model escalation, and repo-state update proposals.
 11. A reviewer/supervisor agent should decide soft findings such as modest budget overage, normal source-file overlap, retry strategy, environment repair, model escalation, and task splitting; deterministic code remains authoritative for hard invariants.
 12. The release path records structured stop evidence and the broader governor/backlog refresh loop remains planned until the N-epic flow is implemented.
+13. Release planning can persist a deterministic `state_review_snapshot.json` artifact and pass its path via `state_review_snapshot_path` in contract-plan payloads.
 
 Target additions:
 
-1. Before selecting an epic, a state-review governor agent should inspect live repository state: branch status, dirty state, open feature/agent branches, source layout drift, changed docs, recent release artifacts, release reviews, metrics, tuning reports, unresolved findings, and tracked repo-state memory.
+1. Before selecting an epic, the state-review governor should expand beyond snapshot capture to full decisioning over live repository state: branch status, dirty state, open feature/agent branches, source layout drift, changed docs, recent release artifacts, release reviews, metrics, tuning reports, unresolved findings, and tracked repo-state memory.
 2. After accepted worker tasks are integrated into `feature/<release>`, an independent reviewer agent should review the full feature diff and evidence as a PR-style change set.
 3. Reviewer findings should become bounded repair contracts executed by repair agents, followed by verification reruns and reviewer re-checks.
 4. The system should finalize only after required reviewer findings are resolved, explicitly accepted with rationale, or stopped by retry budget, hard gates, missing policy/credentials, or configured human escalation.
