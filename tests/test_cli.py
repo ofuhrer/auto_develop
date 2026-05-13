@@ -577,6 +577,12 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
         "contract_plan.json",
         "execution_strategy_selection.json",
         "supervisor_decision.json",
+        "release_soft_gate_decision.json",
+        "state_review_snapshot.json",
+        "state_refresh_summary.json",
+        "feature_review.json",
+        "feature_review_recheck.json",
+        "final_integration_verification.json",
     ):
         path = tmp_path / "runs" / name
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -593,6 +599,7 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
         metrics_path=tmp_path / "runs" / "metrics.json",
         budget_path=tmp_path / "runs" / "budget.json",
         tuning_path=tmp_path / "runs" / "tuning.md",
+        final_integration_verification_path=tmp_path / "runs" / "final_integration_verification.json",
         decision="accepted",
         task_results=[],
     )
@@ -614,8 +621,13 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
             release_metrics_path=tmp_path / "runs" / "metrics.json",
             release_budget_path=tmp_path / "runs" / "budget.json",
             release_tuning_path=tmp_path / "runs" / "tuning.md",
+            release_soft_gate_decision_path=tmp_path / "runs" / "release_soft_gate_decision.json",
+            feature_review_path=tmp_path / "runs" / "feature_review.json",
+            feature_review_recheck_path=tmp_path / "runs" / "feature_review_recheck.json",
             finalization_summary_path=tmp_path / "runs" / "summary.json",
             repo_state_proposal_plan_path=tmp_path / "runs" / "backlog_plan.json",
+            state_review_snapshot_path=tmp_path / "runs" / "state_review_snapshot.json",
+            state_refresh_summary_path=tmp_path / "runs" / "state_refresh_summary.json",
         ),
     )
     result = SimpleNamespace(
@@ -629,7 +641,6 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
 
     def fake_run_governor(**kwargs):
         seen_kwargs.update(kwargs)
-        kwargs["progress"]("event=governor_cycle_started cycle=1 epic_count=2")
         return result
 
     cleanup_report = SimpleNamespace(
@@ -680,16 +691,36 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
     assert '"dry_run": true' in captured.out
     events_text = (tmp_path / "runs" / run_id / "events.jsonl").read_text(encoding="utf-8")
     assert '"event_type": "governor_started"' in events_text
+    assert '"event_type": "state_review_completed"' in events_text
+    assert '"event_type": "state_refresh_summary"' in events_text
+    assert '"event_type": "backlog_planning_completed"' in events_text
+    assert '"event_type": "backlog_selection_completed"' in events_text
     assert '"event_type": "epic_selected"' in events_text
-    assert "event=governor_cycle_started" in events_text
+    assert '"event_type": "objective_generation_completed"' in events_text
+    assert '"event_type": "contract_generation_completed"' in events_text
+    assert '"event_type": "child_release_completed"' in events_text
     assert '"event_type": "release_completed"' in events_text
+    assert '"event_type": "feature_review_completed"' in events_text
+    assert '"event_type": "final_verification_completed"' in events_text
+    assert '"event_type": "repair_decision"' in events_text
     assert '"event_type": "finalization_completed"' in events_text
+    assert '"event_type": "cleanup_eligibility_evaluated"' in events_text
     assert "cleanup_handoff" in events_text
+    cleanup_path = tmp_path / "runs" / run_id / "cleanup" / "cycle_001_demo-epic-1_cleanup.json"
+    assert cleanup_path.exists()
+    assert str(cleanup_path) in events_text
     assert str(cycle.evidence_manifest.contract_plan_path) in events_text
     assert str(cycle.evidence_manifest.generated_objective_path) in events_text
     assert str(cycle.evidence_manifest.release_summary_path) in events_text
+    assert str(cycle.evidence_manifest.release_log_path) in events_text
     assert str(cycle.evidence_manifest.release_review_path) in events_text
     assert str(cycle.evidence_manifest.supervisor_decision_path) in events_text
+    assert str(cycle.evidence_manifest.release_soft_gate_decision_path) in events_text
+    assert str(cycle.evidence_manifest.feature_review_path) in events_text
+    assert str(cycle.evidence_manifest.feature_review_recheck_path) in events_text
+    assert str(release_result.final_integration_verification_path) in events_text
+    assert str(cycle.evidence_manifest.state_review_snapshot_path) in events_text
+    assert str(cycle.evidence_manifest.state_refresh_summary_path) in events_text
     assert str(cycle.evidence_manifest.finalization_summary_path) in events_text
     assert str(cycle.evidence_manifest.repo_state_proposal_plan_path) in events_text
     assert '"event_type": "governor_completed"' in events_text
