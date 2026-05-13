@@ -99,6 +99,32 @@ class PlannerNormalizationError(ValueError):
 _PLANNER_ADMISSION_VALIDATORS_TO_RERUN = ["ContractPlan", "TaskContract", "validate_generated_contracts"]
 
 
+def _raise_planner_admission_normalization_error(message: str, *, error: ValueError) -> None:
+    if "unsafe whole-repo allowed_files patterns" in message:
+        raise PlannerNormalizationError(
+            message,
+            stop_evidence=PlannerNormalizationStopEvidence(
+                kind=RuntimeSupervisorApplierStopKind.BROADENS_ALLOWED_FILES,
+                reason=message,
+            ),
+        ) from error
+    if "allowed_files count exceeds project budget" in message:
+        raise PlannerNormalizationError(
+            message,
+            stop_evidence=PlannerNormalizationStopEvidence(
+                kind=RuntimeSupervisorApplierStopKind.EXCEEDS_TASK_BUDGET,
+                reason=message,
+            ),
+        ) from error
+    raise PlannerNormalizationError(
+        message,
+        stop_evidence=PlannerNormalizationStopEvidence(
+            kind=RuntimeSupervisorApplierStopKind.BYPASSES_HARD_GATE,
+            reason=message,
+        ),
+    ) from error
+
+
 class PlannerBackend(Protocol):
     def generate(
         self,
@@ -629,7 +655,21 @@ def parse_planner_output(
                 ]
             }
         )
-    plan = _normalize_contracts_for_admission(plan, project_config=project_config)
+    try:
+        plan = _normalize_contracts_for_admission(plan, project_config=project_config)
+    except ValueError as error:
+        if isinstance(error, PlannerNormalizationError):
+            raise
+        message = str(error)
+        _persist_planner_admission_repair_stop(
+            plan=plan,
+            planner=planner,
+            bundle_path=normalization_bundle_path,
+            project_config=project_config,
+            failure_message=message,
+            validators_to_rerun=_PLANNER_ADMISSION_VALIDATORS_TO_RERUN,
+        )
+        _raise_planner_admission_normalization_error(message, error=error)
     try:
         validate_generated_contracts(plan, project_config=project_config)
     except ValueError as error:
@@ -642,29 +682,7 @@ def parse_planner_output(
             failure_message=message,
             validators_to_rerun=_PLANNER_ADMISSION_VALIDATORS_TO_RERUN,
         )
-        if "unsafe whole-repo allowed_files patterns" in message:
-            raise PlannerNormalizationError(
-                message,
-                stop_evidence=PlannerNormalizationStopEvidence(
-                    kind=RuntimeSupervisorApplierStopKind.BROADENS_ALLOWED_FILES,
-                    reason=message,
-                ),
-            ) from error
-        if "allowed_files count exceeds project budget" in message:
-            raise PlannerNormalizationError(
-                message,
-                stop_evidence=PlannerNormalizationStopEvidence(
-                    kind=RuntimeSupervisorApplierStopKind.EXCEEDS_TASK_BUDGET,
-                    reason=message,
-                ),
-            ) from error
-        raise PlannerNormalizationError(
-            message,
-            stop_evidence=PlannerNormalizationStopEvidence(
-                kind=RuntimeSupervisorApplierStopKind.BYPASSES_HARD_GATE,
-                reason=message,
-            ),
-        ) from error
+        _raise_planner_admission_normalization_error(message, error=error)
     return plan
 
 
