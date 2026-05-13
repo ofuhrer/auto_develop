@@ -8,7 +8,7 @@ current_tasks:
   - docs-and-state-update
 next_steps:
   - Keep the implemented runtime-supervisor, planner-normalization, one-epic governor logging behavior, and semantic feature-review loop aligned with docs.
-  - Treat governor-state-review as completed for the current cycle; follow with agentic-feature-review-loop so integrated feature branches receive independent semantic review and repair before PR, merge, or autonomous finalization.
+  - Treat governor-state-review as completed for the current cycle; document `agentic-feature-review-loop` as the release-local semantic gate so integrated feature branches receive independent review, bounded repair contracts, verification reruns, and reviewer re-check before PR, merge, or autonomous finalization.
   - Follow with persistent-governor-memory so completed, skipped, blocked, active, reviewed, and candidate epics are durable across repeated cycles.
   - Preserve the implemented repair/resume seam while the broader N-epic governor loop remains planned until state review and feature review exist.
   - Identify procedural heuristics that can be retired once supervisor actions and the broader governor loop exist: deterministic backlog scoring, contract wording checks, log-pattern failure classification, budget-tuning prose, exact-overlap rejection, hard rejection for small budget overages, environment-command assumptions, and cockpit-summary filtering.

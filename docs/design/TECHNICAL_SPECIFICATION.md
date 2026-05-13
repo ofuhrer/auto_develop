@@ -630,7 +630,7 @@ Current limitation: the implemented control plane now supports deterministic sta
 
 ### Feature Review and Repair Flow
 
-The existing `release_review.md` is a deterministic release evidence summary. When `model_roles.reviewer` is configured, `run-release` now also runs a separate semantic feature-review loop. This loop is release-scoped: it reviews one integrated feature branch, produces structured findings, and does not imply persistent governor memory or the planned N-epic control plane.
+The existing `release_review.md` is a deterministic release evidence summary. When `model_roles.reviewer` is configured, `run-release` now also runs a separate semantic feature-review loop. This loop is release-scoped: it reviews one integrated feature branch, produces structured findings, writes `feature_review.json` and `feature_review_recheck.json`, converts required findings into bounded repair contracts, reruns verification, and does not imply persistent governor memory or the planned N-epic control plane.
 
 1. After accepted task branches are integrated into `feature/<release>`, build a review packet containing objective, contracts, `base..feature` diff, changed-files list, release summary, verification logs, soft-gate artifacts, metrics, tuning reports, docs touched, and relevant architecture constraints.
 2. Invoke a reviewer agent that did not implement the worker tasks.
@@ -639,6 +639,7 @@ The existing `release_review.md` is a deterministic release evidence summary. Wh
 5. Run repair agents, rerun verification, and rerun reviewer checks on unresolved findings.
 6. Stop only when required findings are resolved, explicitly accepted with rationale, retry budget is exhausted, hard gates fail, credentials/policy are missing, or configured policy requires human escalation.
 7. Persist `feature_review.json`, `feature_review_recheck.json`, generated repair contracts, repair evidence, and reviewer re-check results as release/governor child artifacts.
+8. Block finalization until required findings are resolved or explicitly accepted with rationale, or until retry budget, hard gates, policy, or credentials require escalation.
 
 This review loop is intentionally agentic. Deterministic code should assemble evidence, enforce hard invariants, validate review schemas, and rerun verification; it should not try to encode semantic architecture review as brittle heuristics.
 
@@ -718,7 +719,7 @@ Implemented re-check stop taxonomy for `feature_review_recheck.json`:
 
 `accepted_with_rationale` means only optional findings remained at re-check time; if the reviewer omitted acceptance rationale, the release flow persists an explicit rationale entry in `feature_review.json.accepted_risks`.
 
-Release finalization gating uses unresolved required findings from the latest reviewer decision. For blocked re-check states, unresolved re-check findings are treated as required unless they are explicitly classified as optional in the latest reviewer decision, preventing false-positive finalization when unresolved required findings persist.
+Release finalization gating uses unresolved required findings from the latest reviewer decision. For blocked re-check states, unresolved re-check findings are treated as required unless they are explicitly classified as optional in the latest reviewer decision, preventing false-positive finalization when unresolved required findings persist. This is the implemented boundary for the reviewer loop; the broader pre-epic governor review and persistent memory layers remain planned.
 
 ## Security and Auth
 
