@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from agentic_devloop.models import ContractNormalizationRefusalReason
+from agentic_devloop.models import ReleaseFinalizationPolicyName
 from agentic_devloop.supervisor_decisions import (
     ContractNormalizationDecision,
     ContractNormalizationOutcome,
@@ -27,6 +28,8 @@ from agentic_devloop.supervisor_decisions import (
     ReleaseSchedulingDecision,
     ReleaseSchedulingAction,
     ReleaseSchedulingStalenessInputs,
+    ReleaseFinalizationDecision,
+    ReleaseFinalizationOutcome,
     RepairLoopContinuationDecision,
     RepairLoopOutcome,
     SCHEMA_VERSION_V1,
@@ -97,6 +100,104 @@ def test_parse_execution_strategy_decision() -> None:
     assert decision.selected_action == ExecutionStrategyAction.ONE_SHOT
 
 
+def test_parse_release_finalization_decision_local_merge() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.RELEASE_FINALIZATION,
+        "risk_level": DecisionRiskLevel.LOW,
+        "policy_basis": ReleaseFinalizationPolicyName.LOCAL_MERGE,
+        "selected_action": ReleaseFinalizationPolicyName.LOCAL_MERGE,
+        "outcome": ReleaseFinalizationOutcome.LOCAL_MERGE,
+        "fallback_plan": "Stop and escalate if merge prerequisites fail.",
+        "validators_to_rerun": ["finalization_gate", "integration_verification"],
+        "outcome_references": ["runs/release/finalization_summary.json"],
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, ReleaseFinalizationDecision)
+    assert decision.outcome == ReleaseFinalizationOutcome.LOCAL_MERGE
+
+
+def test_parse_release_finalization_decision_push_feature() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.RELEASE_FINALIZATION,
+        "risk_level": DecisionRiskLevel.MODERATE,
+        "policy_basis": ReleaseFinalizationPolicyName.PUSH_FEATURE,
+        "selected_action": ReleaseFinalizationPolicyName.PUSH_FEATURE,
+        "outcome": ReleaseFinalizationOutcome.PUSH_FEATURE,
+        "fallback_plan": "Prepare PR-only outcome if push fails.",
+        "validators_to_rerun": ["finalization_gate", "credentials_check"],
+        "outcome_references": ["runs/release/finalization_summary.json"],
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, ReleaseFinalizationDecision)
+    assert decision.outcome == ReleaseFinalizationOutcome.PUSH_FEATURE
+
+
+def test_parse_release_finalization_decision_pr_preparation() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.RELEASE_FINALIZATION,
+        "risk_level": DecisionRiskLevel.MODERATE,
+        "policy_basis": ReleaseFinalizationPolicyName.PR_PREPARATION,
+        "selected_action": ReleaseFinalizationPolicyName.PR_PREPARATION,
+        "outcome": ReleaseFinalizationOutcome.PR_PREPARATION,
+        "fallback_plan": "Stop if PR metadata generation fails validation.",
+        "validators_to_rerun": ["finalization_gate", "review_status"],
+        "outcome_references": ["runs/release/finalization_summary.json"],
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, ReleaseFinalizationDecision)
+    assert decision.outcome == ReleaseFinalizationOutcome.PR_PREPARATION
+
+
+def test_parse_release_finalization_decision_stop_missing_policy() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.RELEASE_FINALIZATION,
+        "risk_level": DecisionRiskLevel.HIGH,
+        "policy_basis": ReleaseFinalizationPolicyName.STOP_MISSING_POLICY_OR_CREDENTIALS,
+        "selected_action": ReleaseFinalizationPolicyName.STOP_MISSING_POLICY_OR_CREDENTIALS,
+        "outcome": ReleaseFinalizationOutcome.STOP_MISSING_POLICY_OR_CREDENTIALS,
+        "fallback_plan": "Stop and request explicit release finalization policy.",
+        "validators_to_rerun": ["finalization_policy_presence"],
+        "missing_policy": True,
+        "outcome_references": ["runs/release/release_summary.json"],
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, ReleaseFinalizationDecision)
+    assert decision.missing_policy is True
+
+
+def test_parse_release_finalization_decision_stop_missing_credentials() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.RELEASE_FINALIZATION,
+        "risk_level": DecisionRiskLevel.HIGH,
+        "policy_basis": ReleaseFinalizationPolicyName.STOP_MISSING_POLICY_OR_CREDENTIALS,
+        "selected_action": ReleaseFinalizationPolicyName.STOP_MISSING_POLICY_OR_CREDENTIALS,
+        "outcome": ReleaseFinalizationOutcome.STOP_MISSING_POLICY_OR_CREDENTIALS,
+        "fallback_plan": "Stop and request the missing credentials before retry.",
+        "validators_to_rerun": ["credentials_check"],
+        "missing_credentials": True,
+        "missing_credential_env_vars": ["GIT_REMOTE_TOKEN"],
+        "outcome_references": ["runs/release/release_summary.json"],
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, ReleaseFinalizationDecision)
+    assert decision.missing_credentials is True
+
+
 def test_parse_legacy_execution_strategy_decision_adds_validators_migration_default() -> None:
     payload = {
         **BASE,
@@ -124,6 +225,53 @@ def test_execution_strategy_rejects_invalid_action_outcome_combination() -> None
                 "outcome": ExecutionStrategyOutcome.PROCEED_SEQUENTIAL,
                 "fallback_plan": "Retry strategy selection with updated coupling evidence.",
                 "validators_to_rerun": ["contract_plan", "verification"],
+            }
+        )
+
+
+def test_release_finalization_rejects_invalid_policy_action_outcome_combination() -> None:
+    with pytest.raises(ValidationError, match="selected_action must match outcome"):
+        ReleaseFinalizationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.RELEASE_FINALIZATION,
+                "risk_level": DecisionRiskLevel.MODERATE,
+                "policy_basis": ReleaseFinalizationPolicyName.PUSH_FEATURE,
+                "selected_action": ReleaseFinalizationPolicyName.PUSH_FEATURE,
+                "outcome": ReleaseFinalizationOutcome.LOCAL_MERGE,
+                "fallback_plan": "Stop and escalate if policy-action mismatch is detected.",
+                "validators_to_rerun": ["finalization_gate"],
+                "outcome_references": ["runs/release/release_summary.json"],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="policy_basis must match selected_action"):
+        ReleaseFinalizationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.RELEASE_FINALIZATION,
+                "risk_level": DecisionRiskLevel.MODERATE,
+                "policy_basis": ReleaseFinalizationPolicyName.LOCAL_MERGE,
+                "selected_action": ReleaseFinalizationPolicyName.PUSH_FEATURE,
+                "outcome": ReleaseFinalizationOutcome.PUSH_FEATURE,
+                "fallback_plan": "Stop and escalate if policy-action mismatch is detected.",
+                "validators_to_rerun": ["finalization_gate"],
+                "outcome_references": ["runs/release/release_summary.json"],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="requires missing_policy or missing_credentials"):
+        ReleaseFinalizationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.RELEASE_FINALIZATION,
+                "risk_level": DecisionRiskLevel.HIGH,
+                "policy_basis": ReleaseFinalizationPolicyName.STOP_MISSING_POLICY_OR_CREDENTIALS,
+                "selected_action": ReleaseFinalizationPolicyName.STOP_MISSING_POLICY_OR_CREDENTIALS,
+                "outcome": ReleaseFinalizationOutcome.STOP_MISSING_POLICY_OR_CREDENTIALS,
+                "fallback_plan": "Stop and request missing policy or credentials.",
+                "validators_to_rerun": ["finalization_policy_presence"],
+                "outcome_references": ["runs/release/release_summary.json"],
             }
         )
 

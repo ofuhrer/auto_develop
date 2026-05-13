@@ -10,7 +10,11 @@ from typing import Annotated, Literal
 
 from pydantic import Field, TypeAdapter, field_validator, model_validator
 
-from agentic_devloop.models import ContractNormalizationRefusalReason, StrictModel
+from agentic_devloop.models import (
+    ContractNormalizationRefusalReason,
+    ReleaseFinalizationPolicyName,
+    StrictModel,
+)
 
 
 SCHEMA_VERSION_V1 = "1.0"
@@ -34,6 +38,7 @@ class SupervisorDecisionType(StrEnum):
     MODEL_OUTPUT_NORMALIZATION = "model_output_normalization"
     ENVIRONMENT_REPAIR = "environment_repair"
     FEATURE_REVIEW_FINDING_CLASSIFICATION = "feature_review_finding_classification"
+    RELEASE_FINALIZATION = "release_finalization"
 
 
 _LEGACY_VALIDATORS_DECISION_TYPES = {
@@ -453,6 +458,77 @@ class EnvironmentRepairDecision(SupervisorDecisionBase):
         return values
 
 
+class ReleaseFinalizationOutcome(StrEnum):
+    LOCAL_MERGE = "local_merge"
+    PUSH_FEATURE = "push_feature"
+    PR_PREPARATION = "pr_preparation"
+    STOP_MISSING_POLICY_OR_CREDENTIALS = "stop_missing_policy_or_credentials"
+
+
+class ReleaseFinalizationDecision(SupervisorDecisionBase):
+    decision_type: Literal[SupervisorDecisionType.RELEASE_FINALIZATION] = SupervisorDecisionType.RELEASE_FINALIZATION
+    risk_level: DecisionRiskLevel
+    policy_basis: ReleaseFinalizationPolicyName
+    selected_action: ReleaseFinalizationPolicyName
+    outcome: ReleaseFinalizationOutcome
+    fallback_plan: str = Field(min_length=1)
+    validators_to_rerun: list[str]
+    missing_policy: bool = False
+    missing_credentials: bool = False
+    missing_credential_env_vars: list[str] = Field(default_factory=list)
+    outcome_references: list[Path] = Field(default_factory=list)
+
+    @field_validator("validators_to_rerun")
+    @classmethod
+    def validators_to_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if not values or any(not value.strip() for value in values):
+            raise ValueError("validators to rerun must not be empty")
+        return values
+
+    @field_validator("missing_credential_env_vars")
+    @classmethod
+    def missing_credential_env_vars_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("missing credential env vars must not be empty")
+        return values
+
+    @field_validator("outcome_references")
+    @classmethod
+    def outcome_references_must_not_be_empty(cls, values: list[Path]) -> list[Path]:
+        if not values:
+            raise ValueError("outcome references must not be empty")
+        return values
+
+    @model_validator(mode="after")
+    def selected_action_must_match_outcome(self) -> "ReleaseFinalizationDecision":
+        outcome_by_action = {
+            ReleaseFinalizationPolicyName.LOCAL_MERGE: ReleaseFinalizationOutcome.LOCAL_MERGE,
+            ReleaseFinalizationPolicyName.PUSH_FEATURE: ReleaseFinalizationOutcome.PUSH_FEATURE,
+            ReleaseFinalizationPolicyName.PR_PREPARATION: ReleaseFinalizationOutcome.PR_PREPARATION,
+            ReleaseFinalizationPolicyName.STOP_MISSING_POLICY_OR_CREDENTIALS: (
+                ReleaseFinalizationOutcome.STOP_MISSING_POLICY_OR_CREDENTIALS
+            ),
+        }
+        expected_outcome = outcome_by_action[self.selected_action]
+        if self.outcome != expected_outcome:
+            raise ValueError("selected_action must match outcome")
+        if self.policy_basis != self.selected_action:
+            raise ValueError("policy_basis must match selected_action")
+        if self.selected_action == ReleaseFinalizationPolicyName.STOP_MISSING_POLICY_OR_CREDENTIALS:
+            if not (self.missing_policy or self.missing_credentials):
+                raise ValueError("stop_missing_policy_or_credentials requires missing_policy or missing_credentials")
+            if self.missing_credentials and not self.missing_credential_env_vars:
+                raise ValueError("missing_credentials=true requires missing_credential_env_vars")
+        else:
+            if self.missing_policy:
+                raise ValueError("non-stop finalization actions must not set missing_policy")
+            if self.missing_credentials:
+                raise ValueError("non-stop finalization actions must not set missing_credentials")
+            if self.missing_credential_env_vars:
+                raise ValueError("non-stop finalization actions must not set missing_credential_env_vars")
+        return self
+
+
 SupervisorDecisionRecord = Annotated[
     (
         ReleaseSchedulingDecision
@@ -464,6 +540,7 @@ SupervisorDecisionRecord = Annotated[
         | ModelOutputNormalizationDecision
         | EnvironmentRepairDecision
         | FeatureReviewFindingClassificationDecision
+        | ReleaseFinalizationDecision
     ),
     Field(discriminator="decision_type"),
 ]

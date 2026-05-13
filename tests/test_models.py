@@ -18,6 +18,8 @@ from agentic_devloop.models import (
     FailureEvidenceExcerpt,
     ModelAvailability,
     ModelCatalogEntry,
+    ReleaseFinalizationPolicy,
+    ReleaseFinalizationPolicyName,
     ProjectConfig,
     ReleaseObjective,
     ReviewDecision,
@@ -110,6 +112,47 @@ def test_project_config_accepts_model_catalog_and_legacy_configs() -> None:
 
     assert legacy.model_catalog == {}
     assert modern.model_catalog["worker"].capabilities == ["implementation"]
+
+
+def test_project_config_accepts_release_finalization_policy() -> None:
+    config = ProjectConfig.model_validate(
+        {
+            "project_id": "demo",
+            "repo_path": "/tmp/demo",
+            "default_base_branch": "main",
+            "worktree_root": "/tmp/worktrees",
+            "executor": {
+                "type": "codex_cli",
+                "model": "worker",
+                "max_walltime_minutes": 5,
+            },
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "release_finalization_policy": {
+                "policy": "push_feature",
+                "required_credential_env_vars": ["GIT_REMOTE_TOKEN"],
+            },
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        }
+    )
+
+    assert isinstance(config.release_finalization_policy, ReleaseFinalizationPolicy)
+    assert config.release_finalization_policy.policy == ReleaseFinalizationPolicyName.PUSH_FEATURE
+
+
+def test_release_finalization_policy_rejects_unknown_fields() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        ReleaseFinalizationPolicy.model_validate(
+            {
+                "policy": "local_merge",
+                "required_credential_env_vars": [],
+                "unexpected": True,
+            }
+        )
 
 
 def test_missing_required_field_fails_clearly() -> None:

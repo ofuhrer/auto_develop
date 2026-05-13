@@ -91,6 +91,33 @@ class ModelRouting(StrictModel):
     escalation_role: str | None = None
 
 
+class ReleaseFinalizationPolicyName(StrEnum):
+    LOCAL_MERGE = "local_merge"
+    PUSH_FEATURE = "push_feature"
+    PR_PREPARATION = "pr_preparation"
+    STOP_MISSING_POLICY_OR_CREDENTIALS = "stop_missing_policy_or_credentials"
+
+
+class ReleaseFinalizationPolicy(StrictModel):
+    policy: ReleaseFinalizationPolicyName
+    required_credential_env_vars: list[str] = Field(default_factory=list)
+
+    @field_validator("required_credential_env_vars", mode="before")
+    @classmethod
+    def normalize_required_credential_env_vars(cls, values: object) -> object:
+        return _normalize_non_empty_string_list(
+            values,
+            error_message="release finalization required credential env vars must not be empty",
+        )
+
+    @field_validator("required_credential_env_vars")
+    @classmethod
+    def required_credential_env_vars_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("release finalization required credential env vars must not be empty")
+        return values
+
+
 class ProjectConfig(StrictModel):
     project_id: str = Field(min_length=1)
     repo_path: Path
@@ -102,6 +129,7 @@ class ProjectConfig(StrictModel):
     model_routing: ModelRouting = Field(default_factory=ModelRouting)
     verification_profiles: dict[str, VerificationProfile] = Field(min_length=1)
     unsafe_overlap_paths: list[str] = Field(default_factory=list)
+    release_finalization_policy: ReleaseFinalizationPolicy | None = None
     budget: Budget
     repo_state_path: Path | None = None
 
