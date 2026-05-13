@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import is_dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -770,9 +771,10 @@ def main(argv: list[str] | None = None) -> int:
 
         cleanup_reports_dir = governor_writer.paths.run_root / "cleanup"
         cleanup_reports_dir.mkdir(parents=True, exist_ok=True)
-        cleanup_payloads_by_cycle: dict[int, dict[str, object]] = {}
+        cycles_for_output = []
 
         for index, cycle in enumerate(result.cycles, start=1):
+            cycle_for_output = cycle
             cycle_release_id = cycle.release.release_id if cycle.release is not None else cycle.release_id
             cleanup_path_for_cycle: Path | None = None
             cycle_artifacts = _cycle_artifact_graph(
@@ -796,6 +798,7 @@ def main(argv: list[str] | None = None) -> int:
                     artifacts=cycle_artifacts["planning"],
                 )
             if cycle.release is not None:
+                cleanup_handoff_note = ""
                 governor_writer.write(
                     event_type=GovernorEventType.RELEASE_COMPLETED,
                     message=f"cycle={index} release_id={cycle.release.release_id} decision={cycle.release.decision}",
@@ -811,22 +814,26 @@ def main(argv: list[str] | None = None) -> int:
                         include_integration_branch=False,
                     )
                     cleanup_payload = _cleanup_result(cleanup_result)
-                    cleanup_payloads_by_cycle[index] = cleanup_payload
                     cleanup_path = cleanup_reports_dir / f"cycle_{index:03d}_{cycle.release.release_id}_cleanup.json"
                     cleanup_path.write_text(json.dumps(cleanup_payload, indent=2) + "\n", encoding="utf-8")
                     cleanup_path_for_cycle = cleanup_path
+                    evidence_manifest = getattr(cycle, "evidence_manifest", None)
+                    if evidence_manifest is not None:
+                        evidence_manifest = evidence_manifest.model_copy(
+                            update={"cleanup_report_path": cleanup_path}
+                        )
+                    cycle_for_output = _with_updates(
+                        cycle_for_output,
+                        {
+                            "cleanup_result": cleanup_payload,
+                            "evidence_manifest": evidence_manifest,
+                        },
+                    )
                     cycle_artifacts = _cycle_artifact_graph(
-                        cycle=cycle,
+                        cycle=cycle_for_output,
                         cleanup_path=cleanup_path_for_cycle,
                     )
-                    governor_writer.write(
-                        event_type=GovernorEventType.STATE_REFRESHED,
-                        message=(
-                            f"cycle={index} release_id={cycle.release.release_id} "
-                            f"cleanup_handoff dry_run={cleanup_payload['dry_run']}"
-                        ),
-                        artifacts=cycle_artifacts["cleanup"],
-                    )
+                    cleanup_handoff_note = f" cleanup_handoff dry_run={cleanup_payload['dry_run']}"
                 if args.release_finalize != "none" or getattr(cycle, "finalization_result", None) is not None:
                     governor_writer.write(
                         event_type=GovernorEventType.FINALIZATION_COMPLETED,
@@ -834,9 +841,11 @@ def main(argv: list[str] | None = None) -> int:
                             f"cycle={index} release_id={cycle.release.release_id} "
                             f"mode={args.release_finalize} blocked="
                             f"{getattr(cycle, 'blocked_finalization', None) is not None}"
+                            f"{cleanup_handoff_note}"
                         ),
                         artifacts=cycle_artifacts["finalization"] + cycle_artifacts["cleanup"],
                     )
+            cycles_for_output.append(cycle_for_output)
         governor_writer.write(
             event_type=GovernorEventType.GOVERNOR_COMPLETED,
             message=(
@@ -847,11 +856,8 @@ def main(argv: list[str] | None = None) -> int:
             artifacts=[cycle.plan_path for cycle in result.cycles],
         )
 
-        output = _backlog_multi_run_result(result)
-        for index, cycle_payload in enumerate(output["cycles"], start=1):
-            cleanup_payload = cleanup_payloads_by_cycle.get(index)
-            if cleanup_payload is not None:
-                cycle_payload["cleanup_result"] = cleanup_payload
+        result_for_output = _with_updates(result, {"cycles": cycles_for_output})
+        output = _backlog_multi_run_result(result_for_output)
         output["governor_log_path"] = str(governor_writer.paths.log_path)
         output["governor_events_path"] = str(governor_writer.paths.events_path)
         print(json.dumps(output, indent=2))
@@ -1152,6 +1158,8 @@ def _cycle_artifact_graph(*, cycle, cleanup_path: Path | None) -> dict[str, list
 
     if cleanup_path is not None:
         cleanup = _existing_paths([cleanup_path])
+    elif manifest is not None:
+        cleanup = _existing_paths([manifest.cleanup_report_path])
 
     return {
         "planning": planning,
@@ -1173,3 +1181,11 @@ def _existing_paths(paths: list[Path | None]) -> list[Path]:
         if path.exists():
             result.append(path)
     return result
+
+
+def _with_updates(value, updates: dict[str, object]):
+    if is_dataclass(value):
+        return replace(value, **updates)
+    for key, update in updates.items():
+        setattr(value, key, update)
+    return value
