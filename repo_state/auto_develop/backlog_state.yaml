@@ -10,60 +10,56 @@ completed_epics:
   - runtime-supervisor-repair-loop
   - agent-governed-soft-gates
   - governor-log-and-contract-normalization
+  - governor-state-review
 blocked_epics: []
 candidate_epics:
-  - id: governor-state-review
-    priority: 1
-    title: Review repository state before selecting the next epic.
-    rationale: The governor should inspect source layout, branch state, recent release artifacts, metrics, unresolved findings, docs drift, and repo-state memory before prioritizing the backlog instead of relying mainly on static roadmap text.
-    next_release_id: governor-state-review
   - id: agentic-feature-review-loop
-    priority: 2
+    priority: 1
     title: Add reviewer-agent findings and repair-agent loop for feature branches.
     rationale: "`release_review.md` is currently an evidence summary; the target workflow needs an independent reviewer agent over `main..feature`, structured findings, bounded repair contracts, verification reruns, and reviewer re-checks before PR, merge, or autonomous finalization."
     next_release_id: agentic-feature-review-loop
   - id: persistent-governor-memory
-    priority: 3
+    priority: 2
     title: Persist authoritative multi-epic governor memory.
     rationale: Repeated autonomous cycles need durable completed/skipped/blocked/active epic state, compact release history, unresolved review findings, retry counts, and state-review snapshots instead of relying on raw runs or manually maintained notes.
     next_release_id: persistent-governor-memory
   - id: multi-epic-run-governor
-    priority: 4
+    priority: 3
     title: Run the next N highest-priority epics autonomously.
     rationale: Converts one-epic run-backlog into the intended high-level development loop after state review, feature review, and persistent memory can prevent stale or insufficiently reviewed work.
     next_release_id: multi-epic-run-governor
   - id: governor-cockpit-v2
-    priority: 5
+    priority: 4
     title: Expand governor cockpit logging for full N-epic runs.
     rationale: Operators need one `governor.log` stream that links state review, backlog selection, child releases, feature reviews, repair loops, state refresh, and next-epic selection across repeated cycles.
     next_release_id: governor-cockpit-v2
   - id: shared-verification-runtime
-    priority: 6
+    priority: 5
     title: Make isolated worktrees run tests through a configured shared runtime.
     rationale: Sub-agents repeatedly could not run pytest because task worktrees do not contain .venv; verification should use project runtime policy rather than worktree-local assumptions.
     next_release_id: shared-verification-runtime
   - id: environment-repair-actions
-    priority: 7
+    priority: 6
     title: Repair safe verification-environment drift autonomously.
     rationale: Stale editable installs, command-not-found errors, missing PYTHONPATH, and dependency runtime drift should become bounded repair actions when project policy declares a safe repair.
     next_release_id: environment-repair-actions
   - id: executor-liveness-supervision
-    priority: 8
+    priority: 7
     title: Classify active, stalled, hung, and environment-blocked executors.
     rationale: Long-running workers need process/output/file heartbeat evidence so the supervisor can wait, inspect, restart, or stop without human guessing.
     next_release_id: executor-liveness-supervision
   - id: target-artifact-ownership
-    priority: 9
+    priority: 8
     title: Store target development memory in the target repo or a durable control repo.
     rationale: Deleting and recloning the auto_develop controller should not lose target repo-state, objectives, contracts, completed-epic history, or next-epic planning context.
     next_release_id: target-artifact-ownership
   - id: governor-state-refresh
-    priority: 10
+    priority: 9
     title: Apply roadmap and repo-state updates after each epic.
     rationale: Ensures new learnings from artifacts, validation, metrics, review findings, and documentation feed the next planning cycle.
     next_release_id: governor-state-refresh
   - id: onboarding-bootstrap
-    priority: 11
+    priority: 10
     title: Bootstrap a freshly cloned target repository from one or two onboarding prompts.
     rationale: The target operator experience is minimal setup followed by a high-level epic-count loop.
     next_release_id: onboarding-bootstrap
@@ -88,4 +84,6 @@ notes:
   - Multi-epic execution needs one parent governor.log/governor.raw.log/events.jsonl stream that links child release logs and exposes selected epic, contract normalization, release execution, independent feature review, repair, finalization, state refresh, and next-epic selection.
   - The current release_review.md is not a PR-style semantic review; an independent reviewer agent should inspect the integrated feature branch and launch repair agents for findings before merge or PR.
   - Before selecting the next epic, the governor should refresh its state view from source/branch status, recent run artifacts, release reviews, metrics, tuning reports, unresolved findings, docs drift, and tracked repo-state memory.
-  - "Prioritization rule as of 2026-05-13: state review first, feature review second, persistent memory third, N-epic loop fourth. Running the N-epic loop before these exists would amplify stale planning and insufficient review."
+  - The governor-state-review cycle was merged on 2026-05-13 and implemented deterministic state-review snapshot capture plus backlog-planning evidence linkage.
+  - Completed objective/contracts should not remain as active planning inputs after merge; otherwise later cycles can reselect stale release ids and feed obsolete contracts back to the planner.
+  - "Prioritization rule as of 2026-05-13 after governor-state-review merge: feature review first, persistent memory second, N-epic loop third. Running the N-epic loop before feature review and memory exists would amplify insufficient review and stale state."

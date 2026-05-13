@@ -1,15 +1,14 @@
-release_id: governor-state-review
-active_objective: "Add the first missing governor layer: a pre-epic repository state-review pass that captures source, branch, docs, artifact, metric, review, and repo-state evidence before backlog prioritization."
+release_id: agentic-feature-review-loop
+active_objective: "Add the next missing governor layer: an independent reviewer-agent pass over integrated feature branches with structured findings, bounded repair contracts, verification reruns, and reviewer re-check before autonomous finalization."
 current_tasks:
-  - governor-state-review-snapshot
-  - state-review-context-collector
-  - backlog-planner-state-context
-  - state-review-artifacts
+  - feature-review-schema
+  - feature-review-runner
+  - review-finding-repair-contracts
+  - release-finalization-gate
   - docs-and-state-update
 next_steps:
   - Keep the implemented runtime-supervisor, planner-normalization, and one-epic governor logging behavior aligned with docs.
-  - Implement governor-state-review first because backlog selection should be based on current source/branch/artifact/review state, not stale roadmap text.
-  - Follow with agentic-feature-review-loop so integrated feature branches receive independent semantic review and repair before PR, merge, or autonomous finalization.
+  - Treat governor-state-review as completed for the current cycle; follow with agentic-feature-review-loop so integrated feature branches receive independent semantic review and repair before PR, merge, or autonomous finalization.
   - Follow with persistent-governor-memory so completed, skipped, blocked, active, reviewed, and candidate epics are durable across repeated cycles.
   - Preserve the implemented repair/resume seam while the broader N-epic governor loop remains planned until state review and feature review exist.
   - Identify procedural heuristics that can be retired once supervisor actions and the broader governor loop exist: deterministic backlog scoring, contract wording checks, log-pattern failure classification, budget-tuning prose, exact-overlap rejection, hard rejection for small budget overages, environment-command assumptions, and cockpit-summary filtering.
