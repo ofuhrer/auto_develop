@@ -208,6 +208,35 @@ def test_plan_release_command_is_registered(capsys) -> None:
     assert "--execute-planner" in captured.out
 
 
+def test_plan_release_outputs_strategy_artifact_paths_when_present(monkeypatch, capsys, tmp_path) -> None:
+    plan_path = tmp_path / "runs" / "contract_plan.json"
+    selection_path = tmp_path / "runs" / "execution_strategy_selection.json"
+    decision_path = tmp_path / "runs" / "supervisor_decision.json"
+    one_shot_input_path = tmp_path / "runs" / "one_shot_execution_input.json"
+    result = ContractPlanResult(
+        release_id="demo-20260513",
+        plan_path=plan_path,
+        plan=ContractPlan(release_id="demo-20260513"),
+        written_contract_paths=[],
+        execution_strategy_selection_path=selection_path,
+        supervisor_decision_path=decision_path,
+        one_shot_execution_input_path=one_shot_input_path,
+    )
+
+    monkeypatch.setattr(cli_module, "plan_release_contracts", lambda **_kwargs: result)
+
+    exit_code = main(["plan-release", "--objective", "demo.yaml"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert '"execution_strategy_selection_path":' in captured.out
+    assert str(selection_path) in captured.out
+    assert '"supervisor_decision_path":' in captured.out
+    assert str(decision_path) in captured.out
+    assert '"one_shot_execution_input_path":' in captured.out
+    assert str(one_shot_input_path) in captured.out
+
+
 def test_run_objective_command_is_registered(capsys) -> None:
     with pytest.raises(SystemExit) as error:
         main(["run-objective", "--help"])
@@ -218,6 +247,37 @@ def test_run_objective_command_is_registered(capsys) -> None:
     assert "--objective" in captured.out
     assert "--execute-planner" in captured.out
     assert "--merge-on-accept" in captured.out
+
+
+def test_run_objective_outputs_strategy_artifact_paths_when_present(monkeypatch, capsys, tmp_path) -> None:
+    plan_path = tmp_path / "runs" / "contract_plan.json"
+    selection_path = tmp_path / "runs" / "execution_strategy_selection.json"
+    decision_path = tmp_path / "runs" / "supervisor_decision.json"
+    one_shot_input_path = tmp_path / "runs" / "one_shot_execution_input.json"
+    planning = ContractPlanResult(
+        release_id="demo-20260513",
+        plan_path=plan_path,
+        plan=ContractPlan(release_id="demo-20260513"),
+        written_contract_paths=[],
+        execution_strategy_selection_path=selection_path,
+        supervisor_decision_path=decision_path,
+        one_shot_execution_input_path=one_shot_input_path,
+    )
+    result = SimpleNamespace(release_id="demo-20260513", planning=planning, release=None)
+
+    monkeypatch.setattr(cli_module, "run_objective", lambda **_kwargs: result)
+
+    exit_code = main(["run-objective", "--project", "demo", "--objective", "demo.yaml"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert '"execution_strategy_selection_path":' in captured.out
+    assert str(selection_path) in captured.out
+    assert '"supervisor_decision_path":' in captured.out
+    assert str(decision_path) in captured.out
+    assert '"one_shot_execution_input_path":' in captured.out
+    assert str(one_shot_input_path) in captured.out
+    assert '"release": null' in captured.out
 
 
 def test_plan_backlog_command_is_registered(capsys) -> None:

@@ -599,35 +599,36 @@ def main(argv: list[str] | None = None) -> int:
             message=f"contract_plan_path={result.contract_plan_path}",
             artifacts=[result.contract_plan_path],
         )
-        if observed["release_started"]:
+        if observed["release_started"] and getattr(result, "release", None) is not None:
             governor_writer.write(
                 event_type=GovernorEventType.RELEASE_STARTED,
                 message=f"release_id={result.release.release_id}",
                 artifacts=[result.release.log_path],
             )
-        if observed["normalization"]:
+        if observed["normalization"] and getattr(result, "release", None) is not None:
             governor_writer.write(
                 event_type=GovernorEventType.CONTRACT_NORMALIZATION,
                 message=f"release_id={result.release.release_id} planner contract normalization applied",
                 artifacts=[result.contract_plan_path, result.release.log_path],
             )
-        if observed["repair_or_resume"]:
+        if observed["repair_or_resume"] and getattr(result, "release", None) is not None:
             governor_writer.write(
                 event_type=GovernorEventType.REPAIR_DECISION,
                 message=f"release_id={result.release.release_id} repair or resume observed",
                 artifacts=[result.release.summary_path, result.release.log_path],
             )
-        governor_writer.write(
-            event_type=GovernorEventType.RELEASE_COMPLETED,
-            message=f"release_id={result.release.release_id} decision={result.release.decision}",
-            artifacts=_release_artifact_links(result.release),
-        )
-        if observed["finalized"] or args.release_finalize != "none":
+        if getattr(result, "release", None) is not None:
             governor_writer.write(
-                event_type=GovernorEventType.FINALIZATION_COMPLETED,
-                message=f"release_id={result.release.release_id} mode={args.release_finalize}",
-                artifacts=[result.release.summary_path],
+                event_type=GovernorEventType.RELEASE_COMPLETED,
+                message=f"release_id={result.release.release_id} decision={result.release.decision}",
+                artifacts=_release_artifact_links(result.release),
             )
+            if observed["finalized"] or args.release_finalize != "none":
+                governor_writer.write(
+                    event_type=GovernorEventType.FINALIZATION_COMPLETED,
+                    message=f"release_id={result.release.release_id} mode={args.release_finalize}",
+                    artifacts=[result.release.summary_path],
+                )
         plan_warnings = getattr(result.plan, "repo_state_updates", None) or getattr(result.plan, "roadmap_updates", None)
         if plan_warnings:
             governor_writer.write(
@@ -635,10 +636,14 @@ def main(argv: list[str] | None = None) -> int:
                 message="repo-state refresh proposal captured in backlog plan",
                 artifacts=[result.plan_path],
             )
+        release_id = result.release.release_id if getattr(result, "release", None) is not None else result.release_id
+        completion_artifacts = [result.plan_path]
+        if getattr(result, "release", None) is not None:
+            completion_artifacts.append(result.release.summary_path)
         governor_writer.write(
             event_type=GovernorEventType.GOVERNOR_COMPLETED,
-            message=f"selected_epic_id={result.selected_epic_id} release_id={result.release.release_id}",
-            artifacts=[result.plan_path, result.release.summary_path],
+            message=f"selected_epic_id={result.selected_epic_id} release_id={release_id}",
+            artifacts=completion_artifacts,
         )
 
         print(json.dumps(_backlog_run_result(result), indent=2))
@@ -711,6 +716,19 @@ def _plan_release_result(result, *, inspect_proposed_contracts: bool) -> dict[st
         "plan_path": str(result.plan_path),
         "generated_contracts": len(result.plan.generated_contracts),
         "warnings": result.plan.warnings,
+        "execution_strategy_selection_path": (
+            str(result.execution_strategy_selection_path)
+            if getattr(result, "execution_strategy_selection_path", None) is not None
+            else None
+        ),
+        "supervisor_decision_path": (
+            str(result.supervisor_decision_path) if getattr(result, "supervisor_decision_path", None) is not None else None
+        ),
+        "one_shot_execution_input_path": (
+            str(result.one_shot_execution_input_path)
+            if getattr(result, "one_shot_execution_input_path", None) is not None
+            else None
+        ),
     }
     if result.written_contract_paths:
         output["written_contract_paths"] = [str(path) for path in result.written_contract_paths]
@@ -733,7 +751,22 @@ def _objective_run_result(result) -> dict[str, object]:
         "release_id": result.release_id,
         "plan_path": str(result.planning.plan_path),
         "written_contract_paths": [str(path) for path in result.planning.written_contract_paths],
-        "release": _release_run_result(result.release),
+        "execution_strategy_selection_path": (
+            str(result.planning.execution_strategy_selection_path)
+            if getattr(result.planning, "execution_strategy_selection_path", None) is not None
+            else None
+        ),
+        "supervisor_decision_path": (
+            str(result.planning.supervisor_decision_path)
+            if getattr(result.planning, "supervisor_decision_path", None) is not None
+            else None
+        ),
+        "one_shot_execution_input_path": (
+            str(result.planning.one_shot_execution_input_path)
+            if getattr(result.planning, "one_shot_execution_input_path", None) is not None
+            else None
+        ),
+        "release": _release_run_result(result.release) if result.release is not None else None,
     }
 
 
@@ -782,6 +815,12 @@ def _backlog_run_result(result) -> dict[str, object]:
         output["objective_path"] = str(result.objective_path)
     if getattr(result, "plan_path", None) is not None:
         output["plan_path"] = str(result.plan_path)
+    if getattr(result, "execution_strategy_selection_path", None) is not None:
+        output["execution_strategy_selection_path"] = str(result.execution_strategy_selection_path)
+    if getattr(result, "supervisor_decision_path", None) is not None:
+        output["supervisor_decision_path"] = str(result.supervisor_decision_path)
+    if getattr(result, "one_shot_execution_input_path", None) is not None:
+        output["one_shot_execution_input_path"] = str(result.one_shot_execution_input_path)
     if getattr(result, "release", None) is not None:
         output["release"] = _release_run_result(result.release)
     return output

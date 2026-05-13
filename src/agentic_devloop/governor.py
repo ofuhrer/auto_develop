@@ -6,6 +6,7 @@ from typing import Callable, Protocol
 
 from agentic_devloop.backlog import BacklogPlanResult, BacklogRunResult
 from agentic_devloop.config import load_project_config
+from agentic_devloop.execution_strategy import ExecutionStrategySelectorInput
 from agentic_devloop.models import (
     BacklogEpic,
     BacklogEvidenceManifest,
@@ -58,6 +59,7 @@ class RunObjectiveFn(Protocol):
         execution_mode: str,
         debug_keep_artifacts: bool,
         progress: Callable[[str], None] | None,
+        execution_strategy_inputs: ExecutionStrategySelectorInput | dict | None,
     ) -> object: ...
 
 
@@ -168,6 +170,12 @@ class GovernorLoop:
                 config=planner, repo_path=config.repo_path
             )
 
+        execution_strategy_inputs = _build_execution_strategy_inputs(
+            plan=plan,
+            epic=epic,
+            objective=objective,
+            runs_dir=runs_dir,
+        )
         objective_run = self._run_objective(
             project_id=project_id,
             objective_path=objective_path,
@@ -188,10 +196,11 @@ class GovernorLoop:
             execution_mode=execution_mode,
             debug_keep_artifacts=debug_keep_artifacts,
             progress=progress,
+            execution_strategy_inputs=execution_strategy_inputs,
         )
         release = objective_run.release
         if self._state_store is not None:
-            if release.decision == "accepted":
+            if release is not None and release.decision == "accepted":
                 self._state_store.mark_completed_epic(epic.epic_id)
             else:
                 self._state_store.mark_blocked_epic(epic.epic_id)
@@ -200,10 +209,11 @@ class GovernorLoop:
             backlog_plan_path=plan_result.plan_path,
             generated_objective_path=objective_path if created_objective else None,
             contract_plan_path=objective_run.planning.plan_path,
-            release_summary_path=release.summary_path,
-            release_metrics_path=release.metrics_path,
-            release_budget_path=release.budget_path,
-            release_tuning_path=release.tuning_path,
+            release_summary_path=release.summary_path if release is not None else None,
+            release_metrics_path=release.metrics_path if release is not None else None,
+            release_budget_path=release.budget_path if release is not None else None,
+            release_tuning_path=release.tuning_path if release is not None else None,
+            state_review_snapshot_path=plan.state_review_snapshot_path,
         )
 
         return BacklogRunResult(
@@ -215,11 +225,52 @@ class GovernorLoop:
             generated_objective_path=objective_path if created_objective else None,
             objective=objective,
             contract_plan_path=objective_run.planning.plan_path,
+            execution_strategy_selection_path=getattr(
+                objective_run.planning, "execution_strategy_selection_path", None
+            ),
+            supervisor_decision_path=getattr(objective_run.planning, "supervisor_decision_path", None),
+            one_shot_execution_input_path=getattr(
+                objective_run.planning, "one_shot_execution_input_path", None
+            ),
             release_id=objective_run.release_id,
             release=release,
-            release_summary_path=release.summary_path,
-            release_metrics_path=release.metrics_path,
-            release_budget_path=release.budget_path,
-            release_tuning_path=release.tuning_path,
+            release_summary_path=release.summary_path if release is not None else None,
+            release_metrics_path=release.metrics_path if release is not None else None,
+            release_budget_path=release.budget_path if release is not None else None,
+            release_tuning_path=release.tuning_path if release is not None else None,
             evidence_manifest=evidence_manifest,
         )
+
+
+def _build_execution_strategy_inputs(
+    *,
+    plan: BacklogPlan,
+    epic: BacklogEpic,
+    objective: ReleaseObjective,
+    runs_dir: Path,
+) -> dict[str, object]:
+    prior_release_run_dir = _latest_release_run_dir(runs_dir=runs_dir, release_id=objective.release_id)
+    release_review_path = (
+        (prior_release_run_dir / "release_review.md") if prior_release_run_dir is not None else None
+    )
+    release_metrics_path = (
+        (prior_release_run_dir / "release_metrics.json") if prior_release_run_dir is not None else None
+    )
+    return {
+        "release_id": objective.release_id,
+        "task_ids": [epic.epic_id],
+        "coupled_tasks": True,
+        "state_review_snapshot_path": plan.state_review_snapshot_path,
+        "release_review_path": release_review_path if release_review_path is not None and release_review_path.exists() else None,
+        "release_metrics_path": release_metrics_path if release_metrics_path is not None and release_metrics_path.exists() else None,
+    }
+
+
+def _latest_release_run_dir(*, runs_dir: Path, release_id: str) -> Path | None:
+    if not runs_dir.exists():
+        return None
+    suffix = f"_{release_id}_release"
+    candidates = [path for path in runs_dir.iterdir() if path.is_dir() and path.name.endswith(suffix)]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: path.name)

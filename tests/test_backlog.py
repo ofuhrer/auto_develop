@@ -363,6 +363,11 @@ def test_run_backlog_selects_one_epic_reuses_objective_and_runs_release(tmp_path
     assert result.objective.release_id == "demo-agent-selected-governor"
     assert result.contract_plan_path is not None
     assert result.contract_plan_path.exists()
+    assert result.execution_strategy_selection_path is not None
+    assert result.execution_strategy_selection_path.exists()
+    assert result.supervisor_decision_path is not None
+    assert result.supervisor_decision_path.exists()
+    assert result.one_shot_execution_input_path is None
     assert result.release_id == "demo-agent-selected-governor"
     assert result.release.decision == "accepted"
     assert result.release_summary_path == result.release.summary_path
@@ -446,6 +451,11 @@ def test_run_backlog_records_generated_objective_path_when_objective_is_created(
 
     assert result.generated_objective_path == result.objective_path
     assert result.generated_objective_path is not None and result.generated_objective_path.exists()
+    assert result.execution_strategy_selection_path is not None
+    assert result.execution_strategy_selection_path.exists()
+    assert result.supervisor_decision_path is not None
+    assert result.supervisor_decision_path.exists()
+    assert result.one_shot_execution_input_path is None
     assert result.evidence_manifest is not None
     assert result.evidence_manifest.backlog_plan_path == result.backlog_plan_path
     assert result.evidence_manifest.generated_objective_path == result.generated_objective_path

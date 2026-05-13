@@ -37,9 +37,12 @@ class BacklogRunResult:
     objective_path: Path
     objective: ReleaseObjective
     release_id: str
-    release: ReleaseRunResult
+    release: ReleaseRunResult | None
     generated_objective_path: Path | None = None
     contract_plan_path: Path | None = None
+    execution_strategy_selection_path: Path | None = None
+    supervisor_decision_path: Path | None = None
+    one_shot_execution_input_path: Path | None = None
     release_summary_path: Path | None = None
     release_metrics_path: Path | None = None
     release_budget_path: Path | None = None
