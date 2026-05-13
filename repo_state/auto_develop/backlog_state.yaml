@@ -1,6 +1,6 @@
 active_goal: Enable a freshly onboarded auto_develop checkout and target repository to run a high-level autonomous development loop for the next N highest-value epics, with a runtime supervisor that diagnoses, repairs, and resumes contract-contained subsystem failures without routine human intervention.
 governor_mode: autonomous_first
-current_focus: supervisor-owned-release-scheduling
+current_focus: review-loop-convergence-policy
 active_epic: null
 completed_epics:
   - release-governor-1
@@ -14,61 +14,58 @@ completed_epics:
   - agentic-feature-review-loop
   - persistent-governor-memory
   - supervisor-decision-records
+  - supervisor-owned-release-scheduling
 blocked_epics: []
 candidate_epics:
-  - id: supervisor-owned-release-scheduling
-    priority: 1
-    title: Let the supervisor decide release scheduling from overlap-risk reports.
-    rationale: Normal source-file overlap should produce a scheduling decision, not an unconditional deterministic stop; hard rejection remains for exclusive paths, generated artifacts, lockfiles, migrations, destructive scripts, forbidden paths, and out-of-scope files.
-    next_release_id: supervisor-owned-release-scheduling
   - id: review-loop-convergence-policy
-    priority: 2
+    priority: 1
     title: Add convergence policy for reviewer repair loops.
     rationale: Multiple repair passes are useful for blocking findings, but repeated adjacent findings should be classified as blockers, soft findings, duplicates, false positives, scope expansion, or backlog follow-ups before retry budget churn.
     next_release_id: review-loop-convergence-policy
   - id: multi-epic-run-governor
-    priority: 3
+    priority: 2
     title: Run the next N highest-priority epics autonomously.
     rationale: Converts one-epic run-backlog into the intended high-level development loop after state review, feature review, persistent memory, and supervisor decision records can prevent stale work and procedural stops.
     next_release_id: multi-epic-run-governor
   - id: governor-cockpit-v2
-    priority: 4
+    priority: 3
     title: Expand governor cockpit logging for full N-epic runs.
     rationale: Operators need one `governor.log` stream that links state review, backlog selection, child releases, feature reviews, repair loops, state refresh, and next-epic selection across repeated cycles.
     next_release_id: governor-cockpit-v2
   - id: shared-verification-runtime
-    priority: 5
+    priority: 4
     title: Make isolated worktrees run tests through a configured shared runtime.
     rationale: Sub-agents repeatedly could not run pytest because task worktrees do not contain .venv; verification should use project runtime policy rather than worktree-local assumptions.
     next_release_id: shared-verification-runtime
   - id: environment-repair-actions
-    priority: 6
+    priority: 5
     title: Repair safe verification-environment drift autonomously.
     rationale: Stale editable installs, command-not-found errors, missing PYTHONPATH, and dependency runtime drift should become bounded repair actions when project policy declares a safe repair.
     next_release_id: environment-repair-actions
   - id: executor-liveness-supervision
-    priority: 7
+    priority: 6
     title: Classify active, stalled, hung, and environment-blocked executors.
     rationale: Long-running workers need process/output/file heartbeat evidence so the supervisor can wait, inspect, restart, or stop without human guessing.
     next_release_id: executor-liveness-supervision
   - id: target-artifact-ownership
-    priority: 8
+    priority: 7
     title: Store target development memory in the target repo or a durable control repo.
     rationale: Deleting and recloning the auto_develop controller should not lose target repo-state, objectives, contracts, completed-epic history, or next-epic planning context.
     next_release_id: target-artifact-ownership
   - id: governor-state-refresh
-    priority: 9
+    priority: 8
     title: Apply roadmap and repo-state updates after each epic.
     rationale: Ensures new learnings from artifacts, validation, metrics, review findings, and documentation feed the next planning cycle.
     next_release_id: governor-state-refresh
   - id: onboarding-bootstrap
-    priority: 10
+    priority: 9
     title: Bootstrap a freshly cloned target repository from one or two onboarding prompts.
     rationale: The target operator experience is minimal setup followed by a high-level epic-count loop.
     next_release_id: onboarding-bootstrap
 last_reviewed: 2026-05-13
 notes:
   - supervisor-decision-records is now implemented with typed, versioned decision models, strict JSON artifact IO under supervisor_decisions directories, and a migrated task-level soft_budget_acceptance path that emits, reloads, and consumes the typed artifact without weakening hard gates.
+  - supervisor-owned-release-scheduling is now implemented with overlap-risk reports, strict release_scheduling decision artifacts, sequential serialization for normal source overlap, parallel execution for independent tasks, and deterministic rejection of stale or unsupported scheduling artifacts.
   - The governor-loop-service-boundaries epic has now extracted GovernorLoop, StateStore, and RepairPolicy seams for one-epic autonomous execution, state persistence, and repair classification.
   - Typed supervisor decision records are the immediate seam for auditable scheduling, repair continuation, finding adjudication, contract normalization, and environment repair.
   - The runtime-supervisor-repair-loop epic is merged; the next planned increment should reduce brittle deterministic stops and improve environment/liveness supervision before the N-epic loop.

@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from agentic_devloop.evidence import supervisor_decisions_artifacts_dir
 from agentic_devloop.supervisor_decisions import (
+    ReleaseSchedulingAction,
     SCHEMA_VERSION_V1,
     DecisionRiskLevel,
     ReleaseSchedulingDecision,
@@ -33,7 +34,18 @@ def _decision(*, evidence_paths: list[Path]) -> ReleaseSchedulingDecision:
             "decision_type": SupervisorDecisionType.RELEASE_SCHEDULING,
             "risk_level": DecisionRiskLevel.MODERATE,
             "overlap_findings": ["src/agentic_devloop/release.py"],
+            "selected_action": ReleaseSchedulingAction.SEQUENTIAL,
             "outcome": SchedulingOutcome.PROCEED_SEQUENTIAL,
+            "fallback_plan": "Rerun overlap analysis before resuming parallel execution.",
+            "validators_to_rerun": ["overlap_report", "verification"],
+            "staleness_inputs": {
+                "execution_mode": "parallel",
+                "selected_task_ids": ["demo-0001"],
+                "selected_contract_paths": [str(Path("contract.yaml"))],
+                "overlap_report_sha256": "abc123",
+                "base_branch_head_commit": "deadbeef",
+                "release_inputs_sha256": "f00d",
+            },
         }
     )
 
@@ -133,7 +145,18 @@ def test_load_supervisor_decision_artifact_rejects_relative_evidence_path_traver
                 "decision_type": "release_scheduling",
                 "risk_level": "moderate",
                 "overlap_findings": [],
+                "selected_action": "sequential",
                 "outcome": "proceed_sequential",
+                "fallback_plan": "Rerun overlap analysis before resuming parallel execution.",
+                "validators_to_rerun": ["overlap_report", "verification"],
+                "staleness_inputs": {
+                    "execution_mode": "parallel",
+                    "selected_task_ids": ["demo-0001"],
+                    "selected_contract_paths": [str(Path("contract.yaml"))],
+                    "overlap_report_sha256": "abc123",
+                    "base_branch_head_commit": "deadbeef",
+                    "release_inputs_sha256": "f00d",
+                },
             },
             indent=2,
         )

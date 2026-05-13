@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shlex
 import threading
+from hashlib import sha256
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -33,6 +34,7 @@ from agentic_devloop.git_finalize import (
     merge_integration_branch_to_base,
     push_branch,
 )
+from agentic_devloop.git_state import git_text
 from fnmatch import fnmatch
 
 from agentic_devloop.models import (
@@ -70,6 +72,16 @@ from agentic_devloop.runtime_supervisor import (
     RuntimeSupervisorStopReason,
     RuntimeSupervisorInput,
     TuningReportPaths,
+)
+from agentic_devloop.supervisor_decisions import (
+    ReleaseSchedulingAction,
+    ReleaseSchedulingDecision,
+    ReleaseSchedulingStalenessInputs,
+    SchedulingOutcome,
+    SupervisorDecisionType,
+    load_supervisor_decision_artifact,
+    supervisor_decision_artifact_path,
+    write_supervisor_decision_artifact,
 )
 from agentic_devloop.state_review import (
     collect_state_review_snapshot,
@@ -166,6 +178,14 @@ def feature_branch_name(release_id: str) -> str:
     return f"feature/{release_id}"
 
 
+def _release_scheduling_decision_path(release_root: Path, release_id: str) -> Path:
+    return supervisor_decision_artifact_path(
+        release_bundle_path=release_root,
+        decision_type=SupervisorDecisionType.RELEASE_SCHEDULING,
+        decision_id=f"{release_id}__scheduling",
+    )
+
+
 def run_release(
     *,
     project_id: str,
@@ -225,6 +245,10 @@ def run_release(
         selected_tasks,
         unsafe_overlap_paths=config.unsafe_overlap_paths,
     )
+    overlap_report_path = _write_release_overlap_report_artifact(
+        release_root=release_root,
+        overlap_report=overlap_report,
+    )
     if overlap_report.has_blocking_findings:
         details = "; ".join(
             f"{finding.first_task_id}/{finding.second_task_id}: {finding.pattern}"
@@ -239,7 +263,13 @@ def run_release(
     ensure_branch_from_base(config.repo_path, feature_branch, config.default_base_branch)
     _report(progress, f"event=integration_branch branch={feature_branch} base={config.default_base_branch}")
     if overlap_report.findings:
-        _report(progress, f"event=overlap_findings count={len(overlap_report.findings)}")
+        _report(
+            progress,
+            "event=overlap_risk_report "
+            f"count={len(overlap_report.findings)} "
+            f"path={overlap_report_path} "
+            f"severity={'blocking' if overlap_report.has_blocking_findings else 'soft'}",
+        )
 
     completed_task_ids = _completed_release_task_ids(
         runs_dir=runs_dir,
@@ -272,7 +302,26 @@ def run_release(
         )
     if dependencies:
         _report(progress, "event=execution_dag dependencies=" + json.dumps(dependencies, sort_keys=True))
-    if execution_mode == "parallel":
+    scheduling_decision = _load_or_build_release_scheduling_decision(
+        release_root=release_root,
+        release_id=release_id,
+        config=config,
+        base_branch=config.default_base_branch,
+        execution_mode=execution_mode,
+        selected_contracts=selected_contracts,
+        selected_tasks=selected_tasks,
+        overlap_report=overlap_report,
+        overlap_report_path=overlap_report_path,
+        dependencies=dependencies,
+    )
+    _report(
+        progress,
+        "event=scheduling_decision "
+        f"action={scheduling_decision.selected_action.value} "
+        f"outcome={scheduling_decision.outcome.value} "
+        f"path={_release_scheduling_decision_path(release_root, release_id)}",
+    )
+    if scheduling_decision.selected_action == ReleaseSchedulingAction.PARALLEL:
         task_results = _run_release_parallel(
             project_id=project_id,
             config_repo_path=config.repo_path,
@@ -292,7 +341,12 @@ def run_release(
             debug_keep_artifacts=debug_keep_artifacts,
             progress=progress,
         )
-    else:
+    elif scheduling_decision.selected_action == ReleaseSchedulingAction.SEQUENTIAL:
+        ordered_task_inputs = _ordered_release_task_inputs(
+            task_inputs=task_inputs,
+            dependencies=dependencies,
+            completed_task_ids=completed_task_ids,
+        )
         task_results = _run_release_sequential(
             project_id=project_id,
             config_repo_path=config.repo_path,
@@ -303,7 +357,7 @@ def run_release(
             run_id=run_id,
             repo_state_path=config.repo_state_path,
             task_base_branch=feature_branch,
-            task_inputs=task_inputs,
+            task_inputs=ordered_task_inputs,
             executor=executor,
             verification_timeout_seconds=verification_timeout_seconds,
             allow_dirty=allow_dirty,
@@ -313,6 +367,10 @@ def run_release(
             stop_on_failure=stop_on_failure,
             debug_keep_artifacts=debug_keep_artifacts,
             progress=progress,
+        )
+    else:
+        raise ValueError(
+            f"unsupported release scheduling action: {scheduling_decision.selected_action.value}"
         )
 
     feature_review_path: Path | None = None
@@ -2326,9 +2384,234 @@ def analyze_contract_overlaps(
                                 second_task_id=second.task_id,
                                 pattern=f"{first_pattern} <-> {second_pattern}",
                                 severity=severity,
-                            )
+                        )
                         )
     return ReleaseOverlapReport(findings=findings)
+
+
+def _write_release_overlap_report_artifact(
+    *,
+    release_root: Path,
+    overlap_report: ReleaseOverlapReport,
+) -> Path:
+    artifact_path = release_root / "release_overlap_report.json"
+    artifact_path.write_text(
+        json.dumps(overlap_report.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return artifact_path
+
+
+def _release_overlap_report_sha256(overlap_report: ReleaseOverlapReport) -> str:
+    payload = json.dumps(overlap_report.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    return sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _release_scheduling_staleness_inputs(
+    *,
+    config_repo_path: Path,
+    base_branch: str,
+    release_id: str,
+    execution_mode: str,
+    selected_contracts: list[Path],
+    selected_tasks: list[TaskContract],
+    overlap_report: ReleaseOverlapReport,
+) -> ReleaseSchedulingStalenessInputs:
+    selected_contract_paths = [path.resolve() for path in selected_contracts]
+    selected_task_ids = [task.task_id for task in selected_tasks]
+    overlap_report_sha256 = _release_overlap_report_sha256(overlap_report)
+    base_branch_head_commit = git_text(config_repo_path, ["rev-parse", base_branch]).strip()
+    release_inputs_sha256 = sha256(
+        json.dumps(
+            {
+                "release_id": release_id,
+                "execution_mode": execution_mode,
+                "selected_task_ids": selected_task_ids,
+                "selected_contract_paths": [str(path) for path in selected_contract_paths],
+                "overlap_report_sha256": overlap_report_sha256,
+                "base_branch_head_commit": base_branch_head_commit,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return ReleaseSchedulingStalenessInputs(
+        execution_mode=execution_mode,  # type: ignore[arg-type]
+        selected_task_ids=selected_task_ids,
+        selected_contract_paths=selected_contract_paths,
+        overlap_report_sha256=overlap_report_sha256,
+        base_branch_head_commit=base_branch_head_commit,
+        release_inputs_sha256=release_inputs_sha256,
+    )
+
+
+def _release_scheduling_action_for_execution_mode(
+    *,
+    execution_mode: str,
+    overlap_report: ReleaseOverlapReport,
+) -> ReleaseSchedulingAction:
+    if overlap_report.findings:
+        return ReleaseSchedulingAction.SEQUENTIAL
+    if execution_mode == "sequential":
+        return ReleaseSchedulingAction.SEQUENTIAL
+    return ReleaseSchedulingAction.PARALLEL
+
+
+def _release_scheduling_outcome_for_action(action: ReleaseSchedulingAction) -> SchedulingOutcome:
+    if action == ReleaseSchedulingAction.PARALLEL:
+        return SchedulingOutcome.PROCEED_PARALLEL
+    if action == ReleaseSchedulingAction.SEQUENTIAL:
+        return SchedulingOutcome.PROCEED_SEQUENTIAL
+    if action == ReleaseSchedulingAction.STACKED:
+        return SchedulingOutcome.STACKED_BRANCHES
+    if action == ReleaseSchedulingAction.REPLAN:
+        return SchedulingOutcome.REPLAN
+    return SchedulingOutcome.STOP
+
+
+def _release_scheduling_fallback_plan(action: ReleaseSchedulingAction) -> str:
+    if action == ReleaseSchedulingAction.SEQUENTIAL:
+        return "Rerun overlap analysis and verification if the selected source scope changes before re-enabling parallel execution."
+    if action == ReleaseSchedulingAction.PARALLEL:
+        return "Rerun the dependency graph and overlap analysis if new file overlap appears before execution resumes."
+    if action == ReleaseSchedulingAction.STACKED:
+        return "Stacked branch scheduling is not yet implemented; re-slice the release into sequential or parallel tasks."
+    if action == ReleaseSchedulingAction.REPLAN:
+        return "Replan the release contract package before retrying execution."
+    return "Stop and inspect the release decision evidence before resuming execution."
+
+
+def _release_scheduling_validators_to_rerun(action: ReleaseSchedulingAction) -> list[str]:
+    if action == ReleaseSchedulingAction.SEQUENTIAL:
+        return ["overlap_report", "execution_dag", "verification"]
+    if action == ReleaseSchedulingAction.PARALLEL:
+        return ["execution_dag", "verification"]
+    return ["overlap_report", "verification"]
+
+
+def _build_release_scheduling_decision(
+    *,
+    config_repo_path: Path,
+    base_branch: str,
+    release_id: str,
+    execution_mode: str,
+    selected_contracts: list[Path],
+    selected_tasks: list[TaskContract],
+    overlap_report: ReleaseOverlapReport,
+    overlap_report_path: Path,
+    dependencies: dict[str, list[str]],
+) -> ReleaseSchedulingDecision:
+    selected_action = _release_scheduling_action_for_execution_mode(
+        execution_mode=execution_mode,
+        overlap_report=overlap_report,
+    )
+    staleness_inputs = _release_scheduling_staleness_inputs(
+        config_repo_path=config_repo_path,
+        base_branch=base_branch,
+        release_id=release_id,
+        execution_mode=execution_mode,
+        selected_contracts=selected_contracts,
+        selected_tasks=selected_tasks,
+        overlap_report=overlap_report,
+    )
+    evidence_paths = [overlap_report_path, *[path.resolve() for path in selected_contracts]]
+    if selected_action == ReleaseSchedulingAction.SEQUENTIAL:
+        if overlap_report.findings:
+            rationale = "Normal source overlap is serialized for safety."
+        else:
+            rationale = "The release was requested in sequential mode."
+        if dependencies:
+            rationale = f"{rationale} Explicit dependencies are preserved in the release DAG."
+    else:
+        rationale = "Independent release tasks can proceed in parallel."
+    return ReleaseSchedulingDecision.model_validate(
+        {
+            "decision_id": f"{release_id}__scheduling",
+            "release_id": release_id,
+            "decided_at": datetime.now(UTC),
+            "decided_by": "deterministic_kernel",
+            "rationale": rationale,
+            "evidence_paths": evidence_paths,
+            "decision_type": SupervisorDecisionType.RELEASE_SCHEDULING,
+            "risk_level": (
+                "moderate"
+                if overlap_report.findings
+                else "low"
+            ),
+            "overlap_findings": [finding.pattern for finding in overlap_report.findings],
+            "selected_action": selected_action,
+            "outcome": _release_scheduling_outcome_for_action(selected_action),
+            "fallback_plan": _release_scheduling_fallback_plan(selected_action),
+            "validators_to_rerun": _release_scheduling_validators_to_rerun(selected_action),
+            "staleness_inputs": staleness_inputs.model_dump(mode="json"),
+        }
+    )
+
+
+def _load_or_build_release_scheduling_decision(
+    *,
+    release_root: Path,
+    release_id: str,
+    config: "ProjectConfig",
+    base_branch: str,
+    execution_mode: str,
+    selected_contracts: list[Path],
+    selected_tasks: list[TaskContract],
+    overlap_report: ReleaseOverlapReport,
+    overlap_report_path: Path,
+    dependencies: dict[str, list[str]],
+) -> ReleaseSchedulingDecision:
+    decision_path = _release_scheduling_decision_path(release_root, release_id)
+    current_staleness_inputs = _release_scheduling_staleness_inputs(
+        config_repo_path=config.repo_path,
+        base_branch=base_branch,
+        release_id=release_id,
+        execution_mode=execution_mode,
+        selected_contracts=selected_contracts,
+        selected_tasks=selected_tasks,
+        overlap_report=overlap_report,
+    )
+    if decision_path.exists():
+        loaded = load_supervisor_decision_artifact(decision_path)
+        if not isinstance(loaded, ReleaseSchedulingDecision):
+            raise ValueError(
+                f"release scheduling decision artifact has unsupported type: {loaded.decision_type}"
+            )
+        if loaded.staleness_inputs != current_staleness_inputs:
+            raise ValueError(
+                f"release scheduling decision artifact is stale for release {release_id}: {decision_path}"
+            )
+        return loaded
+
+    decision = _build_release_scheduling_decision(
+        config_repo_path=config.repo_path,
+        base_branch=base_branch,
+        release_id=release_id,
+        execution_mode=execution_mode,
+        selected_contracts=selected_contracts,
+        selected_tasks=selected_tasks,
+        overlap_report=overlap_report,
+        overlap_report_path=overlap_report_path,
+        dependencies=dependencies,
+    )
+    written_path = write_supervisor_decision_artifact(
+        release_bundle_path=release_root,
+        decision=decision,
+    )
+    if written_path != decision_path:
+        raise RuntimeError(
+            f"release scheduling decision artifact was written to unexpected path: {written_path}"
+        )
+    loaded = load_supervisor_decision_artifact(decision_path)
+    if not isinstance(loaded, ReleaseSchedulingDecision):
+        raise ValueError(
+            f"release scheduling decision artifact has unsupported type: {loaded.decision_type}"
+        )
+    if loaded.staleness_inputs != current_staleness_inputs:
+        raise ValueError(
+            f"release scheduling decision artifact is stale for release {release_id}: {decision_path}"
+        )
+    return loaded
 
 
 def _completed_release_task_ids(
@@ -2387,6 +2670,45 @@ def _release_dependency_map(
     }
 
 
+def _ordered_release_task_inputs(
+    *,
+    task_inputs: list[tuple[Path, TaskContract]],
+    dependencies: dict[str, list[str]],
+    completed_task_ids: set[str],
+) -> list[tuple[Path, TaskContract]]:
+    task_ids = [task.task_id for _, task in task_inputs]
+    task_ids_set = set(task_ids)
+    remaining_dependencies: dict[str, set[str]] = {}
+    for task_id in task_ids:
+        dependency_set = set(dependencies.get(task_id, [])) - completed_task_ids
+        unknown = sorted(dependency_set - task_ids_set)
+        if unknown:
+            raise ValueError(
+                f"task {task_id} depends on unknown release task(s): {', '.join(unknown)}"
+            )
+        remaining_dependencies[task_id] = dependency_set
+
+    ready = [task_id for task_id in task_ids if not remaining_dependencies[task_id]]
+    ordered: list[tuple[Path, TaskContract]] = []
+    emitted: set[str] = set()
+    while ready:
+        task_id = ready.pop(0)
+        contract_path, task = next(item for item in task_inputs if item[1].task_id == task_id)
+        ordered.append((contract_path, task))
+        emitted.add(task_id)
+        for remaining_task_id, task_dependencies in remaining_dependencies.items():
+            if task_id not in task_dependencies:
+                continue
+            task_dependencies.remove(task_id)
+            if not task_dependencies and remaining_task_id not in emitted and remaining_task_id not in ready:
+                ready.append(remaining_task_id)
+
+    if len(ordered) != len(task_inputs):
+        blocked = ", ".join(sorted(task_id for task_id in task_ids_set if task_id not in emitted))
+        raise ValueError(f"release execution DAG has unsatisfied dependencies: {blocked}")
+    return ordered
+
+
 def _overlap_severity(
     first: str,
     second: str,
@@ -2418,6 +2740,8 @@ def _is_hard_unsafe_overlap(first: str, second: str, *, unsafe_overlap_paths: li
             _is_lockfile_path(second),
             _is_migration_path(first),
             _is_migration_path(second),
+            _is_destructive_script_path(first),
+            _is_destructive_script_path(second),
         )
     )
 
@@ -2468,6 +2792,15 @@ def _is_migration_path(pattern: str) -> bool:
         or normalized.startswith("migrations/")
         or normalized.endswith("/migrations")
         or normalized.startswith("alembic/versions/")
+    )
+
+
+def _is_destructive_script_path(pattern: str) -> bool:
+    normalized = pattern.strip().lstrip("./").lower()
+    path = Path(normalized)
+    destructive_tokens = {"destroy", "destruct", "delete", "wipe", "nuke", "reset", "drop", "purge"}
+    return path.parts and path.parts[0] in {"scripts", "script", "bin"} and any(
+        token in path.stem for token in destructive_tokens
     )
 
 
@@ -2591,8 +2924,12 @@ def _display_event_message(message: str) -> str:
         return f"🌿 Integration branch ready: {_style(str(event.get('branch')), 'cyan')} from {event.get('base')}"
     if name == "execution_dag":
         return f"🕸️ Execution DAG: {_style(_compact_value(str(event.get('dependencies'))), 'dim')}"
-    if name == "overlap_findings":
-        return f"🧩 Contract overlap findings: {event.get('count')}  {_style('scheduler will serialize risky overlap', 'dim')}"
+    if name == "overlap_risk_report":
+        severity = event.get("severity", "soft")
+        detail = "scheduler will serialize risky overlap" if severity != "blocking" else "hard gate remains authoritative"
+        return f"🧩 Overlap-risk report: {event.get('count')} finding(s)  {_style(detail, 'dim')} {_style(str(event.get('path')), 'dim')}"
+    if name == "scheduling_decision":
+        return f"🧭 Release scheduling decision: {event.get('action')} -> {event.get('outcome')}  {_style(str(event.get('path')), 'dim')}"
     if name == "task_started":
         return _style(
             f"🧭 Task {event.get('index')}/{event.get('total')} {event.get('task')}: {event.get('title')} [{event.get('type')}, budget {event.get('budget')}]",

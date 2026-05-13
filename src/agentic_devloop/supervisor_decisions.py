@@ -49,11 +49,56 @@ class SchedulingOutcome(StrEnum):
     STOP = "stop"
 
 
+class ReleaseSchedulingAction(StrEnum):
+    PARALLEL = "parallel"
+    SEQUENTIAL = "sequential"
+    STACKED = "stacked"
+    REPLAN = "replan"
+    STOP = "stop"
+
+
+class ReleaseSchedulingStalenessInputs(StrictModel):
+    execution_mode: Literal["sequential", "parallel"]
+    selected_task_ids: list[str] = Field(default_factory=list)
+    selected_contract_paths: list[Path] = Field(default_factory=list)
+    overlap_report_sha256: str = Field(min_length=1)
+    base_branch_head_commit: str = Field(min_length=1)
+    release_inputs_sha256: str = Field(min_length=1)
+
+    @field_validator("selected_task_ids")
+    @classmethod
+    def selected_task_ids_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("selected task ids must not be empty")
+        return values
+
+    @field_validator("selected_contract_paths")
+    @classmethod
+    def selected_contract_paths_must_not_be_empty(cls, values: list[Path]) -> list[Path]:
+        if not values:
+            raise ValueError("selected contract paths must not be empty")
+        return values
+
+    @model_validator(mode="after")
+    def staleness_inputs_must_be_consistent(self) -> "ReleaseSchedulingStalenessInputs":
+        if len(self.selected_task_ids) != len(self.selected_contract_paths):
+            raise ValueError("selected task ids and contract paths must have the same length")
+        if len(self.selected_task_ids) != len(set(self.selected_task_ids)):
+            raise ValueError("selected task ids must be unique")
+        if len(self.selected_contract_paths) != len(set(self.selected_contract_paths)):
+            raise ValueError("selected contract paths must be unique")
+        return self
+
+
 class ReleaseSchedulingDecision(SupervisorDecisionBase):
     decision_type: Literal[SupervisorDecisionType.RELEASE_SCHEDULING] = SupervisorDecisionType.RELEASE_SCHEDULING
     risk_level: DecisionRiskLevel
     overlap_findings: list[str] = Field(default_factory=list)
+    selected_action: ReleaseSchedulingAction
     outcome: SchedulingOutcome
+    fallback_plan: str = Field(min_length=1)
+    validators_to_rerun: list[str] = Field(default_factory=list)
+    staleness_inputs: ReleaseSchedulingStalenessInputs
 
     @field_validator("overlap_findings")
     @classmethod
@@ -61,6 +106,27 @@ class ReleaseSchedulingDecision(SupervisorDecisionBase):
         if any(not value.strip() for value in values):
             raise ValueError("overlap findings must not be empty")
         return values
+
+    @field_validator("validators_to_rerun")
+    @classmethod
+    def validators_to_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if not values or any(not value.strip() for value in values):
+            raise ValueError("validators to rerun must not be empty")
+        return values
+
+    @model_validator(mode="after")
+    def selected_action_must_match_outcome(self) -> "ReleaseSchedulingDecision":
+        outcome_by_action = {
+            ReleaseSchedulingAction.PARALLEL: SchedulingOutcome.PROCEED_PARALLEL,
+            ReleaseSchedulingAction.SEQUENTIAL: SchedulingOutcome.PROCEED_SEQUENTIAL,
+            ReleaseSchedulingAction.STACKED: SchedulingOutcome.STACKED_BRANCHES,
+            ReleaseSchedulingAction.REPLAN: SchedulingOutcome.REPLAN,
+            ReleaseSchedulingAction.STOP: SchedulingOutcome.STOP,
+        }
+        expected_outcome = outcome_by_action[self.selected_action]
+        if self.outcome != expected_outcome:
+            raise ValueError("selected_action must match outcome")
+        return self
 
 
 class RepairLoopOutcome(StrEnum):

@@ -4,6 +4,7 @@ import subprocess
 import threading
 import time
 import json
+from hashlib import sha256
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -32,6 +33,12 @@ from agentic_devloop.release import (
     _should_preserve_task_worktree,
     analyze_contract_overlaps,
     run_release,
+)
+from agentic_devloop.supervisor_decisions import (
+    ReleaseSchedulingAction,
+    SupervisorDecisionType,
+    load_supervisor_decision_artifact,
+    supervisor_decision_artifact_path,
 )
 
 
@@ -121,6 +128,52 @@ class SharedSourceExecutor:
         finally:
             with self._lock:
                 self._active -= 1
+
+
+class DependencyOrderingExecutor:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.started: list[str] = []
+        self.task_two_started_before_task_one_finished = False
+        self.task_one_finished = threading.Event()
+
+    def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        prompt_text = prompt_path.read_text(encoding="utf-8")
+        task_id = "unknown"
+        if "task_id: demo-0001" in prompt_text:
+            task_id = "demo-0001"
+        elif "task_id: demo-0002" in prompt_text:
+            task_id = "demo-0002"
+
+        with self._lock:
+            self.started.append(task_id)
+            if task_id == "demo-0002" and not self.task_one_finished.is_set():
+                self.task_two_started_before_task_one_finished = True
+
+        if task_id == "demo-0001":
+            time.sleep(0.2)
+            self.task_one_finished.set()
+        else:
+            self.task_one_finished.wait(timeout=2)
+
+        output_file = worktree_path / "docs" / f"{task_id}.md"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_text(f"# {task_id}\n", encoding="utf-8")
+
+        stdout_path = output_dir / "executor_stdout.log"
+        stderr_path = output_dir / "executor_stderr.log"
+        stdout_path.write_text("dependency ordering executor\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return ExecutorResult(
+            command=["dependency-ordering-executor"],
+            exit_code=0,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            duration_seconds=0.01,
+            backend="fake",
+            model=None,
+        )
 
 
 class FlakyVerificationExecutor(FakeExecutor):
@@ -443,7 +496,15 @@ def test_run_release_parallel_executes_independent_tasks_concurrently(tmp_path) 
 
     assert result.decision == Decision.ACCEPTED
     assert executor.max_active == 2
-    assert "parallel_scheduler" in result.log_path.read_text(encoding="utf-8")
+    log = result.log_path.read_text(encoding="utf-8")
+    assert "Release scheduling decision: parallel -> proceed_parallel" in log
+    decision_path = supervisor_decision_artifact_path(
+        release_bundle_path=tmp_path / "runs" / result.run_id,
+        decision_type=SupervisorDecisionType.RELEASE_SCHEDULING,
+        decision_id="v0.1.0__scheduling",
+    )
+    decision = load_supervisor_decision_artifact(decision_path)
+    assert decision.selected_action == ReleaseSchedulingAction.PARALLEL
     assert result.review_path.exists()
 
 
@@ -1289,8 +1350,18 @@ def test_run_release_parallel_serializes_same_non_unsafe_source_overlap_and_acce
     assert result.decision == Decision.ACCEPTED
     assert executor.max_active == 1
     log = result.log_path.read_text(encoding="utf-8")
-    assert "Contract overlap findings: 1" in log
-    assert "Execution DAG" in log
+    assert "Overlap-risk report: 1 finding(s)" in log
+    assert "Release scheduling decision: sequential -> proceed_sequential" in log
+    decision_path = supervisor_decision_artifact_path(
+        release_bundle_path=tmp_path / "runs" / result.run_id,
+        decision_type=SupervisorDecisionType.RELEASE_SCHEDULING,
+        decision_id="v0.1.0__scheduling",
+    )
+    decision = load_supervisor_decision_artifact(decision_path)
+    assert decision.selected_action == ReleaseSchedulingAction.SEQUENTIAL
+    assert decision.outcome.value == "proceed_sequential"
+    assert decision.validators_to_rerun == ["overlap_report", "execution_dag", "verification"]
+    assert decision.staleness_inputs.execution_mode == "parallel"
 
 
 def test_run_release_rejects_configured_unsafe_overlap_paths(tmp_path) -> None:
@@ -1323,6 +1394,162 @@ def test_run_release_rejects_configured_unsafe_overlap_paths(tmp_path) -> None:
         raise AssertionError("expected unsafe overlap configuration to hard-reject the release")
 
 
+def test_run_release_parallel_respects_explicit_depends_on_edges(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, verification_command="true")
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"], verification_commands=["true"]).model_dump(mode="json"),
+    )
+    _write_yaml(
+        contracts_dir / "demo-0002.yaml",
+        _task_contract(
+            "demo-0002",
+            allowed_files=["docs/demo-0002.md"],
+            verification_commands=["true"],
+        )
+        .model_copy(update={"depends_on": ["demo-0001"]})
+        .model_dump(mode="json"),
+    )
+
+    executor = DependencyOrderingExecutor()
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=executor,
+        execution_mode="parallel",
+    )
+
+    assert result.decision == Decision.ACCEPTED
+    assert executor.started == ["demo-0001", "demo-0002"]
+    assert executor.task_two_started_before_task_one_finished is False
+    assert "Release scheduling decision: parallel -> proceed_parallel" in result.log_path.read_text(encoding="utf-8")
+
+
+def test_run_release_parallel_reports_blocked_scheduler_state_for_dependency_cycle(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, verification_command="true")
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"], verification_commands=["true"])
+        .model_copy(update={"depends_on": ["demo-0002"]})
+        .model_dump(mode="json"),
+    )
+    _write_yaml(
+        contracts_dir / "demo-0002.yaml",
+        _task_contract("demo-0002", allowed_files=["docs/demo-0002.md"], verification_commands=["true"])
+        .model_copy(update={"depends_on": ["demo-0001"]})
+        .model_dump(mode="json"),
+    )
+
+    with pytest.raises(ValueError, match="unsatisfied dependencies"):
+        run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=FakeExecutor(),
+            execution_mode="parallel",
+        )
+
+
+@pytest.mark.parametrize("artifact_kind", ["stale", "unsupported_action"])
+def test_run_release_rejects_stale_or_invalid_release_scheduling_decisions(
+    tmp_path, artifact_kind: str
+) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, verification_command="true")
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    contract_paths = [
+        contracts_dir / "demo-0001.yaml",
+        contracts_dir / "demo-0002.yaml",
+    ]
+    _write_yaml(
+        contract_paths[0],
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"], verification_commands=["true"]).model_dump(mode="json"),
+    )
+    _write_yaml(
+        contract_paths[1],
+        _task_contract("demo-0002", allowed_files=["docs/demo-0002.md"], verification_commands=["true"]).model_dump(mode="json"),
+    )
+
+    overlap_report_sha256 = sha256(
+        json.dumps({"findings": []}, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    release_inputs_sha256 = sha256(
+        json.dumps(
+            {
+                "release_id": "v0.1.0",
+                "execution_mode": "parallel",
+                "selected_task_ids": ["demo-0001", "demo-0002"],
+                "selected_contract_paths": [str(path.resolve()) for path in contract_paths],
+                "overlap_report_sha256": overlap_report_sha256,
+                "base_branch_head_commit": _git_output(repo, "rev-parse", "HEAD").strip(),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    run_id = "20260513T080000Z_v0.1.0_release"
+    release_root = tmp_path / "runs" / run_id
+    decision_path = supervisor_decision_artifact_path(
+        release_bundle_path=release_root,
+        decision_type=SupervisorDecisionType.RELEASE_SCHEDULING,
+        decision_id="v0.1.0__scheduling",
+    )
+    decision_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": "1.0",
+        "decision_id": "v0.1.0__scheduling",
+        "release_id": "v0.1.0",
+        "decided_at": "2026-05-13T08:00:00",
+        "decided_by": "supervisor-agent",
+        "rationale": "serialized source overlap",
+        "evidence_paths": [str(path.resolve()) for path in contract_paths],
+        "decision_type": "release_scheduling",
+        "risk_level": "moderate",
+        "overlap_findings": [],
+        "selected_action": "stacked" if artifact_kind == "unsupported_action" else "sequential",
+        "outcome": "stacked_branches" if artifact_kind == "unsupported_action" else "proceed_sequential",
+        "fallback_plan": "Rerun overlap analysis before reusing the decision.",
+        "validators_to_rerun": ["overlap_report", "verification"],
+        "staleness_inputs": {
+            "execution_mode": "parallel",
+            "selected_task_ids": ["demo-0001", "demo-0002"],
+            "selected_contract_paths": [str(path.resolve()) for path in contract_paths],
+            "overlap_report_sha256": overlap_report_sha256,
+            "base_branch_head_commit": _git_output(repo, "rev-parse", "HEAD").strip(),
+            "release_inputs_sha256": "stale" if artifact_kind == "stale" else release_inputs_sha256,
+        },
+    }
+    if artifact_kind == "unsupported_action":
+        payload["fallback_plan"] = "Stacked branches are not implemented."
+        payload["validators_to_rerun"] = ["overlap_report", "verification"]
+    decision_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="stale|unsupported release scheduling action"):
+        run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=FakeExecutor(),
+            execution_mode="parallel",
+            now=datetime(2026, 5, 13, 8, 0, 0),
+        )
+
+
 def test_analyze_contract_overlaps_blocks_lockfiles_and_migrations_and_out_of_scope() -> None:
     lockfile_report = analyze_contract_overlaps(
         [
@@ -1346,6 +1573,17 @@ def test_analyze_contract_overlaps_blocks_lockfiles_and_migrations_and_out_of_sc
     assert lockfile_report.has_blocking_findings is True
     assert migration_report.has_blocking_findings is True
     assert out_of_scope_report.has_blocking_findings is True
+
+
+def test_analyze_contract_overlaps_blocks_destructive_scripts() -> None:
+    destructive_report = analyze_contract_overlaps(
+        [
+            _task_contract("demo-0001", allowed_files=["scripts/destroy-db.sh"]),
+            _task_contract("demo-0002", allowed_files=["scripts/destroy-db.sh"]),
+        ]
+    )
+
+    assert destructive_report.has_blocking_findings is True
 
 
 def test_analyze_contract_overlaps_blocks_generated_artifacts() -> None:

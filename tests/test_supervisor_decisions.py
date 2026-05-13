@@ -15,6 +15,8 @@ from agentic_devloop.supervisor_decisions import (
     FindingAdjudicationOutcome,
     FindingSeverity,
     ReleaseSchedulingDecision,
+    ReleaseSchedulingAction,
+    ReleaseSchedulingStalenessInputs,
     RepairLoopContinuationDecision,
     RepairLoopOutcome,
     SCHEMA_VERSION_V1,
@@ -41,7 +43,18 @@ def test_parse_release_scheduling_decision() -> None:
         "decision_type": SupervisorDecisionType.RELEASE_SCHEDULING,
         "risk_level": DecisionRiskLevel.MODERATE,
         "overlap_findings": ["src/release.py"],
+        "selected_action": ReleaseSchedulingAction.SEQUENTIAL,
         "outcome": SchedulingOutcome.PROCEED_SEQUENTIAL,
+        "fallback_plan": "Rerun overlap analysis before parallelizing the release.",
+        "validators_to_rerun": ["overlap_report", "verification"],
+        "staleness_inputs": {
+            "execution_mode": "parallel",
+            "selected_task_ids": ["demo-0001", "demo-0002"],
+            "selected_contract_paths": ["/tmp/contracts/demo-0001.yaml", "/tmp/contracts/demo-0002.yaml"],
+            "overlap_report_sha256": "abc123",
+            "base_branch_head_commit": "deadbeef",
+            "release_inputs_sha256": "f00d",
+        },
     }
 
     decision = parse_supervisor_decision(payload)
@@ -49,6 +62,9 @@ def test_parse_release_scheduling_decision() -> None:
     assert isinstance(decision, ReleaseSchedulingDecision)
     assert decision.schema_version == SCHEMA_VERSION_V1
     assert decision.decision_type == SupervisorDecisionType.RELEASE_SCHEDULING
+    assert decision.selected_action == ReleaseSchedulingAction.SEQUENTIAL
+    assert decision.fallback_plan.startswith("Rerun overlap analysis")
+    assert isinstance(decision.staleness_inputs, ReleaseSchedulingStalenessInputs)
 
 
 def test_repair_loop_attempt_must_not_exceed_max_attempts() -> None:

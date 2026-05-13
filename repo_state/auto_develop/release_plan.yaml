@@ -7,6 +7,7 @@ current_tasks:
   - unsafe-overlap-hard-gate-regressions
   - docs-and-state-update
 next_steps:
+  - Release scheduling is implemented: preserve the overlap-risk report and release_scheduling artifact trail in docs and memory, then move the next release focus to review-loop-convergence-policy.
   - Keep the implemented runtime-supervisor, planner-normalization, one-epic governor logging behavior, typed supervisor decision records, and semantic feature-review loop aligned with docs.
   - Treat governor-state-review, agentic-feature-review-loop, persistent-governor-memory, and supervisor-decision-records as completed for the current cycle.
   - Implement supervisor-owned release scheduling so normal source-file overlap becomes an agent-owned scheduling decision rather than a deterministic stop.
@@ -19,3 +20,4 @@ next_steps:
   - Expand the top-level governor log stream so one file can be watched while state review, backlog planning, contract generation, release execution, feature review, repair, state refresh, and next-epic selection proceed.
   - Document shipped behavior while keeping unimplemented state-review decisioning, persistent memory, and multi-epic loops explicitly planned.
   - Keep `release_review.md` documented as a deterministic evidence summary and `feature_review.json` / `feature_review_recheck.json` documented as the semantic reviewer artifacts when reviewer routing is configured.
+  - The release scheduling epic is implemented in this branch: normal overlap now emits an overlap-risk report plus a typed release_scheduling decision artifact, while stale or unsupported scheduling artifacts fail deterministically.

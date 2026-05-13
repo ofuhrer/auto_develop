@@ -38,6 +38,17 @@ Each decision type adds a small typed payload that matches the judgment being
 recorded. The discriminator allows strict parsing without guessing which model
 should be used.
 
+`release_scheduling` records now include:
+
+- `selected_action` with the released scheduling choice;
+- `outcome` for compatibility with the existing scheduling outcome vocabulary;
+- `fallback_plan` for the next deterministic or supervisor-owned step;
+- `validators_to_rerun` for the evidence checks that must be repeated if the
+  decision becomes stale; and
+- `staleness_inputs` capturing the selected task ids, contract paths, overlap
+  report hash, base-branch commit, execution mode, and release-input hash used
+  to detect stale scheduling artifacts.
+
 ## Artifact Layout
 
 Supervisor decision artifacts are persisted as JSON files under:
@@ -70,6 +81,13 @@ Loading is strict:
 Evidence validation is deliberate. A supervisor record is only useful if the
 referenced files are still inspectable.
 
+`release_scheduling` artifacts are now consumed by release execution. Normal
+source overlap produces an overlap-risk report plus a typed scheduling
+decision, which can serialize the release when the supervisor selects
+`sequential`. Parallel execution remains available for independent tasks, and
+unsupported or stale scheduling decisions fail deterministically instead of
+falling back silently.
+
 ## Relationship To Hard Gates
 
 Supervisor decisions do not bypass deterministic validators.
@@ -93,6 +111,11 @@ not override the deterministic admission checks.
 The `soft_budget_acceptance` path is currently the first runtime consumer of
 this record layer. It writes a typed supervisor decision, reloads it strictly,
 and consumes the parsed record while leaving hard gates unchanged.
+
+The `release_scheduling` path is now the second runtime consumer. It writes a
+typed scheduling decision when release overlap is present, reloads it strictly,
+and rejects stale or unsupported scheduling artifacts without weakening hard
+path, artifact, or verification gates.
 
 The broader multi-epic governor that would repeatedly consume these records is
 still planned.
