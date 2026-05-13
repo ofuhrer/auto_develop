@@ -20,6 +20,7 @@ from agentic_devloop.models import (
     ContractNormalizationRequest,
     ContractPlan,
     GeneratedContract,
+    ModelOutputNormalizationActionPayload,
     ProjectConfig,
     ReleaseObjective,
     StrictModel,
@@ -29,7 +30,6 @@ from agentic_devloop.planner_backend import PlannerBackendResult
 from agentic_devloop.runtime_supervisor import RuntimeSupervisor, RuntimeSupervisorApplierStopKind
 from agentic_devloop.supervisor_decisions import (
     ModelOutputNormalizationAction,
-    ModelOutputNormalizationDecision,
     ModelOutputNormalizationOutcome,
     ModelOutputValidationError,
     DecisionRiskLevel,
@@ -37,6 +37,7 @@ from agentic_devloop.supervisor_decisions import (
     ExecutionStrategyDecision,
     ExecutionStrategyOutcome,
     SupervisorDecisionType,
+    build_model_output_normalization_decision,
     write_supervisor_decision_artifact,
 )
 from agentic_devloop.yaml_io import load_yaml_model, write_yaml_model
@@ -710,32 +711,31 @@ def _persist_model_output_normalization_decision(
                 json.dumps(normalized_plan.model_dump(mode="json"), indent=2) + "\n",
                 encoding="utf-8",
             )
-    decision = ModelOutputNormalizationDecision.model_validate(
+    action_payload = ModelOutputNormalizationActionPayload.model_validate(
         {
-            "decision_type": SupervisorDecisionType.MODEL_OUTPUT_NORMALIZATION,
-            "decision_id": f"{release_id}_{planner}_planner_output",
-            "release_id": release_id,
-            "decided_at": datetime.now(UTC),
-            "decided_by": "parse_planner_output",
+            "raw_artifact_paths": [path.resolve() for path in raw_paths],
+            "validation_errors": [ModelOutputValidationError.model_validate(item) for item in validation_errors],
+            "selected_action": selected_action,
+            "outcome": outcome,
             "rationale": (
                 "Captured planner ContractPlan/TaskContract validation errors and applied bounded normalization."
                 if outcome == ModelOutputNormalizationOutcome.NORMALIZED_AND_RETRY
                 else "Planner output could not be normalized within bounded policy."
             ),
-            "evidence_paths": [str(path.resolve()) for path in raw_paths],
-            "risk_level": DecisionRiskLevel.MODERATE,
-            "raw_artifact_paths": [str(path.resolve()) for path in raw_paths],
-            "validation_errors": [
-                ModelOutputValidationError.model_validate(item).model_dump(mode="json")
-                for item in validation_errors
-            ],
-            "selected_action": selected_action,
-            "outcome": outcome,
             "fallback_plan": "Stop planning and require bounded planner rerun with strict schema output.",
             "validators_to_rerun": _PLANNER_ADMISSION_VALIDATORS_TO_RERUN,
-            "normalized_artifact_path": str(normalized_artifact_path.resolve()) if normalized_artifact_path else None,
+            "normalized_artifact_path": normalized_artifact_path.resolve() if normalized_artifact_path else None,
             "refusal_reason": refusal_reason,
         }
+    )
+    decision = build_model_output_normalization_decision(
+        decision_id=f"{release_id}_{planner}_planner_output",
+        release_id=release_id,
+        decided_at=datetime.now(UTC),
+        decided_by="parse_planner_output",
+        risk_level=DecisionRiskLevel.MODERATE,
+        evidence_paths=[path.resolve() for path in raw_paths],
+        action_payload=action_payload,
     )
     return write_supervisor_decision_artifact(release_bundle_path=bundle_path, decision=decision)
 
