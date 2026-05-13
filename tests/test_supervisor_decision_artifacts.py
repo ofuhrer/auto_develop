@@ -26,10 +26,12 @@ from agentic_devloop.supervisor_decisions import (
     SCHEMA_VERSION_V1,
     SchedulingOutcome,
     SupervisorDecisionType,
+    build_model_output_normalization_decision,
     load_supervisor_decision_artifact,
     supervisor_decision_artifact_path,
     write_supervisor_decision_artifact,
 )
+from agentic_devloop.models import ModelOutputNormalizationActionPayload
 
 
 def _decision(*, evidence_paths: list[Path]) -> ReleaseSchedulingDecision:
@@ -351,6 +353,127 @@ def test_write_and_load_model_output_normalization_artifact_round_trip(tmp_path:
 
     assert artifact_path.exists()
     assert loaded == decision
+
+
+def test_write_and_load_model_output_normalization_applied_from_reusable_api(tmp_path: Path) -> None:
+    evidence_file = tmp_path / "normalization-evidence.log"
+    evidence_file.write_text("applied\n", encoding="utf-8")
+    raw_artifact = tmp_path / "planner.raw.json"
+    raw_artifact.write_text("{}\n", encoding="utf-8")
+    normalized_artifact = tmp_path / "planner.normalized.json"
+    normalized_artifact.write_text("{}\n", encoding="utf-8")
+
+    action_payload = ModelOutputNormalizationActionPayload.model_validate(
+        {
+            "raw_artifact_paths": [Path("planner.raw.json")],
+            "validation_errors": [
+                {"field": "generated_contracts", "message": "Field required", "error_type": "missing"}
+            ],
+            "selected_action": "apply_normalization",
+            "outcome": "normalized_and_retry",
+            "rationale": "Raw planner output is useful but needs normalization.",
+            "fallback_plan": "Refuse and stop if normalized output still fails strict validation.",
+            "validators_to_rerun": ["contract_plan", "verification"],
+            "normalized_artifact_path": Path("planner.normalized.json"),
+        }
+    )
+    decision = build_model_output_normalization_decision(
+        decision_id="normalization-applied-001",
+        release_id="planner-normalization-generalization",
+        decided_at=datetime(2026, 5, 13, 9, 0, 0),
+        decided_by="supervisor-agent",
+        risk_level=DecisionRiskLevel.MODERATE,
+        evidence_paths=[Path("normalization-evidence.log")],
+        action_payload=action_payload,
+    )
+
+    artifact_path = write_supervisor_decision_artifact(release_bundle_path=tmp_path, decision=decision)
+    loaded = load_supervisor_decision_artifact(artifact_path)
+
+    assert loaded == decision
+    assert loaded.model_dump(mode="json")["outcome"] == "normalized_and_retry"
+
+
+def test_write_and_load_model_output_normalization_refused_from_reusable_api(tmp_path: Path) -> None:
+    evidence_file = tmp_path / "normalization-evidence.log"
+    evidence_file.write_text("refused\n", encoding="utf-8")
+    raw_artifact = tmp_path / "planner.raw.json"
+    raw_artifact.write_text("{}\n", encoding="utf-8")
+
+    action_payload = ModelOutputNormalizationActionPayload.model_validate(
+        {
+            "raw_artifact_paths": [Path("planner.raw.json")],
+            "validation_errors": [{"field": "release_id", "message": "Invalid type", "error_type": "string_type"}],
+            "selected_action": "refuse",
+            "outcome": "refused_and_stop",
+            "rationale": "Schema drift is unsafe to normalize under current contract boundaries.",
+            "fallback_plan": "Stop and request a fresh planner run.",
+            "validators_to_rerun": ["contract_plan"],
+            "refusal_reason": "Unsafe normalization for contract semantics.",
+        }
+    )
+    decision = build_model_output_normalization_decision(
+        decision_id="normalization-refused-001",
+        release_id="planner-normalization-generalization",
+        decided_at=datetime(2026, 5, 13, 9, 5, 0),
+        decided_by="supervisor-agent",
+        risk_level=DecisionRiskLevel.HIGH,
+        evidence_paths=[Path("normalization-evidence.log")],
+        action_payload=action_payload,
+    )
+
+    artifact_path = write_supervisor_decision_artifact(release_bundle_path=tmp_path, decision=decision)
+    loaded = load_supervisor_decision_artifact(artifact_path)
+
+    assert loaded == decision
+    assert loaded.model_dump(mode="json")["outcome"] == "refused_and_stop"
+
+
+@pytest.mark.parametrize(
+    "refusal_reason",
+    [
+        "Unsafe normalization would change contract intent.",
+        "Unsafe normalization would invent hard evidence requirements.",
+        "Unsafe normalization would weaken verification constraints.",
+        "Unsafe normalization would violate allowed-file/forbidden-change policy boundaries.",
+    ],
+)
+def test_model_output_normalization_refusal_persists_semantic_safety_categories(
+    tmp_path: Path,
+    refusal_reason: str,
+) -> None:
+    evidence_file = tmp_path / "normalization-evidence.log"
+    evidence_file.write_text("refused\n", encoding="utf-8")
+    raw_artifact = tmp_path / "planner.raw.json"
+    raw_artifact.write_text("{}\n", encoding="utf-8")
+
+    action_payload = ModelOutputNormalizationActionPayload.model_validate(
+        {
+            "raw_artifact_paths": [Path("planner.raw.json")],
+            "validation_errors": [{"field": "generated_contracts", "message": "Invalid shape", "error_type": "mapping_type"}],
+            "selected_action": "refuse",
+            "outcome": "refused_and_stop",
+            "rationale": "Refuse unsafe semantic rewrite.",
+            "fallback_plan": "Stop and request a fresh planner run.",
+            "validators_to_rerun": ["contract_plan"],
+            "refusal_reason": refusal_reason,
+        }
+    )
+    decision = build_model_output_normalization_decision(
+        decision_id="normalization-refused-semantic-001",
+        release_id="planner-normalization-generalization",
+        decided_at=datetime(2026, 5, 13, 10, 0, 0),
+        decided_by="supervisor-agent",
+        risk_level=DecisionRiskLevel.HIGH,
+        evidence_paths=[Path("normalization-evidence.log")],
+        action_payload=action_payload,
+    )
+
+    artifact_path = write_supervisor_decision_artifact(release_bundle_path=tmp_path, decision=decision)
+    loaded = load_supervisor_decision_artifact(artifact_path)
+
+    assert loaded == decision
+    assert loaded.refusal_reason == refusal_reason
 
 
 def test_write_and_load_feature_review_finding_classification_artifact_round_trip(tmp_path: Path) -> None:

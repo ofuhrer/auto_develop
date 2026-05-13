@@ -2,13 +2,24 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
 
-from agentic_devloop.models import ContractPlan, TaskContract
+from agentic_devloop.contracts import normalize_planner_contract_plan_payload
+from agentic_devloop.models import (
+    ContractPlan,
+    ModelOutputNormalizationActionPayload,
+    TaskContract,
+)
+from agentic_devloop.supervisor_decisions import (
+    DecisionRiskLevel,
+    ModelOutputNormalizationDecision,
+    build_model_output_normalization_decision,
+)
 
 
 class ReleaseEventKind(StrEnum):
@@ -102,6 +113,7 @@ class RuntimeSupervisorApplierStopKind(StrEnum):
 class RepairActionKind(StrEnum):
     ENVIRONMENT_REPAIR = "environment_repair"
     PLANNER_CONTRACT_NORMALIZATION = "planner_contract_normalization"
+    MODEL_OUTPUT_NORMALIZATION = "model_output_normalization"
     TASK_SPLIT_OR_SCOPE_NARROWING = "task_split_or_scope_narrowing"
     RELEASE_RESUME = "release_resume"
     LONG_RUNNING_WORKER_INSPECTION = "long_running_worker_inspection"
@@ -248,6 +260,13 @@ class RepoStateUpdateProposal:
     action_kind: RepairActionKind = RepairActionKind.REPO_STATE_UPDATE_PROPOSAL
 
 
+@dataclass(frozen=True)
+class ModelOutputNormalizationDecisionProposal:
+    decision: ModelOutputNormalizationDecision
+    source_evidence_paths: tuple[Path, ...]
+    action_kind: RepairActionKind = RepairActionKind.MODEL_OUTPUT_NORMALIZATION
+
+
 RepairProposal = (
     PlannerContractNormalizationProposal
     | TaskSplitOrScopeNarrowingProposal
@@ -256,6 +275,7 @@ RepairProposal = (
     | LongRunningWorkerInspectionSummary
     | ModelEscalationRecommendation
     | RepoStateUpdateProposal
+    | ModelOutputNormalizationDecisionProposal
 )
 
 
@@ -360,10 +380,17 @@ class RuntimeSupervisor:
         self,
         *,
         source_evidence_paths: tuple[Path, ...],
+        expected_release_id: str,
         candidate_plan: ContractPlan | dict[str, Any],
     ) -> RuntimeSupervisorApplierResult:
         try:
-            normalized = ContractPlan.model_validate(candidate_plan)
+            normalized_candidate: ContractPlan | dict[str, Any] = candidate_plan
+            if isinstance(candidate_plan, dict):
+                normalized_candidate = normalize_planner_contract_plan_payload(
+                    candidate_plan,
+                    release_id=expected_release_id,
+                )
+            normalized = ContractPlan.model_validate(normalized_candidate)
             normalized = ContractPlan.model_validate(normalized.model_dump(mode="python"))
         except ValidationError:
             return RuntimeSupervisorApplierResult(
@@ -553,6 +580,36 @@ class RuntimeSupervisor:
             proposal=RepoStateUpdateProposal(
                 update_summary=update_summary,
                 proposed_changes=tuple(proposed_changes),
+                source_evidence_paths=source_evidence_paths,
+            ),
+        )
+
+    def apply_model_output_normalization_decision(
+        self,
+        *,
+        source_evidence_paths: tuple[Path, ...],
+        decision_id: str,
+        release_id: str,
+        decided_by: str,
+        risk_level: DecisionRiskLevel,
+        evidence_paths: list[Path],
+        action_payload: ModelOutputNormalizationActionPayload,
+        decided_at: datetime | None = None,
+    ) -> RuntimeSupervisorApplierResult:
+        decision = build_model_output_normalization_decision(
+            decision_id=decision_id,
+            release_id=release_id,
+            decided_at=decided_at or datetime.now(UTC),
+            decided_by=decided_by,
+            risk_level=risk_level,
+            evidence_paths=evidence_paths,
+            action_payload=action_payload,
+        )
+        return RuntimeSupervisorApplierResult(
+            action_kind=RepairActionKind.MODEL_OUTPUT_NORMALIZATION,
+            applied=True,
+            proposal=ModelOutputNormalizationDecisionProposal(
+                decision=decision,
                 source_evidence_paths=source_evidence_paths,
             ),
         )

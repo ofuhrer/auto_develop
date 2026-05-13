@@ -9,6 +9,7 @@ import yaml
 from agentic_devloop.models import (
     ContractNormalizationDecision,
     ContractNormalizationOutcome,
+    ContractNormalizationRefusalReason,
     ContractPlan,
     GeneratedContract,
     TaskContract,
@@ -921,6 +922,8 @@ def test_parse_planner_output_normalizes_missing_diff_evidence_and_reruns_admiss
     assert len(normalization_warnings) == 1
     payload = json.loads(normalization_warnings[0].split("=", 1)[1])
     assert payload["decision"] == "normalized"
+    assert payload["validators_to_rerun"] == ["ContractPlan", "TaskContract", "validate_generated_contracts"]
+    assert payload["validator_rerun_succeeded"] is True
     assert payload["before_snapshot"]["contract"]["required_evidence"] == ["test output"]
     assert "git diff" in payload["after_snapshot"]["contract"]["required_evidence"]
 
@@ -975,6 +978,69 @@ def test_parse_planner_output_hard_stops_when_normalization_changes_guarded_sema
 
     assert exc.value.stop_evidence.kind == RuntimeSupervisorApplierStopKind.BYPASSES_HARD_GATE
     assert "allowed_files" in exc.value.stop_evidence.reason
+
+
+@pytest.mark.parametrize(
+    ("update_fields", "expected_token"),
+    [
+        ({"forbidden_changes": ["Do not touch release flow.", "Do not touch tests."]}, "forbidden_changes"),
+        ({"depends_on": ["v0.3.6-0099"]}, "depends_on"),
+    ],
+)
+def test_parse_planner_output_hard_stops_when_normalization_changes_other_guarded_semantics(
+    monkeypatch,
+    update_fields: dict[str, object],
+    expected_token: str,
+) -> None:
+    def _unsafe_normalization(*args, **kwargs):
+        request = args[0]
+        changed = request.before_snapshot.contract.model_copy(update=update_fields)
+        return ContractNormalizationOutcome(
+            release_id=request.release_id,
+            task_id=request.task_id,
+            decision=ContractNormalizationDecision.NORMALIZED,
+            rationale="Unsafe meaning-changing rewrite.",
+            before_snapshot=request.before_snapshot,
+            after_snapshot={"contract": changed},
+            changed_fields=[],
+            artifact_paths=request.artifact_paths,
+        )
+
+    monkeypatch.setattr("agentic_devloop.planning.normalize_contract_request", _unsafe_normalization)
+    with pytest.raises(PlannerNormalizationError) as exc:
+        parse_planner_output(
+            {
+                "release_id": "v0.3.6",
+                "planner": "strong-model",
+                "generated_contracts": [
+                    {
+                        "task_id": "v0.3.6-0001",
+                        "title": "Unsafe normalization",
+                        "objective": "Repair missing diff evidence.",
+                        "rationale": "Repairable planner drift.",
+                        "suggested_contract": {
+                            "task_id": "v0.3.6-0001",
+                            "release_id": "v0.3.6",
+                            "title": "Unsafe normalization",
+                            "task_type": "code_only",
+                            "budget_class": "S",
+                            "objective": "Repair missing diff evidence.",
+                            "allowed_files": ["src/agentic_devloop/planning.py"],
+                            "forbidden_changes": ["Do not touch release flow."],
+                            "required_evidence": ["test output"],
+                            "verification": {"commands": ["true"]},
+                            "stop_conditions": ["Stop when scope expands."],
+                        },
+                    }
+                ],
+                "warnings": [],
+            },
+            release_id="v0.3.6",
+            planner="strong-model",
+        )
+
+    assert exc.value.stop_evidence.kind == RuntimeSupervisorApplierStopKind.BYPASSES_HARD_GATE
+    assert expected_token in exc.value.stop_evidence.reason
 
 
 def test_strong_model_plan_persists_model_output_normalization_decision_with_validation_errors(tmp_path) -> None:
@@ -1069,6 +1135,121 @@ def test_strong_model_plan_persists_model_output_normalization_decision_with_val
     assert decision.validation_errors
     assert any(error.field.startswith("generated_contracts.0.suggested_contract") for error in decision.validation_errors)
     assert decision.normalized_artifact_path is not None
+
+
+def test_plan_release_contracts_stops_before_writing_contracts_when_normalization_is_refused(
+    tmp_path, monkeypatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# demo\n", encoding="utf-8")
+    objective_path = tmp_path / "objective.yaml"
+    _write_yaml(
+        objective_path,
+        {
+            "release_id": "v0.4.2",
+            "title": "Normalization refusal",
+            "objective": "Stop planning on unsafe normalization.",
+            "acceptance_criteria": ["Normalization refusal halts admission."],
+        },
+    )
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "worker", "max_walltime_minutes": 5},
+            "model_roles": {
+                "planner": {"type": "codex_cli", "model": "gpt-5.5", "max_walltime_minutes": 5}
+            },
+            "model_routing": {"default_role": "planner"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 1,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    proposed_dir = tmp_path / "proposed-contracts"
+
+    class MissingDiffPlannerBackend:
+        def generate(self, **_: object) -> PlannerBackendResult:
+            output_dir = tmp_path / "planner_backend"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            stdout_path = output_dir / "planner_stdout.log"
+            stderr_path = output_dir / "planner_stderr.log"
+            metadata_path = output_dir / "planner_metadata.json"
+            stdout_path.write_text("planner output", encoding="utf-8")
+            stderr_path.write_text("", encoding="utf-8")
+            metadata_path.write_text("{}", encoding="utf-8")
+            return PlannerBackendResult(
+                raw_output={
+                    "release_id": "v0.4.2",
+                    "planner": "strong-model",
+                    "generated_contracts": [
+                        {
+                            "task_id": "v0.4.2-0001",
+                            "title": "Needs diff evidence",
+                            "objective": "Repair missing diff evidence.",
+                            "rationale": "Repairable planner drift.",
+                            "suggested_contract": {
+                                "task_id": "v0.4.2-0001",
+                                "release_id": "v0.4.2",
+                                "title": "Needs diff evidence",
+                                "task_type": "code_only",
+                                "budget_class": "S",
+                                "objective": "Repair missing diff evidence.",
+                                "allowed_files": ["src/agentic_devloop/planning.py"],
+                                "forbidden_changes": ["Do not touch release flow."],
+                                "required_evidence": ["test output"],
+                                "verification": {"commands": ["true"]},
+                                "stop_conditions": ["Stop when scope expands."],
+                            },
+                        }
+                    ],
+                    "warnings": [],
+                },
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                metadata_path=metadata_path,
+            )
+
+    def _refuse_normalization(*args, **kwargs):
+        request = args[0]
+        return ContractNormalizationOutcome(
+            release_id=request.release_id,
+            task_id=request.task_id,
+            decision=ContractNormalizationDecision.REFUSED,
+            rationale="Unsafe normalization.",
+            before_snapshot=request.before_snapshot,
+            after_snapshot=None,
+            changed_fields=[],
+            refusal_reasons=[ContractNormalizationRefusalReason.UNSAFE_NORMALIZATION],
+            artifact_paths=request.artifact_paths,
+        )
+
+    monkeypatch.setattr("agentic_devloop.planning.normalize_contract_request", _refuse_normalization)
+
+    with pytest.raises(PlannerNormalizationError, match="normalization was refused") as exc:
+        plan_release_contracts(
+            objective_path=objective_path,
+            contracts_dir=tmp_path / "contracts",
+            write_contracts_dir=proposed_dir,
+            runs_dir=tmp_path / "runs",
+            mode="strong-model",
+            project_id="demo",
+            config_dir=config_dir,
+            planner_backend=MissingDiffPlannerBackend(),
+        )
+
+    assert exc.value.stop_evidence.kind == RuntimeSupervisorApplierStopKind.BYPASSES_HARD_GATE
+    assert not proposed_dir.exists()
 
 
 def test_validate_generated_contracts_rejects_task_id_mismatch() -> None:
