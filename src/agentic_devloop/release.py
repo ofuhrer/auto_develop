@@ -1177,10 +1177,12 @@ def _run_feature_review_and_repair_loop(
             allowed = set(commands)
             unknown = [cmd for cmd in decision.rerun_verification_commands if cmd not in allowed]
             if unknown:
-                raise ValueError(
-                    "feature review requested rerun_verification_commands outside configured verification profile: "
-                    + ", ".join(unknown)
+                _report(
+                    progress,
+                    "event=feature_review_verification_rerun_invalid_commands commands="
+                    + json.dumps(unknown, sort_keys=True),
                 )
+                return False
             commands = list(decision.rerun_verification_commands)
         return _run_integration_verification_rerun(
             repo_path=config.repo_path,
