@@ -1,0 +1,56 @@
+task_id: soft-scope-budget-policy-0004
+release_id: soft-scope-budget-policy
+title: Cover hard-stop and split-replan scope-risk cases
+task_type: code_only
+budget_class: M
+objective: 'Add focused regression tests for soft scope-risk policy edge cases: accepted
+  mechanical/cohesive over-budget tasks, split or replan decisions, and hard-stop
+  cases that must never be softened. Tests must use temporary repositories and deterministic
+  fixtures instead of developer-local Git state.'
+allowed_files:
+- tests/test_review.py
+- tests/test_orchestrator.py
+- tests/test_release.py
+- tests/test_supervisor_decisions.py
+- tests/test_supervisor_decision_artifacts.py
+- tests/test_cli.py
+forbidden_changes:
+- Do not weaken or delete existing assertions for budget, verification, allowed_files,
+  or hard-gate behavior.
+- Do not mark flaky tests as skipped or xfailed to make the suite pass.
+- Do not rely on the developer's local branches, worktrees, credentials, or runtime
+  evidence under runs/.
+- Do not change production code in this task except through earlier dependent contracts.
+required_evidence:
+- git diff
+- changed-files list
+- Focused pytest output for all changed test files
+- Full pytest output if focused tests pass
+- Test names or assertions demonstrating mechanical/cohesive acceptance, split/replan
+  handling, and hard-stop preservation
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_review.py tests/test_orchestrator.py tests/test_release.py tests/test_supervisor_decisions.py
+    tests/test_supervisor_decision_artifacts.py tests/test_cli.py
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if tests require editing source files outside previous implementation contracts.
+- Stop if any hard-stop case can only be tested by weakening production policy.
+- Stop if tests depend on pre-existing local Git state or runtime artifacts.
+- Stop if the full suite exposes unrelated failures that obscure the release's policy
+  behavior; record the failure evidence instead of broadening the task.
+non_goals:
+- Do not update documentation in this task.
+- Do not add slow end-to-end smoke tests that duplicate focused temp-repo coverage.
+- Do not change repository config budgets.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- soft-scope-budget-policy-0002
+- soft-scope-budget-policy-0003

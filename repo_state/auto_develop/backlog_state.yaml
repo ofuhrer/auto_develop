@@ -92,7 +92,7 @@ active_epics:
   state_review_snapshot_references: []
   metrics_snapshot_references: []
   tuning_report_references: []
-  updated_at: '2026-05-13T22:40:00Z'
+  updated_at: '2026-05-13T22:35:45.579909Z'
 reviewed_epics: []
 completed_epic_records:
 - epic_id: governor-cockpit-v2
@@ -291,8 +291,8 @@ notes:
 - 'Current top gap: hard file-count and diff-size budgets still stop or distort useful
   broad-but-mechanical changes; they should become supervisor-adjudicated scope-risk
   findings unless hard safety boundaries are crossed.'
-- 'Next sequencing: soft-scope-budget-policy, review-convergence-adjudicator,
-  shared-verification-runtime, environment repair, then executor liveness.'
+- 'Next sequencing: soft-scope-budget-policy, review-convergence-adjudicator, shared-verification-runtime,
+  environment repair, then executor liveness.'
 - Hard file-count and diff-size budgets should be treated as scope-risk signals for
   supervisor adjudication unless they cross configured hard-policy boundaries; broad
   mechanical changes require stronger verification, not automatic rejection.

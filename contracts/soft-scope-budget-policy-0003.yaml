@@ -1,0 +1,66 @@
+task_id: soft-scope-budget-policy-0003
+release_id: soft-scope-budget-policy
+title: Consume scope-risk decisions in release execution
+task_type: code_only
+budget_class: L
+objective: Wire release execution and summaries so accepted typed scope-risk decisions
+  allow otherwise accepted soft-over-budget work to continue through deterministic
+  validation, feature review, and finalization policy. Split, replan, and stop decisions
+  must halt or redirect execution with inspectable evidence instead of silently accepting
+  work.
+allowed_files:
+- src/agentic_devloop/release.py
+- src/agentic_devloop/cli.py
+- src/agentic_devloop/governor.py
+- src/agentic_devloop/models.py
+- tests/test_release.py
+- tests/test_cli.py
+- tests/test_governor_log.py
+forbidden_changes:
+- Do not finalize a release when hard validation, feature review blockers, unsafe
+  finalization policy, or verification failed.
+- Do not treat missing or invalid scope-risk decision artifacts as acceptance.
+- Do not hide scope-risk decision paths from release summary or CLI JSON output.
+- Do not alter branch naming, worktree isolation, stale worktree, or stale branch
+  safety policy.
+- Do not broaden finalization policy beyond configured release_finalization_policy.
+required_evidence:
+- git diff
+- changed-files list
+- Focused pytest output for release, CLI, and governor summary tests
+- Test evidence that accepted scope-risk decisions continue to validation and summary
+  reporting
+- Test evidence that split, replan, or stop scope-risk decisions do not finalize accepted
+  work
+- Test evidence that missing or invalid scope-risk artifacts remain blocking
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_release.py tests/test_cli.py tests/test_governor_log.py
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop
+    --help
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop
+    run-release --help
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if accepted scope-risk decisions can bypass deterministic verification, feature
+  review, or finalization gates.
+- Stop if release summaries cannot expose the typed decision artifact path.
+- Stop if missing or malformed scope-risk decisions are treated as warnings instead
+  of blocking when an overage needs adjudication.
+- Stop if split or replan outcomes cannot be distinguished from accept outcomes in
+  release artifacts.
+non_goals:
+- Do not implement new supervisor model calls in this task.
+- Do not change task planning admission behavior except for consuming already-produced
+  decision artifacts.
+- Do not update documentation in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- soft-scope-budget-policy-0001
+- soft-scope-budget-policy-0002

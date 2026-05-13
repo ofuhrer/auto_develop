@@ -1,0 +1,56 @@
+task_id: soft-scope-budget-policy-0005
+release_id: soft-scope-budget-policy
+title: Document implemented soft scope-risk policy
+task_type: documentation
+budget_class: S
+objective: Update user, maintainer, design, and repo-state notes to distinguish the
+  implemented soft scope-risk policy from remaining planned supervisor reductions.
+  Documentation must state that changed-file and diff-size overages are supervisor-adjudicated
+  findings only when hard gates pass, and that forbidden paths, generated artifacts,
+  lockfiles, migrations, exclusive paths, out-of-scope files, missing evidence, unsafe
+  finalization, and failed verification remain hard stops.
+allowed_files:
+- docs/README.md
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/design/SUPERVISOR_DECISIONS.md
+- docs/design/ROADMAP_AND_BACKLOG.md
+- repo_state/auto_develop/backlog_state.yaml
+- repo_state/auto_develop/architecture_summary.md
+- repo_state/auto_develop/release_plan.yaml
+forbidden_changes:
+- Do not describe planned supervisor reductions as implemented behavior.
+- Do not remove warnings about hard gates, finalization policy, or verification requirements.
+- Do not add new runtime evidence files under runs/.
+- Do not change objectives, contracts, or project config in this task.
+required_evidence:
+- git diff
+- changed-files list
+- Focused documentation grep or review notes showing soft scope-risk policy and hard-stop
+  list are documented
+- git diff --check output
+verification:
+  commands:
+  - git diff --check
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_cli.py tests/test_release.py
+  profile: null
+stop_conditions:
+- Stop if docs would need to claim supervisor capabilities that are not implemented
+  by the dependent code contracts.
+- Stop if repo-state updates would mark unrelated epics complete or alter external
+  target-project state.
+- Stop if the hard-stop list cannot be documented consistently across user and maintainer
+  docs.
+non_goals:
+- Do not change code in this task.
+- Do not update generated runtime evidence.
+- Do not rewrite broad architecture documents beyond the scope-risk policy sections.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- soft-scope-budget-policy-0003
+- soft-scope-budget-policy-0004

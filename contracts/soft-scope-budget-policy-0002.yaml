@@ -1,0 +1,56 @@
+task_id: soft-scope-budget-policy-0002
+release_id: soft-scope-budget-policy
+title: Emit task scope-risk findings for modest budget overages
+task_type: code_only
+budget_class: M
+objective: Change task-level post-execution review so changed-file and diff-size overages
+  become structured scope-risk findings and typed supervisor decisions when verification
+  passed and no hard safety gate is violated. Preserve hard rejection for forbidden
+  paths, generated artifacts, lockfiles, migrations, configured exclusive paths, files
+  outside allowed_files, missing required evidence, and failed verification.
+allowed_files:
+- src/agentic_devloop/review.py
+- src/agentic_devloop/orchestrator.py
+- src/agentic_devloop/evidence.py
+- tests/test_review.py
+- tests/test_orchestrator.py
+forbidden_changes:
+- Do not soften failed verification, missing required evidence, or disallowed changed
+  files.
+- Do not accept changes outside a task contract's allowed_files.
+- Do not make generated artifacts, lockfiles, migrations, or configured exclusive
+  paths eligible for soft acceptance.
+- Do not replace deterministic hard-gate checks with supervisor judgment.
+- Do not change task contract schema in this task.
+required_evidence:
+- git diff
+- changed-files list
+- Focused pytest output for task review and orchestrator tests
+- Test evidence for accepted mechanical or cohesive changed-file overage
+- Test evidence for accepted mechanical or cohesive diff-size overage
+- Test evidence that disallowed files and failed verification remain hard stops
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_review.py tests/test_orchestrator.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if a task with files outside allowed_files can be accepted through the soft
+  scope-risk path.
+- Stop if verification failure or missing required evidence can be bypassed by a scope-risk
+  decision.
+- Stop if scope-risk evidence cannot include concrete changed-file or diff-size counts
+  and evidence paths.
+- Stop if existing accepted in-budget task behavior regresses.
+non_goals:
+- Do not change release-level budget evaluation in this task.
+- Do not update user documentation in this task.
+- Do not add new cleanup behavior.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- soft-scope-budget-policy-0001

@@ -1,0 +1,23 @@
+release_id: soft-scope-budget-policy
+title: Replace crude file-count hard stops with typed scope-risk decisions
+objective: Convert modest changed-file and diff-size budget pressure from unconditional
+  hard stops into typed supervisor-adjudicated scope-risk findings, while preserving
+  hard deterministic gates for forbidden paths, generated artifacts, lockfiles, migrations,
+  unsafe scope expansion, missing evidence, and failed verification.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- Changed-file and diff-size budget overages produce structured scope-risk evidence
+  and typed supervisor decision artifacts instead of automatic rejection when no hard
+  safety gate is violated.
+- Supervisor scope-risk decisions include evidence paths, classification such as mechanical/cohesive/risky/scope-creep,
+  selected action, rationale, fallback plan, and validators to rerun.
+- Hard stops remain non-bypassable for forbidden paths, generated artifacts, lockfiles,
+  migrations, configured exclusive paths, out-of-scope files, missing required evidence,
+  unsafe finalization, and failed verification.
+- Release planning and execution consume the typed decision so accepted soft-over-budget
+  work can continue through deterministic validation, review, and finalization policy.
+- Tests cover accepted mechanical/cohesive over-budget cases, split/replan decisions,
+  and hard-stop cases that must not be softened.
+- Documentation and repo-state notes distinguish implemented soft scope-risk policy
+  from remaining planned supervisor reductions.

@@ -1,0 +1,50 @@
+task_id: soft-scope-budget-policy-0001
+release_id: soft-scope-budget-policy
+title: Add typed scope-risk supervisor decision model
+task_type: code_only
+budget_class: M
+objective: Introduce a typed supervisor decision artifact for changed-file and diff-size
+  scope-risk adjudication. The model must represent evidence paths, classification
+  values mechanical/cohesive/risky/scope-creep, selected action, rationale, fallback
+  plan, validators_to_rerun, configured limits, actual values, and the affected task
+  or release scope.
+allowed_files:
+- src/agentic_devloop/supervisor_decisions.py
+- src/agentic_devloop/artifacts.py
+- tests/test_supervisor_decisions.py
+- tests/test_supervisor_decision_artifacts.py
+forbidden_changes:
+- Do not remove or loosen validation on existing supervisor decision artifact types.
+- Do not rename existing decision_type values or change their persisted JSON shape.
+- Do not allow empty evidence_paths, rationale, fallback_plan, or validators_to_rerun
+  for the new scope-risk decision.
+- Do not model forbidden paths, generated artifacts, lockfiles, migrations, out-of-scope
+  files, missing evidence, or failed verification as soft-acceptable scope-risk outcomes.
+required_evidence:
+- git diff
+- changed-files list
+- Focused pytest output for supervisor decision model and artifact tests
+- Example serialized scope-risk decision artifact covering a mechanical or cohesive
+  over-budget acceptance
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_supervisor_decisions.py tests/test_supervisor_decision_artifacts.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if the model cannot express classification, selected action, fallback plan,
+  evidence paths, and validators_to_rerun without weakening strict Pydantic validation.
+- Stop if any existing supervisor decision artifact schema becomes backward-incompatible
+  without an explicit migration path.
+- Stop if the new decision type can represent acceptance of a hard safety violation.
+non_goals:
+- Do not wire release execution behavior in this task.
+- Do not update documentation in this task.
+- Do not change budget thresholds in project config.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []
