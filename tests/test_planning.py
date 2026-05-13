@@ -673,6 +673,63 @@ def test_parse_planner_output_preserves_implementation_requirements_as_objective
     assert any("implementation_requirements" in warning for warning in plan.warnings)
 
 
+def test_parse_planner_output_repairs_tail_brace_and_wrapper_depends_on() -> None:
+    raw_output = json.dumps(
+        {
+            "release_id": "v0.3.23",
+            "planner": "strong-model",
+            "generated_contracts": [
+                {
+                    "task_id": "v0.3.23-0001",
+                    "title": "Base task",
+                    "objective": "Implement base task.",
+                    "rationale": "Base task.",
+                    "suggested_contract": {
+                        "task_id": "v0.3.23-0001",
+                        "release_id": "v0.3.23",
+                        "title": "Base task",
+                        "budget_class": "S",
+                        "objective": "Implement base task.",
+                        "allowed_files": ["src/agentic_devloop/planning.py"],
+                        "forbidden_changes": ["Do not change release flow."],
+                        "required_evidence": ["git diff"],
+                        "verification": {"commands": ["true"]},
+                        "stop_conditions": ["Stop if scope expands."],
+                    },
+                },
+                {
+                    "task_id": "v0.3.23-0002",
+                    "title": "Dependent task",
+                    "objective": "Implement dependent task.",
+                    "rationale": "Dependent task.",
+                    "suggested_contract": {
+                        "task_id": "v0.3.23-0002",
+                        "release_id": "v0.3.23",
+                        "title": "Dependent task",
+                        "budget_class": "S",
+                        "objective": "Implement dependent task.",
+                        "allowed_files": ["tests/test_planning.py"],
+                        "forbidden_changes": ["Do not change release flow."],
+                        "required_evidence": ["git diff"],
+                        "verification": {"commands": ["true"]},
+                        "stop_conditions": ["Stop if scope expands."],
+                    },
+                    "depends_on": ["v0.3.23-0001"],
+                },
+            ],
+            "warnings": [],
+        }
+    )
+    raw_output = raw_output.replace('}],"warnings"', '}}],"warnings"', 1)
+
+    plan = parse_planner_output(raw_output, release_id="v0.3.23", planner="strong-model")
+
+    dependent = plan.generated_contracts[1]
+    assert dependent.suggested_contract.depends_on == ["v0.3.23-0001"]
+    assert "depends_on" not in dependent.model_dump(mode="python")
+    assert any("depends_on" in warning for warning in plan.warnings)
+
+
 def test_parse_planner_output_stops_with_structured_evidence_for_overbroad_allowed_files() -> None:
     with pytest.raises(PlannerNormalizationError) as exc:
         parse_planner_output(

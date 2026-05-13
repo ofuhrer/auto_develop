@@ -555,7 +555,10 @@ def parse_planner_output(
         try:
             raw_output = json.loads(raw_output)
         except json.JSONDecodeError as error:
-            raise ValueError("planner output must be valid JSON") from error
+            repaired = _repair_planner_json_tail(raw_output)
+            if repaired is None:
+                raise ValueError("planner output must be valid JSON") from error
+            raw_output = repaired
     initial_validation_errors: list[dict[str, str]] = []
     if isinstance(raw_output, dict):
         initial_validation_errors = _contract_plan_validation_errors(raw_output)
@@ -636,6 +639,22 @@ def parse_planner_output(
             ) from error
         raise
     return plan
+
+
+def _repair_planner_json_tail(raw_output: str) -> dict[str, Any] | None:
+    """Repair a narrow planner JSON tail drift pattern before schema validation."""
+    marker = '}],"warnings"'
+    index = raw_output.rfind(marker)
+    if index < 0:
+        return None
+    candidate = raw_output[:index] + raw_output[index + 1 :]
+    try:
+        parsed = json.loads(candidate)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return parsed
 
 
 def _contract_plan_validation_errors(candidate_plan: object) -> list[dict[str, str]]:
@@ -738,6 +757,11 @@ def _normalize_planner_contract_payloads(raw_plan: dict[str, Any], *, release_id
             continue
 
         contract_payload = deepcopy(suggested_contract)
+        changed_fields: list[str] = []
+        generated_depends_on = generated.get("depends_on")
+        if "depends_on" not in contract_payload and isinstance(generated_depends_on, list):
+            contract_payload["depends_on"] = generated_depends_on
+            changed_fields.append("depends_on")
         fallback_fields = {
             "task_id": generated.get("task_id"),
             "release_id": plan_release_id,
@@ -745,7 +769,6 @@ def _normalize_planner_contract_payloads(raw_plan: dict[str, Any], *, release_id
             "objective": generated.get("objective"),
             "budget_class": generated.get("budget_class") or "M",
         }
-        changed_fields: list[str] = []
         for field_name, fallback_value in fallback_fields.items():
             if field_name not in contract_payload and fallback_value:
                 contract_payload[field_name] = fallback_value
@@ -799,6 +822,7 @@ def _normalize_planner_contract_payloads(raw_plan: dict[str, Any], *, release_id
 
         if changed_fields or alias_changes:
             generated = deepcopy(generated)
+            generated.pop("depends_on", None)
             generated["suggested_contract"] = contract.model_dump(mode="python")
             warnings.append(
                 "planner_contract_payload_normalization="
