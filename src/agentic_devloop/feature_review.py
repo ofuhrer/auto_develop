@@ -4,7 +4,7 @@ import json
 import shlex
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from agentic_devloop.config import load_project_config
@@ -60,15 +60,17 @@ class FeatureReviewBackendResult:
     raw_output: str
 
 
-UNSAFE_REPAIR_PATH_MARKERS: tuple[str, ...] = (
-    "poetry.lock",
-    "uv.lock",
-    "package-lock.json",
-    "pnpm-lock.yaml",
-    "yarn.lock",
-    "migrations/",
-    "generated/",
+UNSAFE_REPAIR_FILENAMES: frozenset[str] = frozenset(
+    {
+        "poetry.lock",
+        "uv.lock",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+    }
 )
+
+UNSAFE_REPAIR_DIRNAMES: frozenset[str] = frozenset({"migrations", "generated"})
 
 MAX_FEATURE_REVIEW_DIFF_CHARS = 120_000
 MAX_FEATURE_REVIEW_ARTIFACT_CHARS = 40_000
@@ -743,6 +745,16 @@ def _is_generated_evidence_path(path: str) -> bool:
     return normalized.startswith("runs/") or normalized.startswith("worktrees/")
 
 
+def _is_unsafe_repair_path(path: str) -> bool:
+    normalized = path.strip().lstrip("./").replace("\\", "/")
+    if not normalized:
+        return False
+    candidate = PurePosixPath(normalized)
+    if candidate.name in UNSAFE_REPAIR_FILENAMES:
+        return True
+    return any(part in UNSAFE_REPAIR_DIRNAMES for part in candidate.parts)
+
+
 def _record_unsafe_overlap(
     finding: FeatureReviewFinding,
     *,
@@ -750,7 +762,7 @@ def _record_unsafe_overlap(
 ) -> None:
     for path in finding.affected_files:
         normalized = path.strip().lstrip("./")
-        if not any(marker in normalized for marker in UNSAFE_REPAIR_PATH_MARKERS):
+        if not _is_unsafe_repair_path(normalized):
             continue
         previous_finding = unsafe_path_to_finding.get(normalized)
         if previous_finding is not None and previous_finding != finding.finding_id:
