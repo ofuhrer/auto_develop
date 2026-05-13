@@ -1,13 +1,13 @@
 # Architecture Summary
 
-`agentic-devloop` is an autonomous-first local Python CLI that orchestrates agentic software development in Git worktrees. The durable architectural direction is now a deterministic kernel plus a high-level governor/supervisor agent. The deterministic kernel owns Git/worktree mechanics, hard safety gates, verification, evidence, metrics, typed artifact persistence, and finalization policy. The governor/supervisor owns judgment-heavy choices: epic selection, one-shot versus decomposed execution, scheduling, planner/reviewer output normalization, finding adjudication, repair/retry/split decisions, and roadmap memory updates. Runtime-supervisor repair/resume seams, planner-output normalization, one-epic governor logging, deterministic state-review snapshot capture, persistent governor memory seams, typed supervisor decision records, supervisor-owned release scheduling, and the release-local feature-review/repair loop are implemented. The broader N-epic governor loop, full agent-driven pre-epic state-review decisioning, and supervisor-owned execution-strategy selection remain planned.
+`agentic-devloop` is an autonomous-first local Python CLI that orchestrates agentic software development in Git worktrees. The durable architectural direction is now a deterministic kernel plus a high-level governor/supervisor agent. The deterministic kernel owns Git/worktree mechanics, hard safety gates, verification, evidence, metrics, typed artifact persistence, and finalization policy. The governor/supervisor owns judgment-heavy choices: epic selection, one-shot versus decomposed execution, scheduling, planner/reviewer output normalization, finding adjudication, repair/retry/split decisions, and roadmap memory updates. Runtime-supervisor repair/resume seams, planner-output normalization, one-epic governor logging, deterministic state-review snapshot capture, persistent governor memory seams, typed supervisor decision records, supervisor-owned release scheduling, supervisor-owned execution-strategy selection, one-shot execution input materialization, and the release-local feature-review/repair loop are implemented. The broader N-epic governor loop and full agent-driven pre-epic state-review decisioning remain planned.
 
 Current flow:
 
 1. The roadmap governor reads repository documentation, roadmap, repo-state memory, run artifacts, metrics, and the configured repository goal.
 2. The governor selects the next highest-reward epic and emits a validated `BacklogPlan`.
 3. `run-backlog` can select one epic, write or reuse its release objective, plan contracts, and execute the resulting release.
-4. The planned next seam lets the supervisor choose execution strategy before contract generation: one-shot implementation, sequential contracts, parallel contracts, stacked branches, patch handoff, or replanning.
+4. The shipped one-epic execution-strategy seam lets the supervisor choose execution strategy before contract generation: one-shot implementation, sequential contracts, parallel contracts, stacked branches, patch handoff, replanning, or stop.
 5. If decomposition is selected, the planner decomposes the objective into bounded task contracts.
 6. Release execution creates isolated task worktrees and branches.
 7. Worker agents implement inside the selected strategy and task boundaries.
@@ -22,22 +22,21 @@ Current flow:
 Target additions:
 
 1. Before selecting an epic, the state-review governor should expand beyond snapshot capture to full decisioning over live repository state: branch status, dirty state, open feature/agent branches, source layout drift, changed docs, recent release artifacts, release reviews, metrics, tuning reports, unresolved findings, and tracked repo-state memory.
-2. Before generating contracts, the supervisor should select execution strategy. The one-shot comparison showed that cohesive architectural work may be faster and higher quality as one high-capability implementation than as several small contracts.
+2. Before generating contracts, the supervisor should normalize useful planner, reviewer, and supervisor output into strict typed artifacts before hard gates decide whether to stop.
 3. The implemented release-local feature-review loop should be composed into the broader governor so every epic receives PR-style semantic review before PR, merge, or autonomous finalization.
 4. Reviewer findings already become bounded repair contracts in one release; the target addition is output normalization, convergence policy, and durable memory across repeated epic cycles.
 5. The system should finalize only after required reviewer findings are resolved, explicitly accepted with rationale, or stopped by retry budget, hard gates, missing policy/credentials, or configured human escalation.
 
 Prioritized architectural gaps:
 
-1. Supervisor-owned execution-strategy selection before contract generation.
-2. Model-output normalization before strict validation for planner, reviewer, and supervisor artifacts.
-3. State-review governor before backlog selection.
-4. Review-loop convergence policy for repeated reviewer/repair cycles.
-5. N-epic governor command once selection, review, memory, scheduling, strategy, and normalization are reliable.
-6. Governor cockpit expansion for full multi-epic visibility.
-7. Shared verification runtime and bounded environment repair.
-8. Executor liveness supervision.
-9. Target artifact ownership and onboarding bootstrap.
+1. Model-output normalization before strict validation for planner, reviewer, and supervisor artifacts.
+2. State-review governor before backlog selection.
+3. Review-loop convergence policy for repeated reviewer/repair cycles.
+4. N-epic governor command once selection, review, memory, scheduling, strategy, and normalization are reliable.
+5. Governor cockpit expansion for full multi-epic visibility.
+6. Shared verification runtime and bounded environment repair.
+7. Executor liveness supervision.
+8. Target artifact ownership and onboarding bootstrap.
 
 The orchestrator owns policy, state, budgets, verification, evidence, roadmap governance, and finalization. Worker agents own implementation inside narrow task contracts. Humans provide goals and hard safety boundaries rather than routine approvals.
 
@@ -46,7 +45,8 @@ Implemented seams:
 1. `GovernorLoop` now coordinates one selected epic at a time.
 2. `StateStore` persists active, completed, and blocked epic state, plus recent run summaries.
 3. `RepairPolicy` classifies retryable versus stop conditions for contract-contained failures, verification drift, missing credentials, and unsafe policy expansion.
-4. These seams support the single-epic governor flow and the implemented runtime-supervisor repair/resume loop; the product-facing N-epic loop is still planned.
+4. `ExecutionStrategy` now selects the one-epic execution mode before contract generation and writes typed selection evidence plus one-shot execution input when applicable.
+5. These seams support the single-epic governor flow and the implemented runtime-supervisor repair/resume loop; the product-facing N-epic loop is still planned.
 
 Code-reduction direction:
 
