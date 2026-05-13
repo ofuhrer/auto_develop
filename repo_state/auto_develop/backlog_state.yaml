@@ -86,14 +86,14 @@ active_epics:
   state_review_snapshot_references: []
   metrics_snapshot_references: []
   tuning_report_references: []
-  updated_at: '2026-05-13T23:33:59Z'
+  updated_at: '2026-05-13T23:36:29.527095Z'
 reviewed_epics: []
 completed_epic_records:
 - epic_id: soft-scope-budget-policy
-  status_reason: completed via feature/soft-scope-budget-policy after autonomous
-    task and repair execution plus manual final-review hardening; typed scope-risk
-    budget policy decisions, release-confined evidence copies, structured metric
-    derivation, deterministic blocking placeholders, docs, and tests are implemented
+  status_reason: completed via feature/soft-scope-budget-policy after autonomous task
+    and repair execution plus manual final-review hardening; typed scope-risk budget
+    policy decisions, release-confined evidence copies, structured metric derivation,
+    deterministic blocking placeholders, docs, and tests are implemented
   next_recommendations: []
   retry_count: 1
   repair_count: 5
@@ -313,15 +313,14 @@ notes:
 - 'Dogfood finding: one-shot high-capability agents produced coherent implementations
   faster than over-decomposed contract batches. Prioritize supervisor-owned execution
   strategy and normalization before expanding multi-epic autonomy.'
-- 'Completed gap: hard file-count
-  and diff-size budgets now produce supervisor-adjudicated scope-risk findings
-  after hard gates pass, so broad-but-mechanical changes are no longer stopped
-  automatically unless they cross a hard safety boundary.'
+- 'Completed gap: hard file-count and diff-size budgets now produce supervisor-adjudicated
+  scope-risk findings after hard gates pass, so broad-but-mechanical changes are no
+  longer stopped automatically unless they cross a hard safety boundary.'
 - 'Current top gap: bounded review convergence still needs supervisor-owned final
   adjudication. Recent cycles reached review convergence limits and required manual
   final repair despite passing focused and full deterministic verification.'
-- 'Next sequencing: review-convergence-adjudicator, shared-verification-runtime,
-  environment repair, then executor liveness.'
+- 'Next sequencing: review-convergence-adjudicator, shared-verification-runtime, environment
+  repair, then executor liveness.'
 - Hard file-count and diff-size budgets are implemented as scope-risk signals for
   supervisor adjudication unless they cross configured hard-policy boundaries; broad
   mechanical changes require stronger verification, not automatic rejection.

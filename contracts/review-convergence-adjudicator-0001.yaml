@@ -1,0 +1,51 @@
+task_id: review-convergence-adjudicator-0001
+release_id: review-convergence-adjudicator
+title: Add typed final review adjudication models
+task_type: code_only
+budget_class: M
+objective: Add typed models for final review adjudication artifacts that classify
+  each remaining reviewer finding as blocker, accepted risk, backlog follow-up, duplicate,
+  false-positive, or scope-expansion, and require rationale, evidence paths, fallback
+  plan, and validators rerun.
+allowed_files:
+- src/agentic_devloop/models.py
+- src/agentic_devloop/supervisor_decisions.py
+- tests/test_supervisor_decisions.py
+- tests/test_release.py
+forbidden_changes:
+- Do not remove or weaken existing FinalReviewContinuationDecision or FeatureReviewFindingClassificationDecision
+  validation rules.
+- Do not rename existing serialized enum values unless tests explicitly cover backward
+  compatibility.
+- Do not implement release orchestration flow in this task.
+- Do not change planner, executor, Git finalization, or cleanup behavior.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_supervisor_decisions.py and tests/test_release.py
+- serialized valid adjudication examples for all six classifications
+- validation failure examples for missing rationale, missing evidence paths, missing
+  fallback plan, and empty validators rerun
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_supervisor_decisions.py tests/test_release.py
+  profile: null
+stop_conditions:
+- Stop if the model change requires editing more than 4 files.
+- Stop if existing supervisor decision artifacts can no longer be loaded by current
+  tests.
+- Stop if any accepted or deferred adjudication can be serialized without rationale,
+  evidence paths, fallback plan, and validators rerun.
+- Stop if the task requires changing files outside allowed_files.
+non_goals:
+- Do not wire the release repair-limit flow.
+- Do not compact decisions into repo-state memory.
+- Do not update user or design documentation.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

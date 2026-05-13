@@ -1,0 +1,48 @@
+task_id: review-convergence-adjudicator-0004
+release_id: review-convergence-adjudicator
+title: Document release-local adjudication behavior
+task_type: documentation
+budget_class: S
+objective: Document how repair-limit final adjudication works, including final integration
+  verification ordering, per-finding classifications, finalization blocking rules,
+  artifact paths, and repo-state memory compaction for accepted or deferred findings.
+allowed_files:
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/design/SUPERVISOR_DECISIONS.md
+- docs/design/TECHNICAL_SPECIFICATION.md
+- docs/README.md
+forbidden_changes:
+- Do not describe future governor-wide autonomous decisioning as implemented.
+- Do not add CLI examples that rely on unimplemented flags or configuration.
+- Do not modify source code or tests in this documentation task.
+- Do not remove existing documentation for feature review, final verification, or
+  supervisor decision artifacts.
+required_evidence:
+- git diff
+- changed-files list
+- documentation excerpts showing release-local adjudication artifact paths and final
+  verification ordering
+- documentation excerpt distinguishing shipped behavior from future governor decisioning
+- git diff --check output
+verification:
+  commands:
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if documenting the behavior accurately requires source changes.
+- Stop if docs would imply accepted/deferred findings can bypass final integration
+  verification.
+- Stop if docs would imply blocker findings can be finalized.
+- Stop if the task requires changing files outside allowed_files.
+non_goals:
+- Do not change behavior or tests.
+- Do not update roadmap priorities beyond clarifying implemented versus planned behavior.
+scientific_assumptions:
+- Not applicable; documentation task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- review-convergence-adjudicator-0003

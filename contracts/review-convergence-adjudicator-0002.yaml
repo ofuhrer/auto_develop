@@ -1,0 +1,61 @@
+task_id: review-convergence-adjudicator-0002
+release_id: review-convergence-adjudicator
+title: Wire repair-limit final adjudication flow
+task_type: code_only
+budget_class: L
+objective: Update release orchestration so reaching the feature-review repair limit
+  triggers final integration verification before adjudicating remaining findings,
+  writes one typed artifact per finding, accepts or defers only non-blocking classifications,
+  and prevents finalization for blocker or malformed-evidence outcomes.
+allowed_files:
+- src/agentic_devloop/release.py
+- src/agentic_devloop/evidence.py
+- src/agentic_devloop/models.py
+- src/agentic_devloop/supervisor_decisions.py
+- tests/test_release.py
+- tests/test_evidence.py
+forbidden_changes:
+- Do not bypass deterministic verification failures to make adjudication pass.
+- Do not finalize a release before final integration verification has completed successfully
+  for accepted or deferred findings.
+- Do not classify malformed or incomplete reviewer evidence as accepted risk, duplicate,
+  false-positive, backlog follow-up, or scope-expansion.
+- Do not change task execution, worktree creation, branch naming, or merge mechanics
+  outside the final review continuation path.
+- Do not delete or overwrite existing feature_review.json, feature_review_recheck.json,
+  or final_integration_verification artifacts.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_release.py tests/test_evidence.py
+- release test fixture proving green final verification with residual non-blocking
+  findings finalizes
+- release test fixture proving blocker adjudication prevents finalization
+- release test fixture proving malformed or incomplete reviewer evidence hard-stops
+- example adjudication artifact paths linked from the release summary or continuation
+  decision
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_release.py tests/test_evidence.py
+  profile: null
+stop_conditions:
+- Stop if final integration verification cannot be proven to run before accepting
+  or deferring any remaining finding.
+- Stop if any blocker classification can reach finalization.
+- Stop if malformed reviewer evidence is silently ignored or converted into an accepted
+  finding.
+- Stop if implementation requires changing more than 6 files.
+- Stop if the task requires changing files outside allowed_files.
+non_goals:
+- Do not redesign the feature reviewer prompt.
+- Do not add backlog planner behavior.
+- Do not update documentation in this task.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: true
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- review-convergence-adjudicator-0001

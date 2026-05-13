@@ -1,0 +1,21 @@
+release_id: review-convergence-adjudicator
+title: Stop reviewer churn with supervisor-owned final adjudication
+objective: After bounded feature-review repair waves, run final integration verification
+  on the integrated feature branch and persist typed supervisor decisions that accept,
+  defer, or block remaining reviewer findings with evidence-backed rationale.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- A release that reaches the configured review repair limit produces a typed supervisor
+  adjudication artifact for every remaining reviewer finding.
+- Final integration verification runs on the integrated feature branch before accepting
+  or deferring any remaining finding.
+- Findings are classified into blocker, accepted risk, backlog follow-up, duplicate,
+  false-positive, or scope-expansion with rationale, evidence paths, fallback plan,
+  and validators rerun.
+- Blocking findings prevent finalization; accepted or deferred findings are compacted
+  into durable repo-state memory for future backlog planning.
+- The behavior is covered by focused tests for green verification with residual non-blocking
+  findings, true blocking findings, and malformed or incomplete reviewer evidence.
+- User and design docs distinguish the shipped release-local adjudication behavior
+  from broader future governor decisioning.

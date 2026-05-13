@@ -1,0 +1,57 @@
+task_id: review-convergence-adjudicator-0003
+release_id: review-convergence-adjudicator
+title: Persist adjudicated follow-ups into repo-state memory
+task_type: code_only
+budget_class: M
+objective: Persist compact repo-state records for final adjudications classified as
+  accepted risk, backlog follow-up, duplicate, false-positive, or scope-expansion,
+  including source evidence paths and fallback plan references for future backlog
+  planning.
+allowed_files:
+- src/agentic_devloop/release.py
+- src/agentic_devloop/state_store.py
+- src/agentic_devloop/models.py
+- tests/test_release.py
+- tests/test_state_store.py
+forbidden_changes:
+- Do not write repo-state records for blocker or hard-stop adjudications as accepted/deferred
+  memory.
+- Do not store full reviewer transcripts when a compact finding summary and artifact
+  path is sufficient.
+- Do not create target-specific durable state in the source repo except test temp-repo
+  fixtures.
+- Do not change backlog epic selection or roadmap planning behavior.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_release.py tests/test_state_store.py
+- test evidence showing accepted risk and backlog follow-up records are written to
+  configured repo_state
+- test evidence showing blocker and malformed-evidence outcomes are not compacted
+  as accepted/deferred memory
+- serialized compact memory example containing classification, rationale summary,
+  evidence paths, fallback plan, and validators rerun
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_release.py tests/test_state_store.py
+  profile: null
+stop_conditions:
+- Stop if repo-state persistence requires broad changes to governor or backlog planning.
+- Stop if compacted memory omits the adjudication artifact path or final verification
+  evidence path.
+- Stop if blockers or hard stops can be persisted as accepted/deferred follow-ups.
+- Stop if implementation requires changing more than 5 files.
+- Stop if the task requires changing files outside allowed_files.
+non_goals:
+- Do not implement a global governor decision engine.
+- Do not alter cleanup retention policy.
+- Do not update documentation in this task.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: true
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- review-convergence-adjudicator-0002
