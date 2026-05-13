@@ -5,8 +5,8 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   subsystem failures, normalizes useful model output before strict validation, and
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
-current_focus: governor-state-refresh
-active_epic: governor-state-refresh
+current_focus: planner-admission-repair
+active_epic: planner-admission-repair
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -28,23 +28,16 @@ completed_epics:
 - integration-review-evidence-handoff
 - autonomous-finalization-and-cleanup
 - planner-normalization-generalization
+- governor-state-refresh
 blocked_epics: []
 candidate_epics:
-- id: governor-state-refresh
-  title: Apply roadmap and repo-state updates after each epic.
-  rationale: Stale tracked state after successful merges can cause the governor to
-    reselect completed work. The top-level loop must compact release outcomes, finalization
-    decisions, review findings, metrics, and next recommendations before selecting
-    the next epic.
-  priority: 1
-  next_release_id: governor-state-refresh
 - id: planner-admission-repair
   title: Repair generated-contract admission failures autonomously.
   rationale: Semantically useful planner output can still fail deterministic admission
     on file budgets, schema shape, dependencies, or verification runtime assumptions.
     The supervisor should split, narrow, classify broad-but-mechanical work, replan,
     or stop with evidence before rerunning admission.
-  priority: 2
+  priority: 1
   next_release_id: planner-admission-repair
 - id: governor-cockpit-v2
   title: Expand governor cockpit logging for full N-epic runs.
@@ -52,67 +45,89 @@ candidate_epics:
     selection, child releases, feature reviews, repair loops, final verification,
     finalization, cleanup, state refresh, and next-epic selection across repeated
     cycles.
-  priority: 3
+  priority: 2
   next_release_id: governor-cockpit-v2
 - id: soft-scope-budget-policy
   title: Replace crude file-count hard stops with typed scope-risk decisions.
   rationale: Many-file mechanical changes can be safe while small changes can be risky.
     File and diff budgets should emit scope-risk findings for supervisor adjudication
     instead of acting as universal hard stops.
-  priority: 4
+  priority: 3
   next_release_id: soft-scope-budget-policy
 - id: review-convergence-adjudicator
   title: Stop reviewer churn with supervisor-owned final adjudication.
   rationale: Review agents can keep discovering adjacent findings after bounded repair
     waves. After configured attempts, the supervisor should run final verification
     and accept, defer, or block remaining findings with typed rationale.
-  priority: 5
+  priority: 4
   next_release_id: review-convergence-adjudicator
 - id: shared-verification-runtime
   title: Make isolated worktrees run tests through a configured shared runtime.
   rationale: Sub-agents repeatedly could not run pytest because task worktrees do
     not contain .venv; verification should use project runtime policy rather than
     worktree-local assumptions.
-  priority: 6
+  priority: 5
   next_release_id: shared-verification-runtime
 - id: environment-repair-actions
   title: Repair safe verification-environment drift autonomously.
   rationale: Stale editable installs, command-not-found errors, missing PYTHONPATH,
     and dependency runtime drift should become bounded repair actions when project
     policy declares a safe repair.
-  priority: 7
+  priority: 6
   next_release_id: environment-repair-actions
 - id: executor-liveness-supervision
   title: Classify active, stalled, hung, and environment-blocked executors.
   rationale: Long-running workers need process/output/file heartbeat evidence so the
     supervisor can wait, inspect, restart, or stop without human guessing.
-  priority: 8
+  priority: 7
   next_release_id: executor-liveness-supervision
 - id: target-artifact-ownership
   title: Store target development memory in the target repo or a durable control repo.
   rationale: Deleting and recloning the auto_develop controller should not lose target
     repo-state, objectives, contracts, completed-epic history, or next-epic planning
     context.
-  priority: 9
+  priority: 8
   next_release_id: target-artifact-ownership
 - id: onboarding-bootstrap
   title: Bootstrap a freshly cloned target repository from one or two onboarding prompts.
   rationale: The target operator experience is minimal setup followed by a high-level
     epic-count loop.
-  priority: 10
+  priority: 9
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
 active_epics:
-- epic_id: governor-state-refresh
+- epic_id: planner-admission-repair
   retry_count: 0
   repair_count: 0
   outcome_references: []
   finalization_outcome_references: []
   unresolved_finding_references: []
   state_review_snapshot_references: []
-  updated_at: '2026-05-13T20:41:57.460172Z'
+  updated_at: '2026-05-13T21:20:00Z'
 reviewed_epics: []
 completed_epic_records:
+- epic_id: governor-state-refresh
+  status_reason: completed via feature/governor-state-refresh and manually recovered
+    after a worktree-local verification-runtime failure; durable state-refresh models,
+    post-cycle refresh payloads, state-refresh failure artifacts, continuation metadata,
+    docs, and tests are implemented
+  retry_count: 1
+  repair_count: 1
+  outcome_references:
+  - release_id: governor-state-refresh
+    outcome: accepted
+    run_summary_path: runs/20260513T205526Z_governor-state-refresh_release/release_summary.json
+    recorded_at: '2026-05-13T21:20:00Z'
+  finalization_outcome_references: []
+  unresolved_finding_references:
+  - finding_id: shared-verification-runtime
+    summary: Documentation task verification failed in an isolated worktree because
+      `.venv/bin/python` was not available there and fallback `python3` lacked runtime
+      dependencies; recovered manually from evidence and verified from the main runtime.
+    severity: moderate
+    source_path: runs/20260513T210532Z_governor-state-refresh_governor-state-refresh-0005/governor-state-refresh-0005/evidence/verification.log
+  state_review_snapshot_references: []
+  updated_at: '2026-05-13T21:20:00Z'
 - epic_id: planner-normalization-generalization
   status_reason: completed via feature/planner-normalization-generalization and merged
     into main; reusable typed planner-output normalization decision path, validator
