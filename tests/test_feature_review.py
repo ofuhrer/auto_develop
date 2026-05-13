@@ -109,6 +109,7 @@ def test_assemble_feature_review_context_selects_latest_release_run_and_diff(tmp
     (repo_path / "hello.txt").write_text("base\nfeature\n", encoding="utf-8")
     _git(repo_path, "add", "hello.txt")
     _git(repo_path, "commit", "-m", "feature")
+    integration_commit = _git(repo_path, "rev-parse", "--verify", "HEAD").strip()
 
     runs_dir = repo_path / "runs"
     run_old = runs_dir / f"20260101T000000Z_{release_id}_release"
@@ -131,6 +132,9 @@ def test_assemble_feature_review_context_selects_latest_release_run_and_diff(tmp
         + "\n",
         encoding="utf-8",
     )
+    summary_payload = json.loads((run_new / "release_summary.json").read_text(encoding="utf-8"))
+    summary_payload["integration_commit"] = integration_commit
+    (run_new / "release_summary.json").write_text(json.dumps(summary_payload, indent=2) + "\n", encoding="utf-8")
     (run_new / "release_review.md").write_text("# review\n", encoding="utf-8")
     (run_new / "release_metrics.json").write_text('{"ok": true}\n', encoding="utf-8")
     (run_new / "release_budget.json").write_text('{"budget": "ok"}\n', encoding="utf-8")

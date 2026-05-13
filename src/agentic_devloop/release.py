@@ -429,6 +429,7 @@ def run_release(
         log_path=log_path,
         raw_log_path=raw_log_path,
         integration_branch=feature_branch,
+        integration_commit=_git_rev_parse(config.repo_path, feature_branch),
         finalization=finalization,
         budget_path=budget_path,
         tuning_path=tuning_path,
@@ -1690,6 +1691,7 @@ def _write_release_summary(
     log_path: Path,
     raw_log_path: Path,
     integration_branch: str,
+    integration_commit: str,
     finalization: FinalizeResult | None,
     budget_path: Path,
     tuning_path: Path,
@@ -1719,6 +1721,7 @@ def _write_release_summary(
         "feature_review_recheck_path": str(feature_review_recheck_path) if feature_review_recheck_path else None,
         "finalization_gate": finalization_gate,
         "integration_branch": integration_branch,
+        "integration_commit": integration_commit,
         "finalization": {
             "merged": finalization.merged,
             "pushed": finalization.pushed,
@@ -1743,6 +1746,17 @@ def _write_release_summary(
     }
     summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     return summary_path
+
+
+def _git_rev_parse(repo_path: Path, ref: str) -> str:
+    result = run_process(
+        ["git", "rev-parse", "--verify", ref],
+        cwd=repo_path,
+        timeout_seconds=120,
+    )
+    if result.exit_code != 0:
+        raise GitFinalizeError(result.stderr.strip() or result.stdout.strip() or f"git ref not found: {ref}")
+    return result.stdout.strip()
 
 
 def _write_release_review(

@@ -135,6 +135,7 @@ def assemble_feature_review_context(
         runs_root=runs_root,
         release_id=release_id,
         integration_branch=integration_branch,
+        integration_commit=integration_commit,
     )
     if latest_release_run_dir is None:
         release_review_path = None
@@ -464,6 +465,7 @@ def _latest_release_summary(
     runs_root: Path,
     release_id: str,
     integration_branch: str,
+    integration_commit: str,
 ) -> tuple[Path | None, Path | None]:
     candidates = sorted(runs_root.glob(f"*_{release_id}_release/release_summary.json"))
     latest_run_dir: Path | None = None
@@ -476,6 +478,8 @@ def _latest_release_summary(
         if summary.get("release_id") != release_id:
             continue
         if summary.get("integration_branch") != integration_branch:
+            continue
+        if summary.get("integration_commit") != integration_commit:
             continue
         latest_run_dir = summary_path.parent
         latest_summary_path = summary_path
