@@ -1,0 +1,47 @@
+task_id: model-output-normalization-0001
+release_id: model-output-normalization
+title: Add typed model-output normalization supervisor decision records
+task_type: code_only
+budget_class: M
+objective: Extend supervisor decision models and artifact IO with a model-output normalization
+  decision type that records raw artifact paths, typed validation errors, rationale,
+  selected action, fallback plan, validators rerun, and normalized/refused outcome
+  without weakening strict supervisor decision loading.
+allowed_files:
+- src/agentic_devloop/supervisor_decisions.py
+- tests/test_supervisor_decisions.py
+- tests/test_supervisor_decision_artifacts.py
+forbidden_changes:
+- Do not change existing release_scheduling, repair, soft_budget_acceptance, finding_adjudication,
+  or execution_strategy decision semantics except to add the new union member.
+- Do not relax StrictModel extra-field rejection, schema_version validation, evidence
+  path containment, or missing-evidence validation.
+- Do not add planner, reviewer, release, runtime-supervisor, CLI, docs, generated
+  artifact, or runtime evidence changes in this task.
+required_evidence:
+- git diff
+- pytest output for supervisor decision model and artifact tests
+- supervisor decision artifact reload validation output
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_supervisor_decisions.py tests/test_supervisor_decision_artifacts.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if the normalization decision cannot be represented as a strict versioned supervisor
+  decision with required raw paths, validation errors, fallback plan, and validators
+  rerun.
+- Stop if implementation requires allowing missing evidence paths or extra unknown
+  fields in existing supervisor decision artifacts.
+- Stop if tests require edits outside the allowed files.
+non_goals:
+- Do not implement planner, reviewer, or supervisor artifact normalization routing
+  in this task.
+- Do not change release execution behavior.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

@@ -1,0 +1,53 @@
+task_id: model-output-normalization-0004
+release_id: model-output-normalization
+title: Normalize repairable supervisor artifact defects before hard stop
+task_type: code_only
+budget_class: M
+objective: Add a bounded supervisor-artifact normalization path for supervisor candidate
+  outputs that fail typed validation due to repairable wrapper/schema drift, capturing
+  raw artifact paths and validation errors, persisting typed normalization decisions,
+  rerunning supervisor decision validators, and refusing unsafe policy expansion or
+  changed selected action semantics.
+allowed_files:
+- src/agentic_devloop/runtime_supervisor.py
+- src/agentic_devloop/release.py
+- tests/test_runtime_supervisor.py
+- tests/test_release.py
+forbidden_changes:
+- Do not change retry budgets, release resume safety checks, repair action semantics,
+  scheduling semantics, or execution-strategy selected action semantics.
+- Do not normalize changed selected actions, broadened allowed files, missing non-derivable
+  evidence, forbidden paths, or unverifiable artifacts into accepted supervisor decisions.
+- Do not edit planner, contract normalization, feature_review, supervisor decision
+  model definitions, docs, repo_state, generated artifacts, or runtime evidence in
+  this task.
+required_evidence:
+- git diff
+- pytest output for runtime supervisor and release supervisor-normalization tests
+- typed normalization decision persistence assertion
+- negative test output showing changed supervisor action semantics are rejected
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_runtime_supervisor.py tests/test_release.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if supervisor artifact normalization requires bypassing strict supervisor decision
+  reload validation.
+- Stop if selected action, fallback plan, validators rerun, or referenced evidence
+  paths cannot be preserved or derived safely.
+- Stop if tests require edits outside the allowed files.
+non_goals:
+- Do not implement planner or reviewer normalization in this task.
+- Do not implement the planned N-epic governor loop.
+- Do not introduce new broad supervisor policy engines.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- model-output-normalization-0001
+- model-output-normalization-0002
+- model-output-normalization-0003

@@ -1,0 +1,54 @@
+task_id: model-output-normalization-0005
+release_id: model-output-normalization
+title: Document implemented normalization and update repo-state memory
+task_type: documentation
+budget_class: S
+objective: Document the implemented planner, reviewer, and supervisor model-output
+  normalization paths, their typed supervisor decision evidence, validator rerun requirements,
+  and refusal boundaries, while updating repo-state memory to distinguish this release
+  from the still-planned N-epic governor loop.
+allowed_files:
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/README.md
+- docs/design/ARCHITECTURE.md
+- repo_state/auto_develop/architecture_summary.md
+- repo_state/auto_develop/backlog_state.yaml
+- repo_state/auto_develop/release_plan.yaml
+forbidden_changes:
+- Do not describe the N-epic governor loop, full convergence policy, or agent-driven
+  pre-epic state-review decisioning as implemented.
+- Do not edit source code, tests, configs, objectives, contracts, generated artifacts,
+  runtime evidence, lockfiles, or unrelated roadmap content.
+- Do not remove historical context that explains why normalization was prioritized
+  after execution-strategy selection.
+required_evidence:
+- git diff
+- documentation grep output showing implemented normalization language
+- git diff --check output
+verification:
+  commands:
+  - rg -n "normalization|model-output|N-epic|planned" docs/USER_GUIDE.md docs/DEVELOPMENT.md
+    docs/README.md docs/design/ARCHITECTURE.md repo_state/auto_develop/architecture_summary.md
+    repo_state/auto_develop/backlog_state.yaml repo_state/auto_develop/release_plan.yaml
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if documentation would need to claim unimplemented N-epic governor behavior
+  as shipped.
+- Stop if docs cannot clearly identify validator authority and refusal boundaries
+  for normalized artifacts.
+- Stop if source or test edits are needed to make the documentation accurate.
+non_goals:
+- Do not change runtime behavior.
+- Do not create new objectives or contracts.
+- Do not update generated run evidence.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- model-output-normalization-0002
+- model-output-normalization-0003
+- model-output-normalization-0004

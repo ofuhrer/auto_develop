@@ -1,0 +1,26 @@
+release_id: model-output-normalization
+title: Normalize useful model output before strict validation
+objective: Add a bounded supervisor-owned normalization path for planner, reviewer,
+  and supervisor artifacts so semantically useful output with repairable schema or
+  wrapper defects is normalized, revalidated, and either admitted or stopped with
+  typed evidence without changing semantic intent.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- Planner, reviewer, and supervisor raw outputs that fail typed validation are captured
+  with validation errors and routed through a bounded normalization step before final
+  hard stop when the defect class is repairable.
+- Normalization can repair wrapper/schema drift, missing or derivable evidence paths,
+  field spelling or shape drift, required evidence omissions, and worktree-local verification-runtime
+  assumptions without broadening scope or changing finding/contract intent.
+- Normalized artifacts are persisted with typed supervisor decision records that include
+  raw artifact paths, validation errors, rationale, selected action, fallback plan,
+  and validators rerun.
+- Deterministic validators remain authoritative after normalization and still reject
+  unsafe policy expansion, changed semantic intent, forbidden paths, missing non-derivable
+  evidence, and unverifiable artifacts.
+- Focused tests cover accepted normalization, rejected semantic changes, reviewer
+  finding normalization with empty evidence paths, generated-contract normalization,
+  and supervisor-decision evidence persistence.
+- Documentation and repo-state memory distinguish implemented normalization from still-planned
+  N-epic governor behavior.
