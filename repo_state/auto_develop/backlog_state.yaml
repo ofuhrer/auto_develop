@@ -103,9 +103,16 @@ completed_epic_records:
     repair waves completed, final integration evidence was manually verified before merge
   updated_at: '2026-05-13T16:40:00Z'
   outcome_references:
-  - runs/20260513T155654Z_multi-epic-run-governor-hardening_release/release_summary.json
+  - release_id: multi-epic-run-governor-hardening
+    outcome: accepted
+    run_summary_path: runs/20260513T155654Z_multi-epic-run-governor-hardening_release/release_summary.json
+    recorded_at: '2026-05-13T16:40:00Z'
   unresolved_finding_references:
-  - integration-review evidence handoff remains the next backlog priority
+  - finding_id: integration-review-evidence-handoff
+    summary: Final integration review needs first-class full-context and verification evidence
+      handoff.
+    severity: moderate
+    source_path: runs/20260513T155654Z_multi-epic-run-governor-hardening_release/release_review.md
   state_review_snapshot_references: []
 skipped_epics: []
 blocked_epic_records: []
