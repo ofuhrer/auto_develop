@@ -8,6 +8,8 @@ from pathlib import Path
 from agentic_devloop.evidence import (
     EvidenceCollector,
     write_conflict_repair_result,
+    write_feature_review_decision,
+    write_feature_review_recheck,
     write_failure_diagnosis,
     write_release_soft_gate_decisions,
     write_review_decision,
@@ -21,7 +23,13 @@ from agentic_devloop.models import (
     FailureDiagnosisInput,
     FailureDiagnosisSourceMetadata,
     FailureEvidenceExcerpt,
+    FeatureReviewDecision,
+    FeatureReviewFinding,
+    FeatureReviewRecommendation,
+    FeatureReviewRecheckRecord,
+    FeatureReviewSeverity,
     ReleaseSoftGateDecisionRecord,
+    Reviewer,
     SoftGateDecision,
     SoftGateDecisionOutcome,
     SoftGateFinding,
@@ -270,6 +278,63 @@ def test_write_release_soft_gate_decisions_writes_stable_json(tmp_path) -> None:
     assert payload["decisions"][0]["decision"]["decision"] == "accept"
     assert payload["decisions"][0]["decision"]["fallback_plan"] == "Escalate on repeated overage."
     assert payload["decisions"][0]["decision"]["validators_rerun"] == ["budget_check"]
+
+
+def test_write_feature_review_decision_writes_stable_json(tmp_path) -> None:
+    release_bundle_path = tmp_path / "runs" / "release-001"
+    release_bundle_path.mkdir(parents=True)
+    decision = FeatureReviewDecision(
+        release_id="release-001",
+        reviewer=Reviewer.STRONG_MODEL,
+        summary="One required repair remains before finalization.",
+        findings=[
+            FeatureReviewFinding(
+                finding_id="feature-001",
+                severity=FeatureReviewSeverity.CRITICAL,
+                summary="Regression risk in finalization gate when review findings remain unresolved.",
+                affected_files=["src/agentic_devloop/release.py"],
+                evidence_paths=[release_bundle_path / "release_summary.json"],
+                required_repairs=["Block finalization until reviewer re-check passes."],
+                optional_follow_ups=["Add coverage for accepted-risk rationale persistence."],
+            )
+        ],
+        accepted_risks=["None accepted until required repair is complete."],
+        recommendation=FeatureReviewRecommendation.REQUIRE_REPAIRS,
+        rerun_verification_commands=["pytest tests/test_release.py"],
+    )
+
+    path = write_feature_review_decision(release_bundle_path, decision)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert path.name == "feature_review.json"
+    assert payload["release_id"] == "release-001"
+    assert payload["reviewer"] == "strong_model"
+    assert payload["recommendation"] == "require_repairs"
+    assert payload["findings"][0]["finding_id"] == "feature-001"
+    assert payload["findings"][0]["severity"] == "critical"
+    assert payload["findings"][0]["evidence_paths"] == [str(release_bundle_path / "release_summary.json")]
+
+
+def test_write_feature_review_recheck_writes_stable_json(tmp_path) -> None:
+    release_bundle_path = tmp_path / "runs" / "release-001"
+    release_bundle_path.mkdir(parents=True)
+    record = FeatureReviewRecheckRecord(
+        release_id="release-001",
+        unresolved_finding_ids=["feature-001"],
+        resolved_finding_ids=["feature-002"],
+        accepted_finding_ids=["feature-003"],
+        stop_reason="blocked_by_retry_budget",
+    )
+
+    path = write_feature_review_recheck(release_bundle_path, record)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+
+    assert path.name == "feature_review_recheck.json"
+    assert payload["release_id"] == "release-001"
+    assert payload["unresolved_finding_ids"] == ["feature-001"]
+    assert payload["resolved_finding_ids"] == ["feature-002"]
+    assert payload["accepted_finding_ids"] == ["feature-003"]
+    assert payload["stop_reason"] == "blocked_by_retry_budget"
 
 
 def task_budget():

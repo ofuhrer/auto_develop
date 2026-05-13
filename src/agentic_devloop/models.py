@@ -10,6 +10,19 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def _normalize_non_empty_string_list(values: object, *, error_message: str) -> list[str]:
+    if not isinstance(values, list):
+        return values
+
+    normalized: list[str] = []
+    for value in values:
+        item = str(value).strip()
+        if not item:
+            raise ValueError(error_message)
+        normalized.append(item)
+    return normalized
+
+
 class ExecutorConfig(StrictModel):
     type: str = Field(min_length=1)
     model: str = Field(min_length=1)
@@ -507,6 +520,121 @@ class TaskSoftGateDecisionRecord(StrictModel):
 class ReleaseSoftGateDecisionRecord(StrictModel):
     release_id: str = Field(min_length=1)
     decisions: list[TaskSoftGateDecisionRecord] = Field(default_factory=list)
+
+
+class FeatureReviewSeverity(StrEnum):
+    LOW = "low"
+    MODERATE = "moderate"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class FeatureReviewRecommendation(StrEnum):
+    APPROVE = "approve"
+    APPROVE_WITH_REPAIRS = "approve_with_repairs"
+    REQUIRE_REPAIRS = "require_repairs"
+    ESCALATE = "escalate"
+
+
+class FeatureReviewFinding(StrictModel):
+    finding_id: str = Field(min_length=1)
+    severity: FeatureReviewSeverity
+    summary: str = Field(min_length=1)
+    affected_files: list[str] = Field(default_factory=list)
+    evidence_paths: list[Path] = Field(default_factory=list)
+    required_repairs: list[str] = Field(default_factory=list)
+    optional_follow_ups: list[str] = Field(default_factory=list)
+
+    @field_validator("affected_files", "required_repairs", "optional_follow_ups", mode="before")
+    @classmethod
+    def normalize_list_items(cls, values: object) -> object:
+        return _normalize_non_empty_string_list(values, error_message="feature review list items must not be empty")
+
+    @field_validator("affected_files", "required_repairs", "optional_follow_ups")
+    @classmethod
+    def list_items_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("feature review list items must not be empty")
+        return values
+
+    @field_validator("evidence_paths", mode="before")
+    @classmethod
+    def evidence_paths_must_not_be_empty(cls, values: object) -> object:
+        if not isinstance(values, list):
+            return values
+
+        normalized: list[object] = []
+        for value in values:
+            if isinstance(value, str):
+                item = value.strip()
+                if not item:
+                    raise ValueError("feature review evidence paths must not be empty")
+                normalized.append(item)
+                continue
+            normalized.append(value)
+        return normalized
+
+    @model_validator(mode="after")
+    def actionable_findings_require_affected_files(self) -> "FeatureReviewFinding":
+        if (self.required_repairs or self.optional_follow_ups) and not self.affected_files:
+            raise ValueError("feature review findings with repairs or follow-ups require affected_files")
+        return self
+
+
+class FeatureReviewDecision(StrictModel):
+    release_id: str = Field(min_length=1)
+    reviewer: Reviewer
+    summary: str = Field(min_length=1)
+    findings: list[FeatureReviewFinding] = Field(default_factory=list)
+    accepted_risks: list[str] = Field(default_factory=list)
+    recommendation: FeatureReviewRecommendation
+    rerun_verification_commands: list[str] = Field(default_factory=list)
+
+    @field_validator("accepted_risks", "rerun_verification_commands", mode="before")
+    @classmethod
+    def normalize_list_items(cls, values: object) -> object:
+        return _normalize_non_empty_string_list(values, error_message="feature review list items must not be empty")
+
+    @field_validator("accepted_risks", "rerun_verification_commands")
+    @classmethod
+    def list_items_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("feature review list items must not be empty")
+        return values
+
+
+class FeatureReviewRecheckStopReason(StrEnum):
+    RESOLVED = "resolved"
+    ACCEPTED_WITH_RATIONALE = "accepted_with_rationale"
+    BLOCKED_BY_RETRY_BUDGET = "blocked_by_retry_budget"
+    BLOCKED_BY_HARD_GATE = "blocked_by_hard_gate"
+
+
+class FeatureReviewRecheckRecord(StrictModel):
+    release_id: str = Field(min_length=1)
+    unresolved_finding_ids: list[str] = Field(default_factory=list)
+    resolved_finding_ids: list[str] = Field(default_factory=list)
+    accepted_finding_ids: list[str] = Field(default_factory=list)
+    stop_reason: FeatureReviewRecheckStopReason | None = None
+
+    @field_validator("stop_reason", mode="before")
+    @classmethod
+    def normalize_legacy_stop_reason(cls, value: object) -> object:
+        if value == "blocked_by":
+            return FeatureReviewRecheckStopReason.BLOCKED_BY_HARD_GATE
+        return value
+
+    @field_validator("unresolved_finding_ids", "resolved_finding_ids", "accepted_finding_ids", mode="before")
+    @classmethod
+    def normalize_finding_id_items(cls, values: object) -> object:
+        return _normalize_non_empty_string_list(values, error_message="feature review finding IDs must not be empty")
+
+    @field_validator("unresolved_finding_ids", "resolved_finding_ids", "accepted_finding_ids")
+    @classmethod
+    def finding_id_items_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("feature review finding IDs must not be empty")
+        return values
 
 
 class GeneratedContract(StrictModel):

@@ -9,6 +9,7 @@ allowed_files:
 - README.md
 - docs/USER_GUIDE.md
 - docs/DEVELOPMENT.md
+- docs/design/ARCHITECTURE.md
 - docs/design/TECHNICAL_SPECIFICATION.md
 - docs/design/ROADMAP_AND_BACKLOG.md
 - repo_state/**/release_plan.yaml

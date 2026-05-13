@@ -7,12 +7,25 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
+
+from pydantic import Field, field_validator, model_validator
 
 from agentic_devloop.artifacts import cleanup_task_artifacts
 from agentic_devloop.budget import build_budget_ledger, build_tuning_report
 from agentic_devloop.config import load_project_config
-from agentic_devloop.evidence import write_release_soft_gate_decisions
+from agentic_devloop.evidence import (
+    write_feature_review_decision,
+    write_feature_review_recheck,
+    write_release_soft_gate_decisions,
+)
+from agentic_devloop.feature_review import (
+    FeatureReviewContextError,
+    assemble_feature_review_context,
+    generate_repair_contracts_for_required_findings,
+    invoke_feature_reviewer,
+    render_feature_review_prompt,
+)
 from agentic_devloop.git_finalize import (
     FinalizeResult,
     GitFinalizeError,
@@ -24,6 +37,9 @@ from fnmatch import fnmatch
 
 from agentic_devloop.models import (
     Decision,
+    FeatureReviewDecision,
+    FeatureReviewRecommendation,
+    FeatureReviewRecheckRecord,
     OverlapFinding,
     ReleaseOverlapReport,
     ReleasePlan,
@@ -33,6 +49,7 @@ from agentic_devloop.models import (
     SoftGateDecisionOutcome,
     SoftGateFinding,
     SoftGateSeverity,
+    StrictModel,
     TaskSoftGateDecisionRecord,
     TaskContract,
 )
@@ -75,9 +92,69 @@ class ReleaseRunResult:
     decision: Decision
     integration_branch: str | None = None
     finalization: FinalizeResult | None = None
+    finalization_gate: dict[str, object] | None = None
+
+
+@dataclass(frozen=True)
+class FeatureReviewLoopResult:
+    task_results: list[TaskRunResult]
+    feature_review_path: Path | None
+    feature_review_recheck_path: Path | None
+    feature_review_decision: FeatureReviewDecision | None
+    feature_review_recheck: FeatureReviewRecheckRecord | None
+    gating_decision: Decision
 
 
 _RELEASE_BUDGET_SOFT_OVERAGE_RATIO = 0.2
+_FEATURE_REVIEW_MAX_REPAIR_LOOPS = 2
+
+
+class ReleaseFinalizationGate(StrictModel):
+    allowed: bool
+    reason: Literal[
+        "allowed",
+        "unresolved_required_findings",
+        "release_decision_not_accepted",
+    ]
+    unresolved_required_finding_ids: list[str] = Field(default_factory=list)
+    decision: Decision
+
+    @field_validator("unresolved_required_finding_ids")
+    @classmethod
+    def unresolved_required_finding_ids_must_be_sorted_unique_and_non_empty(
+        cls, values: list[str]
+    ) -> list[str]:
+        cleaned: list[str] = []
+        for value in values:
+            if not value.strip():
+                raise ValueError("unresolved_required_finding_ids must not contain empty strings")
+            cleaned.append(value)
+        if cleaned != sorted(cleaned):
+            raise ValueError("unresolved_required_finding_ids must be sorted")
+        if len(cleaned) != len(set(cleaned)):
+            raise ValueError("unresolved_required_finding_ids must not contain duplicates")
+        return cleaned
+
+    @model_validator(mode="after")
+    def gate_invariants(self) -> "ReleaseFinalizationGate":
+        if self.allowed:
+            if self.reason != "allowed":
+                raise ValueError("finalization gate allowed=true requires reason='allowed'")
+            if self.unresolved_required_finding_ids:
+                raise ValueError("finalization gate allowed=true requires no unresolved required finding ids")
+            if self.decision != Decision.ACCEPTED:
+                raise ValueError("finalization gate allowed=true requires decision='accepted'")
+            return self
+
+        if self.reason == "unresolved_required_findings" and not self.unresolved_required_finding_ids:
+            raise ValueError(
+                "finalization gate reason='unresolved_required_findings' requires unresolved_required_finding_ids"
+            )
+        if self.reason == "release_decision_not_accepted" and self.decision == Decision.ACCEPTED:
+            raise ValueError(
+                "finalization gate reason='release_decision_not_accepted' requires decision != 'accepted'"
+            )
+        return self
 
 
 def make_release_run_id(release_id: str, now: datetime | None = None) -> str:
@@ -138,6 +215,11 @@ def run_release(
             raise ValueError(
                 f"contract {contract_path} belongs to release {task.release_id}, expected {release_id}"
             )
+    feature_review_source_tasks = _feature_review_source_contracts(
+        release_id=release_id,
+        contracts_dir=contracts_dir,
+        selected_tasks=selected_tasks,
+    )
     _ensure_no_existing_task_branches(config.repo_path, release_id, selected_tasks)
     overlap_report = analyze_contract_overlaps(
         selected_tasks,
@@ -233,7 +315,45 @@ def run_release(
             progress=progress,
         )
 
-    task_decision = _release_decision([result.decision for result in task_results])
+    feature_review_path: Path | None = None
+    feature_review_recheck_path: Path | None = None
+    feature_review_decision: FeatureReviewDecision | None = None
+    feature_review_recheck: FeatureReviewRecheckRecord | None = None
+
+    task_decision = (
+        Decision.ACCEPTED
+        if not task_results and skipped_completed_task_ids
+        else _release_decision([result.decision for result in task_results])
+    )
+    if task_decision == Decision.ACCEPTED and "reviewer" in config.model_roles:
+        feature_review_loop = _run_feature_review_and_repair_loop(
+            project_id=project_id,
+            config=config,
+            release_id=release_id,
+            run_id=run_id,
+            release_root=release_root,
+            runs_dir=runs_dir,
+            config_dir=config_dir,
+            integration_branch=feature_branch,
+            task_results=task_results,
+            source_contracts=feature_review_source_tasks,
+            executor=executor,
+            verification_timeout_seconds=verification_timeout_seconds,
+            allow_dirty=allow_dirty,
+            commit_on_accept=commit_on_accept,
+            merge_on_accept=merge_on_accept,
+            push_on_accept=push_on_accept,
+            debug_keep_artifacts=debug_keep_artifacts,
+            progress=progress,
+        )
+        task_results = feature_review_loop.task_results
+        feature_review_path = feature_review_loop.feature_review_path
+        feature_review_recheck_path = feature_review_loop.feature_review_recheck_path
+        feature_review_decision = feature_review_loop.feature_review_decision
+        feature_review_recheck = feature_review_loop.feature_review_recheck
+        task_decision = _release_decision([result.decision for result in task_results])
+        if feature_review_loop.gating_decision != Decision.ACCEPTED:
+            task_decision = feature_review_loop.gating_decision
     release_metrics = _build_release_metrics(
         run_id=run_id,
         release_id=release_id,
@@ -277,11 +397,26 @@ def run_release(
         release_metrics["decision"] = decision
         metrics_path = _write_release_metrics(runs_dir=runs_dir, run_id=run_id, metrics=release_metrics)
         _report(progress, "event=release_budget_exceeded violations=" + json.dumps(budget_violations, sort_keys=True))
+    finalization_gate = _build_release_finalization_gate(
+        decision=decision,
+        feature_review_decision=feature_review_decision,
+        feature_review_recheck=feature_review_recheck,
+    )
+    if not bool(finalization_gate["allowed"]):
+        _report(
+            progress,
+            "event=release_finalization_blocked reason="
+            + str(finalization_gate["reason"])
+            + " unresolved_required_findings="
+            + json.dumps(finalization_gate["unresolved_required_finding_ids"], sort_keys=True),
+        )
     finalization = _finalize_release(
         repo_path=config.repo_path,
         integration_branch=feature_branch,
         base_branch=config.default_base_branch,
         decision=decision,
+        allowed=bool(finalization_gate["allowed"]),
+        blocked_reason=str(finalization_gate["reason"]),
         mode=release_finalize,
         progress=progress,
     )
@@ -294,12 +429,16 @@ def run_release(
         log_path=log_path,
         raw_log_path=raw_log_path,
         integration_branch=feature_branch,
+        integration_commit=_git_rev_parse(config.repo_path, feature_branch),
         finalization=finalization,
         budget_path=budget_path,
         tuning_path=tuning_path,
         budget_violations=budget_violations,
         soft_budget_findings=soft_budget_findings,
         release_soft_gate_decision_path=release_soft_gate_decision_path,
+        feature_review_path=feature_review_path,
+        feature_review_recheck_path=feature_review_recheck_path,
+        finalization_gate=finalization_gate,
     )
     review_path = _write_release_review(
         runs_dir=runs_dir,
@@ -315,6 +454,11 @@ def run_release(
         budget_violations=budget_violations,
         soft_budget_findings=soft_budget_findings,
         release_soft_gate_decision_path=release_soft_gate_decision_path,
+        feature_review_decision=feature_review_decision,
+        feature_review_path=feature_review_path,
+        feature_review_recheck=feature_review_recheck,
+        feature_review_recheck_path=feature_review_recheck_path,
+        finalization_gate=finalization_gate,
     )
     _report(progress, f"event=release_decision decision={decision}")
     _report(progress, f"event=release_review path={review_path}")
@@ -346,6 +490,7 @@ def run_release(
         decision=decision,
         integration_branch=feature_branch,
         finalization=finalization,
+        finalization_gate=finalization_gate,
     )
 
 
@@ -370,6 +515,24 @@ def _select_contracts(
         if task.release_id == release_id:
             contracts.append(path)
     return contracts
+
+
+def _feature_review_source_contracts(
+    *,
+    release_id: str,
+    contracts_dir: Path,
+    selected_tasks: list[TaskContract],
+) -> list[TaskContract]:
+    """Feature review sees the whole feature diff, including prior release slices."""
+    by_task_id = {task.task_id: task for task in selected_tasks}
+    for path in sorted(contracts_dir.glob("*.yaml")):
+        try:
+            task = load_yaml_model(path, TaskContract)
+        except Exception:
+            continue
+        if task.release_id == release_id:
+            by_task_id.setdefault(task.task_id, task)
+    return [by_task_id[task_id] for task_id in sorted(by_task_id)]
 
 
 def collect_release_planning_state_review_snapshot(
@@ -982,6 +1145,507 @@ def _run_one_release_task(
     return result
 
 
+def _run_feature_review_and_repair_loop(
+    *,
+    project_id: str,
+    config: "ProjectConfig",
+    release_id: str,
+    run_id: str,
+    release_root: Path,
+    runs_dir: Path,
+    config_dir: Path,
+    integration_branch: str,
+    task_results: list[TaskRunResult],
+    source_contracts: list[TaskContract],
+    executor: ExecutorProtocol | None,
+    verification_timeout_seconds: int,
+    allow_dirty: bool,
+    commit_on_accept: bool,
+    merge_on_accept: bool,
+    push_on_accept: bool,
+    debug_keep_artifacts: bool,
+    progress: Callable[[str], None] | None,
+) -> FeatureReviewLoopResult:
+    output_root = release_root / "feature_review"
+    output_root.mkdir(parents=True, exist_ok=True)
+    reviewer_config = config.model_roles.get("reviewer", config.executor)
+
+    gating_decision = Decision.ACCEPTED
+    all_task_results: list[TaskRunResult] = []
+    feature_review_path: Path | None = None
+    feature_review_recheck_path: Path | None = None
+    feature_review_decision: FeatureReviewDecision | None = None
+    feature_review_recheck: FeatureReviewRecheckRecord | None = None
+    outstanding_required_finding_ids: set[str] = set()
+
+    def allowed_verification_commands() -> list[str]:
+        commands: list[str] = []
+        for profile in config.verification_profiles.values():
+            commands.extend(profile.commands)
+        results = all_task_results or task_results
+        for result in results:
+            run_state = _read_json_object(result.bundle_path / "run_state.json")
+            verification_results = run_state.get("verification_results", [])
+            if not isinstance(verification_results, list):
+                continue
+            for item in verification_results:
+                if not isinstance(item, dict):
+                    continue
+                command = item.get("command")
+                if isinstance(command, str) and command.strip():
+                    commands.append(command.strip())
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for command in commands:
+            normalized = str(command).strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            ordered.append(normalized)
+        return ordered
+
+    def run_review(attempt: int) -> FeatureReviewDecision:
+        nonlocal feature_review_path
+        nonlocal feature_review_decision
+        attempt_dir = output_root / f"attempt_{attempt:02d}"
+        _report(progress, f"event=feature_review_started attempt={attempt} output_dir={attempt_dir}")
+        branches_base = config.default_base_branch
+        try:
+            context = assemble_feature_review_context(
+                repo_path=config.repo_path,
+                release_id=release_id,
+                base_branch=branches_base,
+                integration_branch=integration_branch,
+                runs_dir=runs_dir,
+            )
+            prompt = render_feature_review_prompt(
+                context=context,
+                repo_path=config.repo_path,
+                runs_dir=runs_dir,
+            )
+            backend = invoke_feature_reviewer(
+                config=reviewer_config,
+                repo_path=config.repo_path,
+                prompt=prompt,
+                release_id=release_id,
+                output_dir=attempt_dir,
+            )
+            decision = backend.decision
+        except FeatureReviewContextError as error:
+            decision = FeatureReviewDecision.model_validate(
+                {
+                    "release_id": release_id,
+                    "reviewer": "deterministic",
+                    "summary": f"Feature review context failure: {error}",
+                    "recommendation": "escalate",
+                    "accepted_risks": [],
+                    "rerun_verification_commands": [],
+                    "findings": [],
+                }
+            )
+        feature_review_decision = decision
+        feature_review_path = write_feature_review_decision(release_root, decision)
+        _report(progress, f"event=feature_review_completed attempt={attempt} recommendation={decision.recommendation.value}")
+        return decision
+
+    def rerun_verification(attempt: int, decision: FeatureReviewDecision) -> bool:
+        rerun_dir = output_root / f"verification_rerun_{attempt:02d}"
+        rerun_dir.mkdir(parents=True, exist_ok=True)
+        commands = list(config.verification_profiles["default"].commands)
+        allowed = set(allowed_verification_commands())
+        if decision.rerun_verification_commands:
+            unknown = [cmd for cmd in decision.rerun_verification_commands if cmd not in allowed]
+            if unknown:
+                _report(
+                    progress,
+                    "event=feature_review_verification_commands_ignored commands="
+                    + json.dumps(unknown, sort_keys=True),
+                )
+            requested = [cmd for cmd in decision.rerun_verification_commands if cmd in allowed]
+            if requested:
+                commands = requested
+        return _run_integration_verification_rerun(
+            repo_path=config.repo_path,
+            integration_branch=integration_branch,
+            worktree_path=rerun_dir / "worktree",
+            commands=commands,
+            timeout_seconds=verification_timeout_seconds,
+            log_path=rerun_dir / "verification.log",
+            progress=progress,
+        )
+
+    all_task_results = list(task_results)
+    decision = run_review(attempt=1)
+
+    for loop_index in range(_FEATURE_REVIEW_MAX_REPAIR_LOOPS + 1):
+        required_findings = [finding for finding in decision.findings if finding.required_repairs]
+        if required_findings:
+            outstanding_required_finding_ids.update(finding.finding_id for finding in required_findings)
+        optional_findings = [
+            finding
+            for finding in decision.findings
+            if not finding.required_repairs and finding.optional_follow_ups
+        ]
+
+        if decision.recommendation == FeatureReviewRecommendation.ESCALATE:
+            gating_decision = Decision.ESCALATED
+            unresolved_finding_ids = [finding.finding_id for finding in decision.findings]
+            if not unresolved_finding_ids and outstanding_required_finding_ids:
+                unresolved_finding_ids = sorted(outstanding_required_finding_ids)
+            feature_review_recheck = FeatureReviewRecheckRecord(
+                release_id=release_id,
+                unresolved_finding_ids=unresolved_finding_ids or [f"{release_id}:feature_review_blocked"],
+                resolved_finding_ids=[],
+                accepted_finding_ids=[],
+                stop_reason="blocked_by_hard_gate",
+            )
+            feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+            return FeatureReviewLoopResult(
+                task_results=all_task_results,
+                feature_review_path=feature_review_path,
+                feature_review_recheck_path=feature_review_recheck_path,
+                feature_review_decision=feature_review_decision,
+                feature_review_recheck=feature_review_recheck,
+                gating_decision=gating_decision,
+            )
+
+        if not required_findings:
+            stop_reason = "resolved" if not decision.findings else "accepted_with_rationale"
+            optional_finding_ids = {finding.finding_id for finding in optional_findings}
+            if stop_reason == "accepted_with_rationale" and not decision.accepted_risks:
+                decision = decision.model_copy(
+                    update={
+                        "accepted_risks": [
+                            (
+                                "Accepted optional findings after reviewer re-check with no required repairs; "
+                                "follow-up remains non-blocking for release finalization."
+                            )
+                        ]
+                    }
+                )
+                feature_review_decision = decision
+                feature_review_path = write_feature_review_decision(release_root, decision)
+            feature_review_recheck = FeatureReviewRecheckRecord(
+                release_id=release_id,
+                unresolved_finding_ids=[],
+                resolved_finding_ids=[
+                    finding.finding_id
+                    for finding in decision.findings
+                    if finding.finding_id not in optional_finding_ids
+                ],
+                accepted_finding_ids=sorted(optional_finding_ids),
+                stop_reason=stop_reason,
+            )
+            feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+            return FeatureReviewLoopResult(
+                task_results=all_task_results,
+                feature_review_path=feature_review_path,
+                feature_review_recheck_path=feature_review_recheck_path,
+                feature_review_decision=feature_review_decision,
+                feature_review_recheck=feature_review_recheck,
+                gating_decision=gating_decision,
+            )
+
+        if loop_index >= _FEATURE_REVIEW_MAX_REPAIR_LOOPS:
+            verification_ok = rerun_verification(loop_index + 1, decision)
+            adjudicated_finding_ids = (
+                _verification_adjudicated_required_finding_ids(required_findings)
+                if verification_ok
+                else []
+            )
+            if adjudicated_finding_ids and len(adjudicated_finding_ids) == len(required_findings):
+                accepted_risks = list(decision.accepted_risks)
+                accepted_risks.append(
+                    "Accepted required feature-review finding(s) after retry budget because "
+                    "they were verification-only or conditional repair findings and the configured "
+                    "integration verification rerun passed."
+                )
+                decision = decision.model_copy(update={"accepted_risks": accepted_risks})
+                feature_review_decision = decision
+                feature_review_path = write_feature_review_decision(release_root, decision)
+                feature_review_recheck = FeatureReviewRecheckRecord(
+                    release_id=release_id,
+                    unresolved_finding_ids=[],
+                    resolved_finding_ids=[],
+                    accepted_finding_ids=sorted(adjudicated_finding_ids),
+                    stop_reason="accepted_with_rationale",
+                )
+                feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+                return FeatureReviewLoopResult(
+                    task_results=all_task_results,
+                    feature_review_path=feature_review_path,
+                    feature_review_recheck_path=feature_review_recheck_path,
+                    feature_review_decision=feature_review_decision,
+                    feature_review_recheck=feature_review_recheck,
+                    gating_decision=gating_decision,
+                )
+            gating_decision = Decision.NEEDS_REVISION
+            feature_review_recheck = FeatureReviewRecheckRecord(
+                release_id=release_id,
+                unresolved_finding_ids=[finding.finding_id for finding in required_findings],
+                resolved_finding_ids=[],
+                accepted_finding_ids=[finding.finding_id for finding in optional_findings],
+                stop_reason="blocked_by_retry_budget",
+            )
+            feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+            return FeatureReviewLoopResult(
+                task_results=all_task_results,
+                feature_review_path=feature_review_path,
+                feature_review_recheck_path=feature_review_recheck_path,
+                feature_review_decision=feature_review_decision,
+                feature_review_recheck=feature_review_recheck,
+                gating_decision=gating_decision,
+            )
+
+        generated = generate_repair_contracts_for_required_findings(
+            decision=decision,
+            source_contracts=source_contracts,
+        )
+        if not generated:
+            gating_decision = Decision.NEEDS_REVISION
+            feature_review_recheck = FeatureReviewRecheckRecord(
+                release_id=release_id,
+                unresolved_finding_ids=[finding.finding_id for finding in required_findings],
+                resolved_finding_ids=[],
+                accepted_finding_ids=[finding.finding_id for finding in optional_findings],
+                stop_reason="blocked_by_hard_gate",
+            )
+            feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+            return FeatureReviewLoopResult(
+                task_results=all_task_results,
+                feature_review_path=feature_review_path,
+                feature_review_recheck_path=feature_review_recheck_path,
+                feature_review_decision=feature_review_decision,
+                feature_review_recheck=feature_review_recheck,
+                gating_decision=gating_decision,
+            )
+
+        repair_dir = output_root / f"repairs_{loop_index + 1:02d}"
+        repair_dir.mkdir(parents=True, exist_ok=True)
+        _report(progress, f"event=feature_review_repairs_started attempt={loop_index + 1} repairs={len(generated)}")
+        for contract in generated:
+            contract_path = repair_dir / f"{contract.task_id}.yaml"
+            _write_contract_yaml(contract_path, contract.suggested_contract)
+            result = _run_one_release_task(
+                project_id=project_id,
+                config_repo_path=config.repo_path,
+                config_dir=config_dir,
+                runs_dir=runs_dir,
+                task_base_branch=integration_branch,
+                contract_path=contract_path,
+                task=contract.suggested_contract,
+                executor=executor,
+                verification_timeout_seconds=verification_timeout_seconds,
+                allow_dirty=allow_dirty,
+                commit_on_accept=commit_on_accept,
+                merge_on_accept=merge_on_accept,
+                push_on_accept=push_on_accept,
+                debug_keep_artifacts=debug_keep_artifacts,
+                progress=progress,
+            )
+            all_task_results.append(result)
+            if result.decision.decision != Decision.ACCEPTED:
+                gating_decision = Decision.NEEDS_REVISION
+                feature_review_recheck = FeatureReviewRecheckRecord(
+                    release_id=release_id,
+                    unresolved_finding_ids=[finding.finding_id for finding in required_findings],
+                    resolved_finding_ids=[],
+                    accepted_finding_ids=[finding.finding_id for finding in optional_findings],
+                    stop_reason="blocked_by_hard_gate",
+                )
+                feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+                return FeatureReviewLoopResult(
+                    task_results=all_task_results,
+                    feature_review_path=feature_review_path,
+                    feature_review_recheck_path=feature_review_recheck_path,
+                    feature_review_decision=feature_review_decision,
+                    feature_review_recheck=feature_review_recheck,
+                    gating_decision=gating_decision,
+                )
+
+        verification_ok = rerun_verification(loop_index + 1, decision)
+        if not verification_ok:
+            gating_decision = Decision.NEEDS_REVISION
+            feature_review_recheck = FeatureReviewRecheckRecord(
+                release_id=release_id,
+                unresolved_finding_ids=[finding.finding_id for finding in required_findings],
+                resolved_finding_ids=[],
+                accepted_finding_ids=[finding.finding_id for finding in optional_findings],
+                stop_reason="blocked_by_hard_gate",
+            )
+            feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+            return FeatureReviewLoopResult(
+                task_results=all_task_results,
+                feature_review_path=feature_review_path,
+                feature_review_recheck_path=feature_review_recheck_path,
+                feature_review_decision=feature_review_decision,
+                feature_review_recheck=feature_review_recheck,
+                gating_decision=gating_decision,
+            )
+        decision = run_review(attempt=loop_index + 2)
+
+    gating_decision = Decision.NEEDS_REVISION
+    feature_review_recheck = FeatureReviewRecheckRecord(
+        release_id=release_id,
+        unresolved_finding_ids=[finding.finding_id for finding in decision.findings],
+        resolved_finding_ids=[],
+        accepted_finding_ids=[],
+        stop_reason="blocked_by_retry_budget",
+    )
+    feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+    return FeatureReviewLoopResult(
+        task_results=all_task_results,
+        feature_review_path=feature_review_path,
+        feature_review_recheck_path=feature_review_recheck_path,
+        feature_review_decision=feature_review_decision,
+        feature_review_recheck=feature_review_recheck,
+        gating_decision=gating_decision,
+    )
+
+
+def _verification_adjudicated_required_finding_ids(findings: list[object]) -> list[str]:
+    accepted: list[str] = []
+    for finding in findings:
+        if _is_verification_only_or_conditional_finding(finding):
+            accepted.append(str(getattr(finding, "finding_id")))
+    return accepted
+
+
+def _is_verification_only_or_conditional_finding(finding: object) -> bool:
+    summary = str(getattr(finding, "summary", "")).lower()
+    repairs = " ".join(str(item) for item in getattr(finding, "required_repairs", [])).lower()
+    text = f"{summary} {repairs}"
+    verification_markers = (
+        "verify",
+        "verification",
+        "confirm",
+        "rerun",
+        "compileall",
+        "pytest",
+        "parses",
+        "syntax",
+        "if needed",
+    )
+    if not any(marker in text for marker in verification_markers):
+        return False
+    unconditional_change_markers = (
+        "implement ",
+        "add ",
+        "change ",
+        "modify ",
+        "remove ",
+        "restore ",
+        "replace ",
+        "repair the source",
+        "fix behavior",
+    )
+    return not any(marker in text for marker in unconditional_change_markers)
+
+
+def _write_contract_yaml(path: Path, contract: TaskContract) -> None:
+    import yaml
+
+    path.write_text(yaml.safe_dump(contract.model_dump(mode="json"), sort_keys=False), encoding="utf-8")
+
+
+def _run_integration_verification_rerun(
+    *,
+    repo_path: Path,
+    integration_branch: str,
+    worktree_path: Path,
+    commands: list[str],
+    timeout_seconds: int,
+    log_path: Path,
+    progress: Callable[[str], None] | None,
+) -> bool:
+    repo_path = repo_path.resolve()
+    worktree_path = worktree_path.resolve()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_lines: list[str] = []
+    cleanup_root = log_path.parent.resolve()
+    _assert_safe_feature_review_rerun_worktree(worktree_path, cleanup_root)
+    log_lines.append(f"rerun worktree cleanup guard: {worktree_path} is under {cleanup_root}")
+
+    if worktree_path.exists():
+        run_process(
+            ["git", "worktree", "remove", "--force", str(worktree_path)],
+            cwd=repo_path,
+            timeout_seconds=120,
+        )
+
+    add = run_process(
+        ["git", "worktree", "add", "--detach", str(worktree_path), integration_branch],
+        cwd=repo_path,
+        timeout_seconds=120,
+    )
+    log_lines.append(f"$ git worktree add --detach {worktree_path} {integration_branch}")
+    log_lines.append(add.stdout.rstrip())
+    log_lines.append(add.stderr.rstrip())
+    if add.exit_code != 0:
+        log_path.write_text("\n".join(line for line in log_lines if line) + "\n", encoding="utf-8")
+        _report(progress, f"event=feature_review_verification_worktree_failed error={add.stderr.strip() or add.stdout.strip()}")
+        return False
+
+    ok = True
+    for command in commands:
+        parts = _command_with_env_prefixes(shlex.split(command))
+        log_lines.append(f"$ {command}")
+        result = run_process(
+            parts,
+            cwd=worktree_path,
+            timeout_seconds=timeout_seconds,
+        )
+        log_lines.append(result.stdout.rstrip())
+        log_lines.append(result.stderr.rstrip())
+        if result.exit_code != 0:
+            ok = False
+            _report(progress, f"event=feature_review_verification_failed command={json.dumps(command)} exit_code={result.exit_code}")
+            break
+
+    remove = run_process(
+        ["git", "worktree", "remove", "--force", str(worktree_path)],
+        cwd=repo_path,
+        timeout_seconds=120,
+    )
+    log_lines.append(f"$ git worktree remove --force {worktree_path}")
+    log_lines.append(remove.stdout.rstrip())
+    log_lines.append(remove.stderr.rstrip())
+    if remove.exit_code != 0:
+        _report(progress, f"event=feature_review_verification_worktree_cleanup_failed error={remove.stderr.strip() or remove.stdout.strip()}")
+
+    log_path.write_text("\n".join(line for line in log_lines if line) + "\n", encoding="utf-8")
+    _report(progress, f"event=feature_review_verification_completed ok={str(ok).lower()} log={log_path}")
+    return ok
+
+
+def _assert_safe_feature_review_rerun_worktree(worktree_path: Path, cleanup_root: Path) -> None:
+    if worktree_path == cleanup_root or cleanup_root in worktree_path.parents:
+        return
+    raise ValueError(
+        "feature-review verification rerun worktree must be inside the rerun output directory "
+        f"before forced cleanup is allowed: worktree={worktree_path} cleanup_root={cleanup_root}"
+    )
+
+
+def _command_with_env_prefixes(parts: list[str]) -> list[str]:
+    env_parts: list[str] = []
+    command_parts = list(parts)
+    while command_parts and _looks_like_env_assignment(command_parts[0]):
+        env_parts.append(command_parts.pop(0))
+    if not env_parts:
+        return parts
+    if not command_parts:
+        return parts
+    return ["/usr/bin/env", *env_parts, *command_parts]
+
+
+def _looks_like_env_assignment(value: str) -> bool:
+    if "=" not in value:
+        return False
+    name, _value = value.split("=", 1)
+    return bool(name) and all(character == "_" or character.isalnum() for character in name)
+
+
 def _load_release_plan(config_repo_path: Path, repo_state_path: Path | None) -> ReleasePlan | None:
     if repo_state_path is None:
         return None
@@ -998,10 +1662,15 @@ def _finalize_release(
     integration_branch: str,
     base_branch: str,
     decision: Decision,
+    allowed: bool,
+    blocked_reason: str,
     mode: str,
     progress: Callable[[str], None] | None,
 ) -> FinalizeResult | None:
     if mode == "none":
+        return None
+    if not allowed:
+        _report(progress, f"release_finalization_skipped reason={blocked_reason}")
         return None
     if decision != Decision.ACCEPTED:
         _report(progress, f"release_finalization_skipped decision={decision}")
@@ -1093,12 +1762,16 @@ def _write_release_summary(
     log_path: Path,
     raw_log_path: Path,
     integration_branch: str,
+    integration_commit: str,
     finalization: FinalizeResult | None,
     budget_path: Path,
     tuning_path: Path,
     budget_violations: list[str],
     soft_budget_findings: list[str],
     release_soft_gate_decision_path: Path | None,
+    feature_review_path: Path | None,
+    feature_review_recheck_path: Path | None,
+    finalization_gate: dict[str, object],
 ) -> Path:
     summary_dir = runs_dir / run_id
     summary_dir.mkdir(parents=True, exist_ok=True)
@@ -1115,7 +1788,11 @@ def _write_release_summary(
         "budget_violations": budget_violations,
         "soft_budget_findings": soft_budget_findings,
         "release_soft_gate_decision_path": str(release_soft_gate_decision_path) if release_soft_gate_decision_path else None,
+        "feature_review_path": str(feature_review_path) if feature_review_path else None,
+        "feature_review_recheck_path": str(feature_review_recheck_path) if feature_review_recheck_path else None,
+        "finalization_gate": finalization_gate,
         "integration_branch": integration_branch,
+        "integration_commit": integration_commit,
         "finalization": {
             "merged": finalization.merged,
             "pushed": finalization.pushed,
@@ -1142,6 +1819,17 @@ def _write_release_summary(
     return summary_path
 
 
+def _git_rev_parse(repo_path: Path, ref: str) -> str:
+    result = run_process(
+        ["git", "rev-parse", "--verify", ref],
+        cwd=repo_path,
+        timeout_seconds=120,
+    )
+    if result.exit_code != 0:
+        raise GitFinalizeError(result.stderr.strip() or result.stdout.strip() or f"git ref not found: {ref}")
+    return result.stdout.strip()
+
+
 def _write_release_review(
     *,
     runs_dir: Path,
@@ -1157,6 +1845,11 @@ def _write_release_review(
     budget_violations: list[str],
     soft_budget_findings: list[str],
     release_soft_gate_decision_path: Path | None,
+    feature_review_decision: FeatureReviewDecision | None,
+    feature_review_path: Path | None,
+    feature_review_recheck: FeatureReviewRecheckRecord | None,
+    feature_review_recheck_path: Path | None,
+    finalization_gate: dict[str, object],
 ) -> Path:
     review_path = runs_dir / run_id / "release_review.md"
     lines = [
@@ -1181,6 +1874,22 @@ def _write_release_review(
         lines.extend(f"- Soft finding: {finding}" for finding in soft_budget_findings)
     if release_soft_gate_decision_path is not None:
         lines.append(f"- Soft decision artifact: `{release_soft_gate_decision_path}`")
+    if feature_review_path is not None:
+        lines.extend(
+            [
+                "",
+                "## Feature Review",
+                "",
+                f"- Artifact: `{feature_review_path}`",
+            ]
+        )
+        if feature_review_decision is not None:
+            lines.append(f"- Recommendation: `{feature_review_decision.recommendation.value}`")
+            lines.append(f"- Findings: `{len(feature_review_decision.findings)}`")
+        if feature_review_recheck_path is not None:
+            lines.append(f"- Recheck artifact: `{feature_review_recheck_path}`")
+        if feature_review_recheck is not None and feature_review_recheck.stop_reason is not None:
+            lines.append(f"- Recheck status: `{feature_review_recheck.stop_reason}`")
     lines.extend([
         "",
         "## Task Results",
@@ -1223,14 +1932,89 @@ def _write_release_review(
             [
                 "## Release Finalization",
                 "",
+                f"- Allowed: `{finalization_gate['allowed']}`",
+                f"- Gate reason: `{finalization_gate['reason']}`",
+                f"- Unresolved required findings: `{len(finalization_gate['unresolved_required_finding_ids'])}`",
                 f"- Merged: `{finalization.merged}`",
                 f"- Pushed: `{finalization.pushed}`",
                 f"- Error: `{finalization.error or 'none'}`",
                 "",
             ]
         )
+    elif not bool(finalization_gate["allowed"]):
+        lines.extend(
+            [
+                "## Release Finalization",
+                "",
+                f"- Allowed: `{finalization_gate['allowed']}`",
+                f"- Gate reason: `{finalization_gate['reason']}`",
+                f"- Unresolved required findings: `{len(finalization_gate['unresolved_required_finding_ids'])}`",
+                "",
+            ]
+        )
     review_path.write_text("\n".join(lines), encoding="utf-8")
     return review_path
+
+
+def _build_release_finalization_gate(
+    *,
+    decision: Decision,
+    feature_review_decision: FeatureReviewDecision | None,
+    feature_review_recheck: FeatureReviewRecheckRecord | None,
+) -> dict[str, object]:
+    unresolved_finding_ids = set(feature_review_recheck.unresolved_finding_ids) if feature_review_recheck else set()
+    required_finding_ids_from_decision = (
+        {
+            finding.finding_id
+            for finding in feature_review_decision.findings
+            if finding.required_repairs
+        }
+        if feature_review_decision
+        else set()
+    )
+    optional_finding_ids_from_decision = (
+        {
+            finding.finding_id
+            for finding in feature_review_decision.findings
+            if not finding.required_repairs and finding.optional_follow_ups
+        }
+        if feature_review_decision
+        else set()
+    )
+    unresolved_required_finding_ids = sorted(unresolved_finding_ids.intersection(required_finding_ids_from_decision))
+    if (
+        not unresolved_required_finding_ids
+        and unresolved_finding_ids
+        and not required_finding_ids_from_decision
+        and feature_review_recheck is not None
+        and feature_review_recheck.stop_reason in {"blocked_by_retry_budget", "blocked_by_hard_gate"}
+    ):
+        # Recheck unresolved findings are authoritative when the latest decision no longer
+        # carries explicit required findings but the loop still ended in a blocked state.
+        unresolved_required_finding_ids = sorted(unresolved_finding_ids.difference(optional_finding_ids_from_decision))
+    if unresolved_required_finding_ids:
+        gate = ReleaseFinalizationGate(
+            allowed=False,
+            reason="unresolved_required_findings",
+            unresolved_required_finding_ids=unresolved_required_finding_ids,
+            decision=decision,
+        )
+        return gate.model_dump(mode="json")
+    if decision != Decision.ACCEPTED:
+        gate = ReleaseFinalizationGate(
+            allowed=False,
+            reason="release_decision_not_accepted",
+            unresolved_required_finding_ids=[],
+            decision=decision,
+        )
+        return gate.model_dump(mode="json")
+    gate = ReleaseFinalizationGate(
+        allowed=True,
+        reason="allowed",
+        unresolved_required_finding_ids=[],
+        decision=decision,
+    )
+    return gate.model_dump(mode="json")
 
 
 def _build_release_metrics(
@@ -1593,6 +2377,8 @@ def _release_dependency_map(
             )
     for finding in overlap_report.findings:
         if finding.severity == "minor":
+            if finding.second_task_id not in dependencies:
+                continue
             dependencies[finding.second_task_id].add(finding.first_task_id)
     return {
         task_id: sorted(values - completed_task_ids)

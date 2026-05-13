@@ -129,6 +129,71 @@ def test_run_release_command_outputs_budget_artifact_paths(monkeypatch, capsys, 
     assert "release_tuning.md" in captured.out
 
 
+def test_run_release_command_outputs_finalization_gate(monkeypatch, capsys, tmp_path) -> None:
+    result = SimpleNamespace(
+        release_id="v1.0.0",
+        run_id="run-1",
+        summary_path=tmp_path / "runs" / "release_summary.json",
+        log_path=tmp_path / "runs" / "release.log",
+        review_path=tmp_path / "runs" / "release_review.md",
+        metrics_path=tmp_path / "runs" / "release_metrics.json",
+        budget_path=tmp_path / "runs" / "release_budget.json",
+        tuning_path=tmp_path / "runs" / "release_tuning.md",
+        integration_branch="feature/v1.0.0",
+        decision="needs_revision",
+        finalization_gate={
+            "allowed": False,
+            "reason": "unresolved_required_findings",
+            "unresolved_required_finding_ids": ["finding-required-1"],
+            "decision": "needs_revision",
+        },
+        task_results=[],
+    )
+
+    monkeypatch.setattr(cli_module, "run_release", lambda **kwargs: result)
+
+    exit_code = main(["run-release", "--project", "demo", "--release", "v1.0.0"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert '"finalization_gate": {' in captured.out
+    assert '"reason": "unresolved_required_findings"' in captured.out
+    assert '"unresolved_required_finding_ids": [' in captured.out
+
+
+def test_run_release_command_outputs_open_finalization_gate_after_review_flow(monkeypatch, capsys, tmp_path) -> None:
+    result = SimpleNamespace(
+        release_id="v1.0.0",
+        run_id="run-1",
+        summary_path=tmp_path / "runs" / "release_summary.json",
+        log_path=tmp_path / "runs" / "release.log",
+        review_path=tmp_path / "runs" / "release_review.md",
+        metrics_path=tmp_path / "runs" / "release_metrics.json",
+        budget_path=tmp_path / "runs" / "release_budget.json",
+        tuning_path=tmp_path / "runs" / "release_tuning.md",
+        integration_branch="feature/v1.0.0",
+        decision="accepted",
+        finalization_gate={
+            "allowed": True,
+            "reason": "allowed",
+            "unresolved_required_finding_ids": [],
+            "decision": "accepted",
+        },
+        task_results=[],
+    )
+
+    monkeypatch.setattr(cli_module, "run_release", lambda **kwargs: result)
+
+    exit_code = main(["run-release", "--project", "demo", "--release", "v1.0.0"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert '"finalization_gate": {' in captured.out
+    assert '"allowed": true' in captured.out
+    assert '"reason": "allowed"' in captured.out
+    assert '"decision": "accepted"' in captured.out
+
+
 def test_plan_release_command_is_registered(capsys) -> None:
     with pytest.raises(SystemExit) as error:
         main(["plan-release", "--help"])

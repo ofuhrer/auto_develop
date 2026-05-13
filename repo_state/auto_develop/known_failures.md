@@ -32,16 +32,19 @@
 
 ## Current Gap: independent feature review
 
-- `release_review.md` is currently a deterministic evidence summary. It is not
-  a full semantic PR-style review by an independent reviewer agent.
-- The target workflow needs a reviewer agent that inspects the integrated
-  feature branch (`base..feature/<release>`), contracts, evidence, verification
-  logs, soft-gate decisions, docs, metrics, and architecture constraints.
-- Reviewer findings should be structured and become bounded repair contracts for
-  repair agents. Verification and reviewer re-checks should repeat until
-  required findings are resolved, accepted with rationale, or stopped by retry
-  budget, hard gates, missing policy/credentials, or configured human
-  escalation.
+- `release_review.md` is a deterministic evidence summary; semantic review now
+  lives in `feature_review.json` and `feature_review_recheck.json` when a
+  `model_roles.reviewer` is configured.
+- The `agentic-feature-review-loop` dogfood run showed that the semantic review
+  loop can produce useful repair contracts and also false-positive required
+  findings after verification already proves the concern false.
+- Required-finding adjudication is now deliberately narrow: verification-only or
+  conditional findings can be accepted with rationale after the configured
+  integration verification rerun passes; findings that require implementation
+  changes remain blocking.
+- Remaining gap: this adjudication is still local to one release. The broader
+  governor should own a typed evidence-backed reviewer/supervisor decision
+  rather than accumulating procedural heuristics in `release.py`.
 
 ## Closed-loop run learning: run-backlog autonomous loop
 

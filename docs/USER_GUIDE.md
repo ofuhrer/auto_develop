@@ -290,7 +290,7 @@ acceptance_criteria:
 
 Use objectives for planning. Use contracts for execution.
 
-The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the current governor service chooses one epic at a time, produces an objective, and feeds the existing objective/contract/release machinery. The runtime supervisor now records structured repair/resume evidence for recoverable release failures. The codebase now also supports deterministic state-review snapshot artifacts (`state_review_snapshot.json`) and contract-plan references (`state_review_snapshot_path`) as bounded evidence inputs. The broader multi-epic governor loop, fully agent-driven pre-epic state-review decisioning, independent feature-review agent, reviewer-comment repair loop, and always-on state refresh remain planned beyond the current one-epic governor boundary.
+The intended workflow is autonomous-first. Humans define the repository goal and hard policy boundaries; the current governor service chooses one epic at a time, produces an objective, and feeds the existing objective/contract/release machinery. The runtime supervisor records structured repair/resume evidence for recoverable release failures. The codebase also supports deterministic state-review snapshot artifacts (`state_review_snapshot.json`) and contract-plan references (`state_review_snapshot_path`) as bounded evidence inputs. When `model_roles.reviewer` is configured, `run-release` performs an independent feature-review pass after accepted tasks are integrated into `feature/<release>`, persists `feature_review.json` and `feature_review_recheck.json`, launches bounded repair contracts for required findings, reruns verification, and blocks finalization while unresolved required findings remain. `release_review.md` stays the deterministic release summary, while the reviewer JSON artifacts capture the semantic reviewer pass and the repair-contract trail. This review loop is intentionally release-local: it is the implemented semantic gate for one integrated feature branch, not the broader multi-epic governor. The broader multi-epic governor loop, fully agent-driven pre-epic state-review decisioning, persistent governor memory, and always-on state refresh remain planned beyond the current one-epic governor boundary.
 
 Use backlog planning first:
 
@@ -831,7 +831,23 @@ Relationship to nearby commands:
 
 `run-backlog` is intentionally one epic per invocation. A multi-epic governor command is planned but not yet the documented user workflow.
 
-Current review behavior is also narrower than the target workflow. `run-release` writes a deterministic `release_review.md`, but that file is an evidence summary, not an independent semantic PR-style review. The target workflow should add a reviewer agent that inspects the integrated feature branch diff and evidence, emits structured findings, and launches bounded repair agents before PR creation, merge-to-main, or policy-approved autonomous finalization.
+`run-release` writes a deterministic `release_review.md` evidence summary. If the project config also defines `model_roles.reviewer`, it invokes a separate reviewer agent over `base..feature`, writes `feature_review.json`, generates bounded repair contracts for required findings, reruns verification using validated reviewer-requested commands or the default verification profile, writes `feature_review_recheck.json`, and blocks PR/merge/push finalization while unresolved required findings remain.
+
+Reviewer backend assumptions (implemented today):
+- Feature review currently runs via the Codex CLI backend (`executor.type: codex_cli`). `run-release` preflights the reviewer backend and blocks review immediately when `codex` is missing from `PATH` or the configured reviewer executor type is unsupported.
+- When the reviewer backend is unsupported, missing, or returns invalid output, the review is treated as blocked and `feature_review.json` records an `escalate` recommendation with a critical finding whose summary includes stable remediation hints (install/configure `codex`, verify `model_roles.reviewer`, or disable semantic review and use deterministic/human review).
+
+Implemented `feature_review_recheck.json` stop reasons:
+- `resolved`: no findings remained after re-check.
+- `accepted_with_rationale`: optional findings remained, or a required finding was adjudicated as verification-only/conditional after the configured integration verification rerun passed. Explicit acceptance rationale is persisted in `feature_review.json` (`accepted_risks`) when needed.
+- `blocked_by_retry_budget`: required findings remained after bounded repair retries.
+- `blocked_by_hard_gate`: reviewer escalation, repair-contract generation failure, repair-task failure, or verification rerun failure blocked progression.
+
+`feature_review_recheck.json.stop_reason` is validated against exactly this fixed taxonomy.
+
+Finalization gating blocks when unresolved finding IDs from `feature_review_recheck.json` intersect with required findings from the latest `feature_review.json` decision. In a blocked re-check state (`blocked_by_retry_budget` / `blocked_by_hard_gate`) where the latest reviewer decision carries no required findings but unresolved finding IDs remain, the gate treats those unresolved IDs as required unless the same IDs are explicitly optional findings in the latest reviewer decision. (Today the gate does not consult the re-check record's `accepted_finding_ids` / `resolved_finding_ids`; it relies on unresolved IDs plus the latest reviewer decision's required/optional classification.)
+
+The implemented adjudication path is intentionally narrow: it can accept false-positive required findings such as "confirm syntax/imports" only after the integration verification rerun passes, and it does not accept findings that require implementation changes. That keeps the reviewer loop bounded to the integrated feature branch while leaving broader multi-epic review orchestration, persistent memory, and pre-epic state refresh as planned work.
 
 The planned multi-epic governor should expose one parent log stream:
 
@@ -1074,7 +1090,7 @@ Then decide whether to repair manually, narrow the contract, or rerun from a cle
 
 ## Current Limits
 
-`auto_develop` is useful for bounded autonomous development today. The active direction is a complete autonomous project governor with runtime supervision: it should review current repository state, choose epics from docs/roadmap/state/artifacts, decompose them, run workers, verify, run independent feature review, repair reviewer findings and contract-contained failures, update memory, and continue until configured stopping criteria are reached.
+`auto_develop` is useful for bounded autonomous development today. The current implementation includes one-epic planning, runtime-supervisor repair/resume, deterministic state-review snapshot capture, and an independent feature-review pass when `model_roles.reviewer` is configured. The active direction is a complete autonomous project governor with runtime supervision: it should review current repository state, choose epics from docs/roadmap/state/artifacts, decompose them, run workers, verify, run independent feature review, repair reviewer findings and contract-contained failures, update memory, and continue until configured stopping criteria are reached.
 
 Current important limits:
 
@@ -1082,7 +1098,7 @@ Current important limits:
 - Fully dynamic model-driven orchestration is still evolving.
 - The broader multi-epic governor loop remains planned.
 - Full agent-driven pre-epic state-review decisioning before backlog selection remains planned.
-- Independent reviewer-agent plus reviewer-comment repair loop remains planned.
+- Multi-epic orchestration of reviewer-agent findings and repair-agent loops remains planned; the currently shipped reviewer/repair loop runs only when `model_roles.reviewer` is configured and is release-local to one `run-release` execution.
 - Pull request creation is not yet automated by the CLI.
 - Remote execution adapters, such as cluster or SLURM execution, are still project-specific work.
 - Human review is still recommended before merging significant work into `main`.

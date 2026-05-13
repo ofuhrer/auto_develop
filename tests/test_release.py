@@ -6,18 +6,25 @@ import time
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
+import pytest
 
 from agentic_devloop.git_finalize import FinalizeResult
 from agentic_devloop.models import ExecutorResult, ProjectConfig, TaskContract
 from agentic_devloop.models import Decision, Reviewer, ReviewDecision
+from agentic_devloop.models import FeatureReviewDecision, FeatureReviewRecheckRecord
 from agentic_devloop.orchestrator import TaskRunResult, executor_config_for_task, executor_configs_for_task
 from agentic_devloop.release import (
     collect_release_planning_state_review_snapshot,
+    _assert_safe_feature_review_rerun_worktree,
+    _build_release_finalization_gate,
     _completed_release_task_ids,
     _ensure_no_existing_task_branches,
     _ensure_no_existing_worktrees,
+    _command_with_env_prefixes,
+    _verification_adjudicated_required_finding_ids,
     _multiplexed_progress,
     _release_dependency_map,
     _should_preserve_task_branch,
@@ -145,6 +152,37 @@ class FlakyVerificationExecutor(FakeExecutor):
         stderr_path.write_text("", encoding="utf-8")
         return ExecutorResult(
             command=["flaky-verification-executor"],
+            exit_code=0,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            duration_seconds=0.01,
+            backend="fake",
+            model=None,
+        )
+
+
+class AllowedFilesExecutor:
+    def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        prompt_text = prompt_path.read_text(encoding="utf-8")
+        match = prompt_text.split("```yaml\n", 1)
+        if len(match) != 2:
+            raise AssertionError("executor prompt missing contract yaml block")
+        contract_yaml, _rest = match[1].split("```", 1)
+        contract = yaml.safe_load(contract_yaml)
+        allowed_files = contract.get("allowed_files") or []
+        if not allowed_files:
+            raise AssertionError("contract missing allowed_files")
+        target = worktree_path / str(allowed_files[0])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("ok\n", encoding="utf-8")
+
+        stdout_path = output_dir / "executor_stdout.log"
+        stderr_path = output_dir / "executor_stderr.log"
+        stdout_path.write_text("allowed files executor\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return ExecutorResult(
+            command=["allowed-files-executor"],
             exit_code=0,
             stdout_path=stdout_path,
             stderr_path=stderr_path,
@@ -439,6 +477,22 @@ def test_release_dependency_map_accepts_completed_prior_release_tasks() -> None:
     assert dependencies == {}
 
 
+def test_release_dependency_map_ignores_overlap_edges_for_completed_tasks() -> None:
+    active = _task_contract("demo-0002", allowed_files=["docs/guides/setup.md"]).model_copy(
+        update={"depends_on": ["demo-0001"]}
+    )
+    completed = _task_contract("demo-0001", allowed_files=["docs/guides/**"])
+    report = analyze_contract_overlaps([completed, active])
+
+    dependencies = _release_dependency_map(
+        [active],
+        report,
+        completed_task_ids={"demo-0001"},
+    )
+
+    assert dependencies == {}
+
+
 def test_completed_release_task_ids_reads_accepted_merged_summaries(tmp_path) -> None:
     summary_dir = tmp_path / "20260512T000000Z_demo_release"
     summary_dir.mkdir(parents=True)
@@ -619,7 +673,8 @@ def test_run_release_supervisor_repairs_verification_and_resumes(tmp_path) -> No
     assert attempt["applier_applied"] is True
     assert attempt["applier_stop_evidence"] is None
     assert "event=repair_succeeded task=demo-0001 attempt=1" in result.log_path.read_text(encoding="utf-8")
-    assert result.task_results[0].run_id.endswith("_retry2")
+    assert repair["initial_result"]["run_id"] != repair["final_result"]["run_id"]
+    assert result.task_results[0].run_id == repair["final_result"]["run_id"]
 
 
 def test_run_release_continues_with_completed_dependencies_during_repair_resume(tmp_path) -> None:
@@ -682,6 +737,46 @@ def test_run_release_continues_with_completed_dependencies_during_repair_resume(
     assert "event=repair_succeeded task=demo-0002 attempt=1" in log
     assert accepted_marker.read_text(encoding="utf-8") == "preserve-me\n"
     assert accepted_marker.exists()
+
+
+def test_run_release_accepts_completed_only_continuation(tmp_path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+    prior_summary_dir = tmp_path / "runs" / "20260512T000000Z_v0.1.0_release"
+    prior_summary_dir.mkdir(parents=True, exist_ok=True)
+    (prior_summary_dir / "release_summary.json").write_text(
+        json.dumps(
+            {
+                "release_id": "v0.1.0",
+                "integration_branch": "feature/v0.1.0",
+                "tasks": [{"task_id": "demo-0001", "decision": "accepted", "merged": True}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        contract_paths=[contracts_dir / "demo-0001.yaml"],
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=AllowedFilesExecutor(),
+        merge_on_accept=True,
+    )
+
+    assert result.decision == Decision.ACCEPTED
+    assert result.task_results == []
+    log = result.log_path.read_text(encoding="utf-8")
+    assert 'event=completed_release_tasks_skipped tasks=["demo-0001"]' in log
 
 
 def test_run_release_supervisor_stops_on_unsafe_repair(tmp_path) -> None:
@@ -1337,6 +1432,1046 @@ def test_state_review_snapshot_collector_requires_existing_planning_artifacts_di
         assert "release planning artifacts directory does not exist" in str(error)
     else:
         raise AssertionError("expected missing planning artifacts directory to fail")
+
+
+def test_run_release_feature_review_repair_loop_records_artifacts(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {
+                "worker": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+                "reviewer": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    decisions = [
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Needs a repair.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "finding-1",
+                        "severity": "high",
+                        "summary": "Fix required.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Update docs."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Repairs applied.",
+                "recommendation": "approve",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [],
+            }
+        ),
+    ]
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    def fake_invoke_feature_reviewer(*_args, **_kwargs):
+        if not decisions:
+            raise AssertionError("unexpected reviewer invocation")
+        return FakeBackendResult(decisions.pop(0))
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert result.decision == Decision.ACCEPTED
+    assert summary["feature_review_path"] is not None
+    assert summary["feature_review_recheck_path"] is not None
+    recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
+    assert recheck["stop_reason"] == "resolved"
+
+
+def test_run_release_feature_review_uses_all_release_contracts_for_continuation_repairs(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    (repo / "src" / "agentic_devloop").mkdir(parents=True)
+    (repo / "src" / "agentic_devloop" / "feature_review.py").write_text("ORIGINAL = True\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-m", "add source"], cwd=repo, check=True)
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            "model_roles": {
+                "worker": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+                "reviewer": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+    _write_yaml(
+        contracts_dir / "demo-0002.yaml",
+        _task_contract(
+            "demo-0002",
+            allowed_files=["src/agentic_devloop/feature_review.py"],
+            verification_commands=["test -f src/agentic_devloop/feature_review.py"],
+        ).model_dump(mode="json"),
+    )
+
+    decisions = [
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Needs continuation-scope repair.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "finding-continuation-1",
+                        "severity": "high",
+                        "summary": "Fix source from earlier slice.",
+                        "affected_files": ["src/agentic_devloop/feature_review.py"],
+                        "required_repairs": ["Update feature review implementation."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Repairs applied.",
+                "recommendation": "approve",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [],
+            }
+        ),
+    ]
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    def fake_invoke_feature_reviewer(*_args, **_kwargs):
+        if not decisions:
+            raise AssertionError("unexpected reviewer invocation")
+        return FakeBackendResult(decisions.pop(0))
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            contract_paths=[contracts_dir / "demo-0001.yaml"],
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
+    assert result.decision == Decision.ACCEPTED
+    assert recheck["stop_reason"] == "resolved"
+    assert not decisions
+
+
+def test_run_release_feature_review_reruns_requested_verification_subset(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            "model_roles": {
+                "worker": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+                "reviewer": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs", "test -f README.md"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    decisions = [
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Needs a repair.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": ["test -d docs"],
+                "findings": [
+                    {
+                        "finding_id": "finding-1",
+                        "severity": "high",
+                        "summary": "Fix required.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Update docs."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Repairs applied.",
+                "recommendation": "approve",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [],
+            }
+        ),
+    ]
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    def fake_invoke_feature_reviewer(*_args, **_kwargs):
+        if not decisions:
+            raise AssertionError("unexpected reviewer invocation")
+        return FakeBackendResult(decisions.pop(0))
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer), patch(
+        "agentic_devloop.release._run_integration_verification_rerun",
+        return_value=True,
+    ) as rerun:
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    assert result.decision == Decision.ACCEPTED
+    assert rerun.call_args.kwargs["commands"] == ["test -d docs"]
+
+
+def test_run_release_feature_review_ignores_unknown_rerun_commands_and_uses_default_profile(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            "model_roles": {
+                "worker": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+                "reviewer": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs", "test -f README.md"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+    decisions = [
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Needs a repair.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [".venv/bin/python -m pytest"],
+                "findings": [
+                    {
+                        "finding_id": "finding-1",
+                        "severity": "high",
+                        "summary": "Fix required.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Update docs."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Repairs applied.",
+                "recommendation": "approve",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [],
+            }
+        ),
+    ]
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    def fake_invoke_feature_reviewer(*_args, **_kwargs):
+        if not decisions:
+            raise AssertionError("unexpected reviewer invocation")
+        return FakeBackendResult(decisions.pop(0))
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer), patch(
+        "agentic_devloop.release._run_integration_verification_rerun",
+        return_value=True,
+    ) as rerun:
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    assert result.decision == Decision.ACCEPTED
+    assert rerun.call_args.kwargs["commands"] == ["test -d docs", "test -f README.md"]
+    assert "event=feature_review_verification_commands_ignored" in result.log_path.read_text(encoding="utf-8")
+
+
+def test_command_with_env_prefixes_wraps_leading_assignments() -> None:
+    assert _command_with_env_prefixes(["PYTHONPATH=src", "/tmp/python", "-m", "pytest"]) == [
+        "/usr/bin/env",
+        "PYTHONPATH=src",
+        "/tmp/python",
+        "-m",
+        "pytest",
+    ]
+    assert _command_with_env_prefixes(["git", "diff", "--check"]) == ["git", "diff", "--check"]
+
+
+def test_feature_review_rerun_worktree_cleanup_guard_requires_rerun_root(tmp_path: Path) -> None:
+    rerun_root = (tmp_path / "runs" / "feature_review" / "verification_rerun_01").resolve()
+    safe_worktree = rerun_root / "worktree"
+    unsafe_worktree = (tmp_path / "worktrees" / "not-rerun-owned").resolve()
+
+    _assert_safe_feature_review_rerun_worktree(safe_worktree, rerun_root)
+
+    with pytest.raises(ValueError, match="forced cleanup"):
+        _assert_safe_feature_review_rerun_worktree(unsafe_worktree, rerun_root)
+
+
+def test_feature_review_required_finding_adjudication_is_limited_to_verification_only_findings() -> None:
+    syntax_finding = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "demo",
+            "reviewer": "hybrid",
+            "summary": "review",
+            "recommendation": "require_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "syntax-risk",
+                    "severity": "critical",
+                    "summary": "Confirm the module parses; possible syntax issue in diff excerpt.",
+                    "affected_files": ["src/agentic_devloop/feature_review.py"],
+                    "required_repairs": [
+                        "Open the file and ensure strings are valid; fix formatting if needed.",
+                        "Rerun compileall and pytest to confirm imports pass.",
+                    ],
+                },
+                {
+                    "finding_id": "real-change",
+                    "severity": "high",
+                    "summary": "Missing implementation behavior.",
+                    "affected_files": ["src/agentic_devloop/release.py"],
+                    "required_repairs": ["Implement the missing finalization behavior."],
+                },
+            ],
+        }
+    )
+
+    accepted = _verification_adjudicated_required_finding_ids(syntax_finding.findings)
+
+    assert accepted == ["syntax-risk"]
+
+
+def test_run_release_feature_review_optional_findings_are_accepted_not_resolved(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            "model_roles": {
+                "worker": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+                "reviewer": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+    decision = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "v0.1.0",
+            "reviewer": "strong_model",
+            "summary": "Approve with optional follow-up.",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "optional-1",
+                    "severity": "low",
+                    "summary": "Optional polish.",
+                    "affected_files": ["docs/demo-0001.md"],
+                    "required_repairs": [],
+                    "optional_follow_ups": ["Consider a later docs cleanup."],
+                }
+            ],
+        }
+    )
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", return_value=FakeBackendResult(decision)):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
+    assert result.decision == Decision.ACCEPTED
+    assert recheck["resolved_finding_ids"] == []
+    assert recheck["accepted_finding_ids"] == ["optional-1"]
+    assert recheck["stop_reason"] == "accepted_with_rationale"
+
+
+def test_run_release_feature_review_repair_recheck_allows_finalization_gate(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {
+                "worker": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+                "reviewer": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    decisions = [
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Needs a repair.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "finding-1",
+                        "severity": "high",
+                        "summary": "Fix required.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Update docs."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Repairs applied.",
+                "recommendation": "approve",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [],
+            }
+        ),
+    ]
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    def fake_invoke_feature_reviewer(*_args, **_kwargs):
+        if not decisions:
+            raise AssertionError("unexpected reviewer invocation")
+        return FakeBackendResult(decisions.pop(0))
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+            release_finalize="merge-main",
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
+    review = result.review_path.read_text(encoding="utf-8")
+
+    assert result.decision == Decision.ACCEPTED
+    assert result.finalization is not None
+    assert result.finalization.merged is True
+    assert result.finalization_gate is not None
+    assert result.finalization_gate["allowed"] is True
+    assert result.finalization_gate["reason"] == "allowed"
+    assert result.finalization_gate["unresolved_required_finding_ids"] == []
+    assert summary["finalization_gate"]["allowed"] is True
+    assert summary["finalization_gate"]["reason"] == "allowed"
+    assert summary["finalization_gate"]["unresolved_required_finding_ids"] == []
+    assert summary["feature_review_recheck_path"] is not None
+    assert recheck["stop_reason"] == "resolved"
+    assert not decisions
+    assert "- Gate reason: `allowed`" in review
+    assert "- Unresolved required findings: `0`" in review
+
+
+def test_run_release_feature_review_end_to_end_flow_opens_finalization_gate(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {
+                "worker": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+                "reviewer": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs", "test -f README.md"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    decisions = [
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Repair needed.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": ["test -d docs"],
+                "findings": [
+                    {
+                        "finding_id": "finding-1",
+                        "severity": "high",
+                        "summary": "Fix required.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Update docs."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Repair verified.",
+                "recommendation": "approve",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [],
+            }
+        ),
+    ]
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    def fake_invoke_feature_reviewer(*_args, **_kwargs):
+        if not decisions:
+            raise AssertionError("unexpected reviewer invocation")
+        return FakeBackendResult(decisions.pop(0))
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer), patch(
+        "agentic_devloop.release._run_integration_verification_rerun",
+        return_value=True,
+    ) as rerun:
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+            release_finalize="merge-main",
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert result.decision == Decision.ACCEPTED
+    assert result.finalization is not None
+    assert result.finalization.merged is True
+    assert result.finalization_gate is not None
+    assert result.finalization_gate["allowed"] is True
+    assert summary["feature_review_path"] is not None
+    assert summary["feature_review_recheck_path"] is not None
+    assert summary["finalization_gate"]["allowed"] is True
+    assert rerun.call_count == 1
+    assert rerun.call_args.kwargs["commands"] == ["test -d docs"]
+
+
+def test_run_release_feature_review_full_repair_recheck_finalization_regression(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {
+                "worker": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+                "reviewer": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs", "test -f README.md"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    decisions = [
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Repair needed.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": ["test -d docs"],
+                "findings": [
+                    {
+                        "finding_id": "finding-1",
+                        "severity": "high",
+                        "summary": "Fix required.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Update docs."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Repairs verified.",
+                "recommendation": "approve",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [],
+            }
+        ),
+    ]
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    def fake_invoke_feature_reviewer(*_args, **_kwargs):
+        if not decisions:
+            raise AssertionError("unexpected reviewer invocation")
+        return FakeBackendResult(decisions.pop(0))
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer), patch(
+        "agentic_devloop.release._run_integration_verification_rerun",
+        return_value=True,
+    ) as rerun:
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+            release_finalize="merge-main",
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
+    review = result.review_path.read_text(encoding="utf-8")
+
+    assert result.decision == Decision.ACCEPTED
+    assert result.finalization is not None
+    assert result.finalization.merged is True
+    assert result.finalization_gate is not None
+    assert result.finalization_gate["allowed"] is True
+    assert result.finalization_gate["reason"] == "allowed"
+    assert result.finalization_gate["unresolved_required_finding_ids"] == []
+    assert summary["feature_review_path"] is not None
+    assert summary["feature_review_recheck_path"] is not None
+    assert summary["finalization_gate"]["allowed"] is True
+    assert summary["finalization_gate"]["reason"] == "allowed"
+    assert summary["finalization_gate"]["unresolved_required_finding_ids"] == []
+    assert recheck["stop_reason"] == "resolved"
+    assert rerun.call_count == 1
+    assert rerun.call_args.kwargs["commands"] == ["test -d docs"]
+    assert not decisions
+    assert "## Feature Review" in review
+    assert "- Gate reason: `allowed`" in review
+    assert "- Unresolved required findings: `0`" in review
+
+
+def test_run_release_blocks_finalization_on_unresolved_required_feature_review_findings(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {
+                "worker": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+                "reviewer": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    decision = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "v0.1.0",
+            "reviewer": "strong_model",
+            "summary": "Required repair cannot be mapped to a bounded repair contract.",
+            "recommendation": "require_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "finding-required-1",
+                    "severity": "high",
+                    "summary": "Fix required in file outside allowed contract scope.",
+                    "affected_files": ["src/outside_scope.py"],
+                    "required_repairs": ["Apply a code fix."],
+                    "optional_follow_ups": [],
+                }
+            ],
+        }
+    )
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", return_value=FakeBackendResult(decision)), patch(
+        "agentic_devloop.release.generate_repair_contracts_for_required_findings",
+        return_value=[],
+    ):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+            release_finalize="merge-main",
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    review = result.review_path.read_text(encoding="utf-8")
+
+    assert result.finalization is None
+    assert result.finalization_gate is not None
+    assert result.finalization_gate["allowed"] is False
+    assert result.finalization_gate["reason"] == "unresolved_required_findings"
+    assert result.finalization_gate["unresolved_required_finding_ids"] == ["finding-required-1"]
+    assert summary["finalization_gate"]["reason"] == "unresolved_required_findings"
+    assert summary["finalization_gate"]["unresolved_required_finding_ids"] == ["finding-required-1"]
+    assert "- Gate reason: `unresolved_required_findings`" in review
+    assert "- Unresolved required findings: `1`" in review
+
+
+def test_release_finalization_gate_only_counts_required_findings() -> None:
+    decision = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "demo-release",
+            "reviewer": "strong_model",
+            "summary": "review summary",
+            "recommendation": "escalate",
+            "findings": [
+                {
+                    "finding_id": "finding-optional-1",
+                    "severity": "moderate",
+                    "summary": "optional follow-up only",
+                    "affected_files": ["docs/demo.md"],
+                    "required_repairs": [],
+                    "optional_follow_ups": ["consider tightening wording"],
+                }
+            ],
+        }
+    )
+    gate = _build_release_finalization_gate(
+        decision=Decision.ESCALATED,
+        feature_review_decision=decision,
+        feature_review_recheck=FeatureReviewRecheckRecord.model_validate(
+            {
+                "release_id": "demo-release",
+                "unresolved_finding_ids": ["finding-optional-1"],
+                "resolved_finding_ids": [],
+                "accepted_finding_ids": [],
+                "stop_reason": "blocked_by_hard_gate",
+            }
+        ),
+    )
+
+    assert gate["allowed"] is False
+    assert gate["reason"] == "release_decision_not_accepted"
+    assert gate["unresolved_required_finding_ids"] == []
 
 
 def _task_contract(

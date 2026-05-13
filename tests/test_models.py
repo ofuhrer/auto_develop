@@ -22,6 +22,11 @@ from agentic_devloop.models import (
     ReleaseObjective,
     ReviewDecision,
     Reviewer,
+    FeatureReviewDecision,
+    FeatureReviewFinding,
+    FeatureReviewRecommendation,
+    FeatureReviewRecheckRecord,
+    FeatureReviewSeverity,
     SoftGateDecision,
     SoftGateDecisionOutcome,
     SoftGateFinding,
@@ -288,6 +293,87 @@ def test_soft_gate_models_reject_unknown_fields() -> None:
                 "fallback_plan": "Escalate if repeated.",
                 "validators_rerun": ["budget_check"],
                 "unknown": "value",
+            }
+        )
+
+
+def test_feature_review_models_validate() -> None:
+    decision = FeatureReviewDecision(
+        release_id="release-001",
+        reviewer=Reviewer.STRONG_MODEL,
+        summary="Integrated feature branch is mostly sound with one required repair.",
+        findings=[
+            FeatureReviewFinding(
+                finding_id="feature-001",
+                severity=FeatureReviewSeverity.HIGH,
+                summary="Missing negative-path verification for release finalization guard.",
+                affected_files=["src/agentic_devloop/release.py", "tests/test_release.py"],
+                evidence_paths=[Path("runs/release-001/release_summary.json")],
+                required_repairs=["Add regression test for guard failure path."],
+                optional_follow_ups=["Add reviewer checklist coverage for guard outcomes."],
+            )
+        ],
+        accepted_risks=["Minor docs drift accepted for this release increment."],
+        recommendation=FeatureReviewRecommendation.APPROVE_WITH_REPAIRS,
+        rerun_verification_commands=["pytest tests/test_release.py"],
+    )
+    recheck = FeatureReviewRecheckRecord(
+        release_id="release-001",
+        unresolved_finding_ids=["feature-001"],
+        resolved_finding_ids=[],
+        accepted_finding_ids=[],
+        stop_reason="blocked_by_hard_gate",
+    )
+
+    assert decision.findings[0].severity == FeatureReviewSeverity.HIGH
+    assert decision.recommendation == FeatureReviewRecommendation.APPROVE_WITH_REPAIRS
+    assert recheck.stop_reason == "blocked_by_hard_gate"
+
+
+def test_feature_review_recheck_normalizes_legacy_blocked_by_stop_reason() -> None:
+    recheck = FeatureReviewRecheckRecord.model_validate(
+        {
+            "release_id": "release-001",
+            "unresolved_finding_ids": ["feature-001"],
+            "resolved_finding_ids": [],
+            "accepted_finding_ids": [],
+            "stop_reason": "blocked_by",
+        }
+    )
+
+    assert recheck.stop_reason == "blocked_by_hard_gate"
+
+
+def test_feature_review_models_reject_unknown_fields() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        FeatureReviewFinding.model_validate(
+            {
+                "finding_id": "feature-001",
+                "severity": "high",
+                "summary": "Risky change.",
+                "unexpected": True,
+            }
+        )
+
+
+def test_feature_review_findings_with_actions_require_affected_files() -> None:
+    with pytest.raises(ValidationError, match="require affected_files"):
+        FeatureReviewFinding.model_validate(
+            {
+                "finding_id": "feature-001",
+                "severity": "high",
+                "summary": "Required repair lacks scope.",
+                "required_repairs": ["Fix the issue."],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="require affected_files"):
+        FeatureReviewFinding.model_validate(
+            {
+                "finding_id": "feature-002",
+                "severity": "moderate",
+                "summary": "Optional follow-up lacks scope.",
+                "optional_follow_ups": ["Document the follow-up."],
             }
         )
 
