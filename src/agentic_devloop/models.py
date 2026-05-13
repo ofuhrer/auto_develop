@@ -250,6 +250,27 @@ class GovernorStopReason(StrEnum):
     STATE_REFRESH_FAILED = "state_refresh_failed"
 
 
+class GovernorStopCategory(StrEnum):
+    NO_ACTIONABLE_WORK = "no_actionable_work"
+    PLANNING_ONLY_STRATEGY = "planning_only_strategy"
+    NON_ACCEPTED_RELEASE = "non_accepted_release"
+    BLOCKED_FINALIZATION = "blocked_finalization"
+    STATE_REFRESH_FAILURE = "state_refresh_failure"
+    MISSING_PLANNER_CREDENTIALS = "missing_planner_credentials"
+    HARD_POLICY_STOP = "hard_policy_stop"
+    REPEATED_EPIC_SELECTED = "repeated_epic_selected"
+    REQUESTED_EPIC_COUNT_REACHED = "requested_epic_count_reached"
+    UNKNOWN = "unknown"
+
+
+class GovernorStopContext(StrictModel):
+    reason: str = Field(min_length=1)
+    category: GovernorStopCategory
+    cycle_index: int | None = Field(default=None, ge=1)
+    epic_id: str | None = None
+    release_id: str | None = None
+    evidence_artifact_paths: list[Path] = Field(default_factory=list)
+
 class StateReviewSnapshot(StrictModel):
     captured_at: datetime
     repo_path: Path

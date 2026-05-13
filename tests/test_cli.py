@@ -11,6 +11,9 @@ from agentic_devloop.models import (
     BacklogEvidenceManifest,
     ContractPlan,
     GeneratedContract,
+    GovernorContinuationAction,
+    GovernorContinuationStopReason,
+    GovernorCycleContinuation,
     GovernorStopReason,
     TaskContract,
 )
@@ -686,6 +689,11 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
     assert '"attempted_epic_count": 1' in captured.out
     assert '"accepted_epic_count": 1' in captured.out
     assert '"stop_reason": "release_not_accepted"' in captured.out
+    assert '"stop_context": {' in captured.out
+    assert '"category": "non_accepted_release"' in captured.out
+    assert '"cycle_index": 1' in captured.out
+    assert '"epic_id": "epic-1"' in captured.out
+    assert '"release_id": "demo-epic-1"' in captured.out
     assert '"cleanup_result": {' in captured.out
     assert '"evidence_manifest": {' in captured.out
     assert '"dry_run": true' in captured.out
@@ -705,6 +713,8 @@ def test_run_governor_wires_epic_count_and_writes_parent_events(monkeypatch, cap
     assert '"event_type": "repair_decision"' in events_text
     assert '"event_type": "finalization_completed"' in events_text
     assert '"event_type": "cleanup_eligibility_evaluated"' in events_text
+    assert '"event_type": "stop_reason_recorded"' in events_text
+    assert '"stop_category": "non_accepted_release"' in events_text
     assert "cleanup_handoff" in events_text
     cleanup_path = tmp_path / "runs" / run_id / "cleanup" / "cycle_001_demo-epic-1_cleanup.json"
     assert cleanup_path.exists()
@@ -812,6 +822,8 @@ def test_run_governor_outputs_blocked_finalization_state(monkeypatch, capsys, tm
 
     assert exit_code == 0
     assert '"stop_reason": "blocked_finalization"' in captured.out
+    assert '"stop_context": {' in captured.out
+    assert '"category": "blocked_finalization"' in captured.out
     assert '"blocked_finalization": {' in captured.out
     assert '"type": "finalization_gate_blocked"' in captured.out
     assert '"finalization_policy": "push-feature"' in captured.out
@@ -896,6 +908,166 @@ def test_run_governor_outputs_pr_preparation_handoff_state(monkeypatch, capsys, 
     assert '"finalization_result": {' in captured.out
     assert '"handoff_path":' in captured.out
     assert str(handoff_path) in captured.out
+
+
+@pytest.mark.parametrize(
+    ("stop_reason", "cycle", "expected_category"),
+    [
+        (
+            GovernorStopReason.NO_ACTIONABLE_WORK,
+            SimpleNamespace(
+                selected_epic_id="epic-noop",
+                release_id="no_actionable_work",
+                release=None,
+                plan_path=Path("/tmp/missing-plan.json"),
+                objective_path=Path("/tmp/missing-objective.yaml"),
+                contract_plan_path=None,
+                evidence_manifest=None,
+            ),
+            "no_actionable_work",
+        ),
+        (
+            GovernorStopReason.PLANNING_ONLY_STRATEGY,
+            SimpleNamespace(
+                selected_epic_id="epic-plan",
+                release_id="demo-plan-only",
+                release=None,
+                plan_path=Path("/tmp/missing-plan.json"),
+                objective_path=Path("/tmp/missing-objective.yaml"),
+                contract_plan_path=None,
+                evidence_manifest=None,
+            ),
+            "planning_only_strategy",
+        ),
+        (
+            GovernorStopReason.STATE_REFRESH_FAILED,
+            SimpleNamespace(
+                selected_epic_id="epic-refresh",
+                release_id="demo-refresh",
+                release=None,
+                plan_path=Path("/tmp/missing-plan.json"),
+                objective_path=Path("/tmp/missing-objective.yaml"),
+                contract_plan_path=None,
+                governor_cycle_continuation=GovernorCycleContinuation(
+                    action=GovernorContinuationAction.STOP,
+                    stop_reason=GovernorContinuationStopReason.STATE_REFRESH_FAILED,
+                ),
+                evidence_manifest=BacklogEvidenceManifest(
+                    state_refresh_error_path=Path("/tmp/missing-refresh-error.json"),
+                ),
+            ),
+            "state_refresh_failure",
+        ),
+    ],
+)
+def test_run_governor_outputs_typed_stop_context_categories(
+    monkeypatch, capsys, tmp_path, stop_reason, cycle, expected_category
+) -> None:
+    run_id = "20260513T000000Z_demo_governor"
+    result = SimpleNamespace(
+        project_id="demo",
+        requested_epic_count=2,
+        attempted_epic_count=1,
+        accepted_epic_count=0,
+        stop_reason=stop_reason,
+        cycles=[cycle],
+    )
+    monkeypatch.setattr(cli_module, "_make_governor_run_id", lambda **_kwargs: run_id)
+    monkeypatch.setattr(cli_module, "run_governor", lambda **kwargs: result)
+    monkeypatch.setattr(cli_module, "_codex_backlog_planner_backend", lambda **kwargs: object())
+
+    exit_code = main(
+        [
+            "run-governor",
+            "--project",
+            "demo",
+            "--goal",
+            "Run repeated epics",
+            "--epic-count",
+            "2",
+            "--execute-planner",
+            "--runs-dir",
+            str(tmp_path / "runs"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert '"stop_context": {' in captured.out
+    assert f'"category": "{expected_category}"' in captured.out
+    events_text = (tmp_path / "runs" / run_id / "events.jsonl").read_text(encoding="utf-8")
+    assert '"event_type": "stop_reason_recorded"' in events_text
+    assert f'"stop_category": "{expected_category}"' in events_text
+
+
+def test_run_governor_records_missing_credentials_stop_context_before_nonzero_exit(
+    monkeypatch, capsys, tmp_path
+) -> None:
+    run_id = "20260513T000000Z_demo_governor"
+    monkeypatch.setattr(cli_module, "_make_governor_run_id", lambda **_kwargs: run_id)
+    monkeypatch.setattr(cli_module, "_codex_backlog_planner_backend", lambda **kwargs: object())
+
+    def failing_run_governor(**_kwargs):
+        raise RuntimeError("missing planner credentials: OPENAI_API_KEY")
+
+    monkeypatch.setattr(cli_module, "run_governor", failing_run_governor)
+
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "run-governor",
+                "--project",
+                "demo",
+                "--goal",
+                "Run repeated epics",
+                "--epic-count",
+                "1",
+                "--execute-planner",
+                "--runs-dir",
+                str(tmp_path / "runs"),
+            ]
+        )
+    captured = capsys.readouterr()
+    assert error.value.code == 2
+    assert "missing planner credentials" in captured.err
+    events_text = (tmp_path / "runs" / run_id / "events.jsonl").read_text(encoding="utf-8")
+    assert '"event_type": "stop_reason_recorded"' in events_text
+    assert '"stop_category": "missing_planner_credentials"' in events_text
+
+
+def test_run_governor_records_hard_policy_stop_context_before_nonzero_exit(
+    monkeypatch, capsys, tmp_path
+) -> None:
+    run_id = "20260513T000000Z_demo_governor"
+    monkeypatch.setattr(cli_module, "_make_governor_run_id", lambda **_kwargs: run_id)
+    monkeypatch.setattr(cli_module, "_codex_backlog_planner_backend", lambda **kwargs: object())
+
+    def failing_run_governor(**_kwargs):
+        raise RuntimeError("blocked by hard gate: forbidden path update")
+
+    monkeypatch.setattr(cli_module, "run_governor", failing_run_governor)
+
+    with pytest.raises(SystemExit) as error:
+        main(
+            [
+                "run-governor",
+                "--project",
+                "demo",
+                "--goal",
+                "Run repeated epics",
+                "--epic-count",
+                "1",
+                "--execute-planner",
+                "--runs-dir",
+                str(tmp_path / "runs"),
+            ]
+        )
+    captured = capsys.readouterr()
+    assert error.value.code == 2
+    assert "blocked by hard gate" in captured.err
+    events_text = (tmp_path / "runs" / run_id / "events.jsonl").read_text(encoding="utf-8")
+    assert '"event_type": "stop_reason_recorded"' in events_text
+    assert '"stop_category": "hard_policy_stop"' in events_text
 
 
 def test_run_backlog_requires_execute_planner(capsys) -> None:

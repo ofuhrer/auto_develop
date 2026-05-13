@@ -18,6 +18,7 @@ from agentic_devloop.models import (
     FeatureReviewRecheckStopReason,
     FeatureReviewFollowUpProposal,
     GovernorContinuationAction,
+    GovernorStopCategory,
     GovernorContinuationStopReason,
     GovernorCycleContinuation,
     GovernorFeatureReviewContinuation,
@@ -1229,3 +1230,16 @@ def _load_backlog_follow_up_proposals(
         if proposal.classification == "backlog_follow_up":
             proposals.append(proposal)
     return proposals
+
+
+def governor_stop_category_for_reason(stop_reason: GovernorStopReason) -> GovernorStopCategory:
+    category_map: dict[GovernorStopReason, GovernorStopCategory] = {
+        GovernorStopReason.NO_ACTIONABLE_WORK: GovernorStopCategory.NO_ACTIONABLE_WORK,
+        GovernorStopReason.PLANNING_ONLY_STRATEGY: GovernorStopCategory.PLANNING_ONLY_STRATEGY,
+        GovernorStopReason.RELEASE_NOT_ACCEPTED: GovernorStopCategory.NON_ACCEPTED_RELEASE,
+        GovernorStopReason.BLOCKED_FINALIZATION: GovernorStopCategory.BLOCKED_FINALIZATION,
+        GovernorStopReason.STATE_REFRESH_FAILED: GovernorStopCategory.STATE_REFRESH_FAILURE,
+        GovernorStopReason.REPEATED_EPIC_SELECTED: GovernorStopCategory.REPEATED_EPIC_SELECTED,
+        GovernorStopReason.REQUESTED_EPIC_COUNT_REACHED: GovernorStopCategory.REQUESTED_EPIC_COUNT_REACHED,
+    }
+    return category_map.get(stop_reason, GovernorStopCategory.UNKNOWN)

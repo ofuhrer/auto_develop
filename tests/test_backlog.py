@@ -16,11 +16,12 @@ from agentic_devloop.execution_strategy import (
     ExecutionStrategyReason,
     ExecutionStrategySelection,
 )
-from agentic_devloop.governor import GovernorLoop
+from agentic_devloop.governor import GovernorLoop, governor_stop_category_for_reason
 from agentic_devloop.models import (
     ExecutorResult,
     GovernorContinuationAction,
     GovernorContinuationStopReason,
+    GovernorStopCategory,
     GovernorStopReason,
 )
 from agentic_devloop.state_refresh import (
@@ -792,6 +793,14 @@ def test_governor_loop_runs_one_epic_and_builds_evidence_manifest(tmp_path) -> N
     summary_payload = json.loads(result.state_refresh_summary_path.read_text(encoding="utf-8"))
     assert summary_payload["state_review_snapshot_path"].endswith("state_review_snapshot.json")
     assert summary_payload["status_count"] >= 0
+
+
+def test_governor_stop_reason_category_mapping_is_typed() -> None:
+    assert governor_stop_category_for_reason(GovernorStopReason.NO_ACTIONABLE_WORK) == GovernorStopCategory.NO_ACTIONABLE_WORK
+    assert governor_stop_category_for_reason(GovernorStopReason.PLANNING_ONLY_STRATEGY) == GovernorStopCategory.PLANNING_ONLY_STRATEGY
+    assert governor_stop_category_for_reason(GovernorStopReason.RELEASE_NOT_ACCEPTED) == GovernorStopCategory.NON_ACCEPTED_RELEASE
+    assert governor_stop_category_for_reason(GovernorStopReason.BLOCKED_FINALIZATION) == GovernorStopCategory.BLOCKED_FINALIZATION
+    assert governor_stop_category_for_reason(GovernorStopReason.STATE_REFRESH_FAILED) == GovernorStopCategory.STATE_REFRESH_FAILURE
 
 
 def test_governor_loop_state_refresh_failure_writes_error_artifact(tmp_path, monkeypatch) -> None:

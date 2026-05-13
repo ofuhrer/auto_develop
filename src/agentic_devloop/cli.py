@@ -15,9 +15,11 @@ from agentic_devloop.config import ProjectConfigError, load_project_config
 from agentic_devloop.doctor import run_doctor
 from agentic_devloop.objective import run_objective
 from agentic_devloop.orchestrator import run_task
+from agentic_devloop.models import GovernorStopCategory, GovernorStopContext, GovernorStopReason
 from agentic_devloop.planning import plan_release_contracts
 from agentic_devloop.planner_backend import CodexPlannerBackend
 from agentic_devloop.governor_log import GovernorEventContext, GovernorEventType, build_governor_event_log_writer
+from agentic_devloop.governor import governor_stop_category_for_reason
 from agentic_devloop.release import run_release
 from agentic_devloop.status import load_run_summaries
 
@@ -748,6 +750,21 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             parser.exit(130, "\ninterrupted: run-governor stopped before completion\n")
         except Exception as error:
+            stop_context = _governor_failure_stop_context(error)
+            governor_writer.write(
+                event_type=GovernorEventType.STOP_REASON_RECORDED,
+                message=(
+                    f"governor stop context category={stop_context.category.value} "
+                    f"reason={stop_context.reason}"
+                ),
+                artifacts=stop_context.evidence_artifact_paths,
+                context=GovernorEventContext(
+                    phase=GovernorEventType.STOP_REASON_RECORDED.value,
+                    stop_reason=stop_context.reason,
+                    artifact_count=len(stop_context.evidence_artifact_paths),
+                    details={"stop_category": stop_context.category.value},
+                ),
+            )
             parser.exit(2, f"error: {error}\n")
 
         def write_cycle_event(
@@ -1011,6 +1028,24 @@ def main(argv: list[str] | None = None) -> int:
                     epic_id=next_cycle.selected_epic_id,
                     release_id=cycle_release_id,
                 )
+        stop_context = _governor_stop_context(result)
+        governor_writer.write(
+            event_type=GovernorEventType.STOP_REASON_RECORDED,
+            message=(
+                f"governor stop context category={stop_context.category.value} "
+                f"reason={stop_context.reason}"
+            ),
+            artifacts=stop_context.evidence_artifact_paths,
+            context=GovernorEventContext(
+                phase=GovernorEventType.STOP_REASON_RECORDED.value,
+                stop_reason=stop_context.reason,
+                cycle_index=stop_context.cycle_index,
+                epic_id=stop_context.epic_id,
+                release_id=stop_context.release_id,
+                artifact_count=len(stop_context.evidence_artifact_paths),
+                details={"stop_category": stop_context.category.value},
+            ),
+        )
         governor_writer.write(
             event_type=GovernorEventType.GOVERNOR_COMPLETED,
             message=(
@@ -1023,11 +1058,13 @@ def main(argv: list[str] | None = None) -> int:
                 phase=GovernorEventType.GOVERNOR_COMPLETED.value,
                 stop_reason=getattr(result.stop_reason, "value", str(result.stop_reason)),
                 artifact_count=len(result.cycles),
+                details={"stop_category": stop_context.category.value},
             ),
         )
 
         result_for_output = _with_updates(result, {"cycles": cycles_for_output})
         output = _backlog_multi_run_result(result_for_output)
+        output["stop_context"] = stop_context.model_dump(mode="json")
         output["governor_log_path"] = str(governor_writer.paths.log_path)
         output["governor_events_path"] = str(governor_writer.paths.events_path)
         print(json.dumps(output, indent=2))
@@ -1278,6 +1315,67 @@ def _backlog_multi_run_result(result) -> dict[str, object]:
         "stop_reason": result.stop_reason,
         "cycles": [_backlog_run_result(cycle) for cycle in result.cycles],
     }
+
+
+def _governor_stop_context(result) -> GovernorStopContext:
+    stop_reason = result.stop_reason
+    category = governor_stop_category_for_reason(stop_reason)
+    cycle_index: int | None = None
+    epic_id: str | None = None
+    release_id: str | None = None
+    evidence_paths: list[Path] = []
+    if result.cycles:
+        cycle_index = len(result.cycles)
+        last_cycle = result.cycles[-1]
+        epic_id = getattr(last_cycle, "selected_epic_id", None)
+        cycle_release = getattr(last_cycle, "release", None)
+        release_id = (
+            getattr(cycle_release, "release_id", None)
+            if cycle_release is not None
+            else getattr(last_cycle, "release_id", None)
+        )
+        evidence_paths = _cycle_stop_artifacts(last_cycle)
+    return GovernorStopContext(
+        reason=getattr(stop_reason, "value", str(stop_reason)),
+        category=category,
+        cycle_index=cycle_index,
+        epic_id=epic_id,
+        release_id=release_id,
+        evidence_artifact_paths=evidence_paths,
+    )
+
+
+def _cycle_stop_artifacts(cycle) -> list[Path]:
+    manifest = getattr(cycle, "evidence_manifest", None)
+    if manifest is None:
+        return _existing_paths([getattr(cycle, "plan_path", None), getattr(cycle, "objective_path", None)])
+    return _existing_paths(
+        [
+            manifest.backlog_plan_path,
+            manifest.contract_plan_path,
+            manifest.release_summary_path,
+            manifest.finalization_decision_path,
+            manifest.final_review_continuation_decision_path,
+            manifest.state_refresh_error_path,
+            manifest.state_refresh_summary_path,
+            manifest.feature_review_path,
+            manifest.feature_review_recheck_path,
+        ]
+    )
+
+
+def _governor_failure_stop_context(error: Exception) -> GovernorStopContext:
+    reason = str(error).strip() or error.__class__.__name__
+    normalized = reason.lower()
+    category = GovernorStopCategory.UNKNOWN
+    if "credential" in normalized or "auth" in normalized:
+        category = GovernorStopCategory.MISSING_PLANNER_CREDENTIALS
+    elif "hard policy" in normalized or "hard gate" in normalized or "forbidden" in normalized:
+        category = GovernorStopCategory.HARD_POLICY_STOP
+    return GovernorStopContext(
+        reason=reason,
+        category=category,
+    )
 
 
 def _codex_planner_backend(*, project_id: str | None, config_dir: Path, runs_dir: Path) -> CodexPlannerBackend:
