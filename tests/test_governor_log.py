@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from agentic_devloop.governor_log import GovernorEventType, build_governor_event_log_writer
+from agentic_devloop.governor_log import (
+    GovernorEventContext,
+    GovernorEventType,
+    build_governor_event_log_writer,
+)
 from agentic_devloop.paths import governor_run_paths
 
 
@@ -33,6 +37,7 @@ def test_governor_writer_emits_all_log_files(tmp_path: Path) -> None:
     raw_text = writer.paths.raw_log_path.read_text(encoding="utf-8")
     assert "event=governor_started" in raw_text
     assert "message=Selected next epic." in raw_text
+    assert "context=phase=governor_started artifact_count=0" in raw_text
 
 
 def test_governor_events_jsonl_is_valid_and_keeps_artifact_links(tmp_path: Path) -> None:
@@ -50,7 +55,71 @@ def test_governor_events_jsonl_is_valid_and_keeps_artifact_links(tmp_path: Path)
     assert len(lines) == 1
     record = json.loads(lines[0])
 
+    assert set(record.keys()) == {"artifacts", "context", "event_type", "message", "timestamp"}
     assert record["event_type"] == "release_completed"
     assert record["message"] == "Child release finished."
     assert record["artifacts"] == [str(artifact_one), str(artifact_two)]
     assert isinstance(record["timestamp"], str)
+    assert record["context"]["phase"] == "release_completed"
+    assert record["context"]["artifact_count"] == 2
+
+
+def test_governor_writer_emits_typed_context_and_readable_compact_logs(tmp_path: Path) -> None:
+    writer = build_governor_event_log_writer(runs_dir=tmp_path / "runs", run_id="run-1")
+
+    writer.write(
+        event_type=GovernorEventType.FINAL_VERIFICATION_COMPLETED,
+        message="Final verification passed.",
+        context=GovernorEventContext(
+            phase="final_verification",
+            release_id="rel-123",
+            epic_id="governor-cockpit-v2",
+            decision="continue",
+            outcome="accepted",
+            cycle_index=2,
+            details={"tests_passed": True, "duration_s": 42},
+        ),
+    )
+
+    raw_text = writer.paths.raw_log_path.read_text(encoding="utf-8")
+    human_text = writer.paths.log_path.read_text(encoding="utf-8")
+    event_line = writer.paths.events_path.read_text(encoding="utf-8").splitlines()[0]
+    record = json.loads(event_line)
+
+    assert "context=phase=final_verification" in raw_text
+    assert "release_id=rel-123" in raw_text
+    assert "decision=continue" in raw_text
+    assert "(phase=final_verification release_id=rel-123" in human_text
+    assert record["context"] == {
+        "cycle_index": 2,
+        "decision": "continue",
+        "details": {"duration_s": 42, "tests_passed": True},
+        "epic_id": "governor-cockpit-v2",
+        "outcome": "accepted",
+        "phase": "final_verification",
+        "release_id": "rel-123",
+    }
+
+
+def test_governor_event_type_includes_required_cockpit_events() -> None:
+    expected_values = {
+        "state_review_completed",
+        "state_refresh_summary",
+        "state_refresh_error",
+        "backlog_selection_completed",
+        "objective_generation_completed",
+        "contract_generation_completed",
+        "child_release_started",
+        "child_release_completed",
+        "feature_review_completed",
+        "repair_decision",
+        "final_verification_completed",
+        "finalization_decision",
+        "cleanup_eligibility_evaluated",
+        "next_epic_selected",
+        "stop_reason_recorded",
+        "governor_completed",
+    }
+
+    observed_values = {event.value for event in GovernorEventType}
+    assert expected_values.issubset(observed_values)
