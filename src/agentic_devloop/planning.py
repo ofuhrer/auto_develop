@@ -86,6 +86,9 @@ class PlannerNormalizationError(ValueError):
         self.stop_evidence = stop_evidence
 
 
+_PLANNER_ADMISSION_VALIDATORS_TO_RERUN = ["ContractPlan", "TaskContract", "validate_generated_contracts"]
+
+
 class PlannerBackend(Protocol):
     def generate(
         self,
@@ -729,7 +732,7 @@ def _persist_model_output_normalization_decision(
             "selected_action": selected_action,
             "outcome": outcome,
             "fallback_plan": "Stop planning and require bounded planner rerun with strict schema output.",
-            "validators_to_rerun": ["ContractPlan", "TaskContract", "validate_generated_contracts"],
+            "validators_to_rerun": _PLANNER_ADMISSION_VALIDATORS_TO_RERUN,
             "normalized_artifact_path": str(normalized_artifact_path.resolve()) if normalized_artifact_path else None,
             "refusal_reason": refusal_reason,
         }
@@ -776,6 +779,18 @@ def _normalize_contracts_for_admission(
         )
         outcome = normalize_contract_request(request, project_config=project_config)
         if outcome.after_snapshot is None:
+            validators_to_rerun = list(_PLANNER_ADMISSION_VALIDATORS_TO_RERUN)
+            normalized_evidence.append(
+                "planner_contract_normalization="
+                + json.dumps(
+                    {
+                        **outcome.model_dump(mode="json"),
+                        "validators_to_rerun": validators_to_rerun,
+                        "validator_rerun_succeeded": False,
+                    },
+                    sort_keys=True,
+                )
+            )
             raise PlannerNormalizationError(
                 "planner-generated contract normalization was refused",
                 stop_evidence=PlannerNormalizationStopEvidence(
@@ -804,11 +819,19 @@ def _normalize_contracts_for_admission(
             continue
         normalized_generated_contract = generated.model_copy(update={"suggested_contract": normalized_contract})
         rerun_plan = plan.model_copy(update={"generated_contracts": [normalized_generated_contract]})
+        validators_to_rerun = list(_PLANNER_ADMISSION_VALIDATORS_TO_RERUN)
         validate_generated_contracts(rerun_plan, project_config=project_config)
         normalized_generated.append(normalized_generated_contract)
         normalized_evidence.append(
             "planner_contract_normalization="
-            + json.dumps(outcome.model_dump(mode="json"), sort_keys=True)
+            + json.dumps(
+                {
+                    **outcome.model_dump(mode="json"),
+                    "validators_to_rerun": validators_to_rerun,
+                    "validator_rerun_succeeded": True,
+                },
+                sort_keys=True,
+            )
         )
     if not normalized_evidence:
         return plan
