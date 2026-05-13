@@ -264,6 +264,47 @@ def invoke_feature_reviewer(
 
     prompt_path.write_text(prompt, encoding="utf-8")
 
+    if config.type != "codex_cli":
+        error_message = (
+            f"Unsupported feature review executor backend: {config.type}. "
+            "Only codex_cli is supported for feature review."
+        )
+        stdout_path.write_text("", encoding="utf-8")
+        stderr_path.write_text(error_message + "\n", encoding="utf-8")
+        metadata_path.write_text(
+            json.dumps(
+                {
+                    "configured_backend": config.type,
+                    "backend": None,
+                    "model": model or config.model,
+                    "command": [],
+                    "exit_code": None,
+                    "duration_seconds": 0.0,
+                    "timed_out": False,
+                    "prompt_chars": len(prompt),
+                    "stdout_chars": 0,
+                    "stderr_chars": len(error_message) + 1,
+                    "error": error_message,
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        decision = _blocked_feature_review_decision(
+            release_id=release_id,
+            reason=error_message,
+            evidence_paths=[prompt_path, stdout_path, stderr_path, metadata_path],
+        )
+        return FeatureReviewBackendResult(
+            decision=decision,
+            prompt_path=prompt_path,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            metadata_path=metadata_path,
+            raw_output="",
+        )
+
     command = [
         "codex",
         "exec",
@@ -284,7 +325,8 @@ def invoke_feature_reviewer(
     metadata_path.write_text(
         json.dumps(
             {
-                "backend": config.type,
+                "configured_backend": config.type,
+                "backend": "codex_cli",
                 "model": model or config.model,
                 "command": [shlex.quote(part) for part in command],
                 "exit_code": result.exit_code,
