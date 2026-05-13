@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 import yaml
@@ -276,9 +277,17 @@ class StateStore:
         self.save(state)
         return state
 
-    def _increment_epic_counter(self, epic_id: str, *, amount: int, counter: str) -> BacklogState:
+    def _increment_epic_counter(
+        self,
+        epic_id: str,
+        *,
+        amount: int,
+        counter: Literal["retry_count", "repair_count"],
+    ) -> BacklogState:
         if amount <= 0:
             raise ValueError("amount must be greater than 0")
+        if counter not in {"retry_count", "repair_count"}:
+            raise ValueError(f"unsupported epic counter: {counter}")
         state = self.load()
         record = self._get_or_create_epic_record(state, epic_id)
         setattr(record, counter, getattr(record, counter) + amount)
