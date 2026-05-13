@@ -1403,9 +1403,11 @@ def _run_feature_review_and_repair_loop(
                     evidence_paths.append(str(feature_review_path.resolve()))
                 if is_accepted and last_verification_log_path is not None:
                     evidence_paths.append(str(last_verification_log_path.resolve()))
+                stable_decision_id = f"{release_id}__feature_review_finding__{finding_id}"
+                attempt_decision_id = f"{stable_decision_id}__attempt_{attempt}"
                 decision_record = FeatureReviewFindingClassificationDecision.model_validate(
                     {
-                        "decision_id": f"{release_id}__feature_review_finding__{finding_id}",
+                        "decision_id": attempt_decision_id,
                         "release_id": release_id,
                         "decided_at": datetime.now(UTC),
                         "decided_by": "run_release_feature_review_loop",
@@ -1424,8 +1426,14 @@ def _run_feature_review_and_repair_loop(
                         "validators_to_rerun": validators_to_rerun,
                     }
                 )
-                path = write_supervisor_decision_artifact(release_bundle_path=release_root, decision=decision_record)
-                written[finding_id] = path
+                attempt_path = write_supervisor_decision_artifact(
+                    release_bundle_path=release_root, decision=decision_record
+                )
+                written[finding_id] = attempt_path
+
+                # Maintain a stable, "latest" decision id that always points at the most recent attempt.
+                stable_record = decision_record.model_copy(update={"decision_id": stable_decision_id})
+                write_supervisor_decision_artifact(release_bundle_path=release_root, decision=stable_record)
                 _report(
                     progress,
                     "event=feature_review_finding_classified attempt="
