@@ -1534,6 +1534,65 @@ def test_run_release_does_not_finalize_when_scope_risk_decision_requires_stop(tm
     assert any("requires stopped" in reason for reason in summary["scope_risk_budget_policy_gate"]["blocking_reasons"])
 
 
+@pytest.mark.parametrize(
+    ("selected_action", "outcome", "expected_gate_phrase"),
+    [
+        (ScopeRiskAction.SPLIT_TASK, ScopeRiskOutcome.SPLIT_AND_RETRY, "requires split_and_retry"),
+        (ScopeRiskAction.REPLAN, ScopeRiskOutcome.REPLAN_AND_RETRY, "requires replan_and_retry"),
+    ],
+)
+def test_run_release_scope_risk_split_or_replan_decision_blocks_finalize_and_preserves_hard_gate(
+    tmp_path,
+    selected_action: ScopeRiskAction,
+    outcome: ScopeRiskOutcome,
+    expected_gate_phrase: str,
+) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(tmp_path, repo, max_strong_model_calls_per_release=10)
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/*"]).model_dump(mode="json"),
+    )
+    runs_dir = tmp_path / "runs"
+    now = datetime(2026, 5, 12, tzinfo=UTC)
+    run_id = make_release_run_id("v0.1.0", now)
+    release_root = runs_dir / run_id
+    release_root.mkdir(parents=True, exist_ok=True)
+    decision_path = _write_scope_risk_budget_policy_decision(
+        release_root=release_root,
+        release_id="v0.1.0",
+        decided_at=now,
+        affected_task_id="demo-0001",
+        selected_action=selected_action,
+        outcome=outcome,
+        classification=ScopeRiskClassification.COHESIVE,
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=runs_dir,
+        executor=ManyFilesExecutor(files_per_task=9),
+        merge_on_accept=True,
+        release_finalize="merge-main",
+        now=now,
+    )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert result.decision == Decision.NEEDS_REVISION
+    assert result.finalization is None
+    assert summary["scope_risk_budget_policy_gate"]["allowed"] is False
+    assert any(
+        expected_gate_phrase in reason for reason in summary["scope_risk_budget_policy_gate"]["blocking_reasons"]
+    )
+    assert str(decision_path) in summary["scope_risk_budget_policy_gate"]["selected_decision_paths"]
+    assert str(decision_path) in summary["scope_risk_budget_policy_gate"]["blocking_decision_paths"]
+
+
 def test_release_preflight_ignores_metadata_files(tmp_path) -> None:
     worktree_root = tmp_path / "worktrees"
     worktree_root.mkdir()
