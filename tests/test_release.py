@@ -18,6 +18,7 @@ from agentic_devloop.models import FeatureReviewDecision, FeatureReviewRecheckRe
 from agentic_devloop.orchestrator import TaskRunResult, executor_config_for_task, executor_configs_for_task
 from agentic_devloop.release import (
     collect_release_planning_state_review_snapshot,
+    _assert_safe_feature_review_rerun_worktree,
     _build_release_finalization_gate,
     _completed_release_task_ids,
     _ensure_no_existing_task_branches,
@@ -1829,6 +1830,17 @@ def test_command_with_env_prefixes_wraps_leading_assignments() -> None:
         "pytest",
     ]
     assert _command_with_env_prefixes(["git", "diff", "--check"]) == ["git", "diff", "--check"]
+
+
+def test_feature_review_rerun_worktree_cleanup_guard_requires_rerun_root(tmp_path: Path) -> None:
+    rerun_root = (tmp_path / "runs" / "feature_review" / "verification_rerun_01").resolve()
+    safe_worktree = rerun_root / "worktree"
+    unsafe_worktree = (tmp_path / "worktrees" / "not-rerun-owned").resolve()
+
+    _assert_safe_feature_review_rerun_worktree(safe_worktree, rerun_root)
+
+    with pytest.raises(ValueError, match="forced cleanup"):
+        _assert_safe_feature_review_rerun_worktree(unsafe_worktree, rerun_root)
 
 
 def test_run_release_feature_review_optional_findings_are_accepted_not_resolved(tmp_path: Path) -> None:

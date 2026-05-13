@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 
 from agentic_devloop.feature_review import (
+    MAX_FEATURE_REVIEW_ARTIFACT_CHARS,
+    MAX_FEATURE_REVIEW_DIFF_CHARS,
+    FeatureReviewContext,
     assemble_feature_review_context,
     generate_repair_contracts_for_required_findings,
     invoke_feature_reviewer,
@@ -157,6 +160,39 @@ def test_assemble_feature_review_context_selects_latest_release_run_and_diff(tmp
     )
     assert release_id in prompt
     assert "Git diff" in prompt
+
+
+def test_render_feature_review_prompt_truncates_large_diff_and_artifacts(tmp_path: Path) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    run_dir = repo_path / "runs" / "20260101T000000Z_rel-3_release"
+    run_dir.mkdir(parents=True)
+    summary_path = run_dir / "release_summary.json"
+    summary_path.write_text("S" * (MAX_FEATURE_REVIEW_ARTIFACT_CHARS + 100), encoding="utf-8")
+
+    context = FeatureReviewContext(
+        release_id="rel-3",
+        base_branch="main",
+        integration_branch="feature/rel-3",
+        base_commit="a" * 40,
+        integration_commit="b" * 40,
+        changed_files=["src/agentic_devloop/feature_review.py"],
+        diff_text="D" * (MAX_FEATURE_REVIEW_DIFF_CHARS + 100),
+        docs_design_paths=[],
+        latest_release_run_dir=run_dir,
+        release_summary_path=summary_path,
+        release_review_path=None,
+        release_metrics_path=None,
+        release_budget_path=None,
+        release_tuning_path=None,
+    )
+
+    prompt = render_feature_review_prompt(context=context, repo_path=repo_path)
+
+    assert "feature review context truncated: git diff exceeded" in prompt
+    assert "feature review context truncated: release_summary.json exceeded" in prompt
+    assert "Inspect full evidence at git diff --patch main..feature/rel-3" in prompt
+    assert "Inspect full evidence at runs/20260101T000000Z_rel-3_release/release_summary.json" in prompt
 
 
 def test_invoke_feature_reviewer_parses_decision_and_writes_artifacts(monkeypatch, tmp_path: Path) -> None:

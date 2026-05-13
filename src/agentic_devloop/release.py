@@ -1490,6 +1490,9 @@ def _run_integration_verification_rerun(
     worktree_path = worktree_path.resolve()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_lines: list[str] = []
+    cleanup_root = log_path.parent.resolve()
+    _assert_safe_feature_review_rerun_worktree(worktree_path, cleanup_root)
+    log_lines.append(f"rerun worktree cleanup guard: {worktree_path} is under {cleanup_root}")
 
     if worktree_path.exists():
         run_process(
@@ -1541,6 +1544,15 @@ def _run_integration_verification_rerun(
     log_path.write_text("\n".join(line for line in log_lines if line) + "\n", encoding="utf-8")
     _report(progress, f"event=feature_review_verification_completed ok={str(ok).lower()} log={log_path}")
     return ok
+
+
+def _assert_safe_feature_review_rerun_worktree(worktree_path: Path, cleanup_root: Path) -> None:
+    if worktree_path == cleanup_root or cleanup_root in worktree_path.parents:
+        return
+    raise ValueError(
+        "feature-review verification rerun worktree must be inside the rerun output directory "
+        f"before forced cleanup is allowed: worktree={worktree_path} cleanup_root={cleanup_root}"
+    )
 
 
 def _command_with_env_prefixes(parts: list[str]) -> list[str]:

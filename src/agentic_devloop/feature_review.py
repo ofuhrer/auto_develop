@@ -70,6 +70,9 @@ UNSAFE_REPAIR_PATH_MARKERS: tuple[str, ...] = (
     "generated/",
 )
 
+MAX_FEATURE_REVIEW_DIFF_CHARS = 120_000
+MAX_FEATURE_REVIEW_ARTIFACT_CHARS = 40_000
+
 
 def determine_feature_review_branches(
     *,
@@ -176,9 +179,21 @@ def render_feature_review_prompt(
     def read(path: Path | None) -> str:
         if path is None:
             return ""
-        return _safe_read_text(path, allowed_roots=[repo_root, runs_root, docs_design_root])
+        text = _safe_read_text(path, allowed_roots=[repo_root, runs_root, docs_design_root])
+        return _bounded_review_text(
+            text,
+            max_chars=MAX_FEATURE_REVIEW_ARTIFACT_CHARS,
+            evidence_path=_repo_relative(path, repo_root),
+            label=path.name,
+        )
 
     docs_section = _render_docs_design_section(context, docs_design_root)
+    diff_text = _bounded_review_text(
+        context.diff_text,
+        max_chars=MAX_FEATURE_REVIEW_DIFF_CHARS,
+        evidence_path=f"git diff --patch {context.base_branch}..{context.integration_branch}",
+        label="git diff",
+    )
     release_summary = read(context.release_summary_path)
     release_review = read(context.release_review_path)
     release_metrics = read(context.release_metrics_path)
@@ -221,7 +236,7 @@ def render_feature_review_prompt(
             *([f"- {path}" for path in context.changed_files] or ["- (none)"]),
             "",
             "Git diff (base..integration):",
-            context.diff_text,
+            diff_text,
             "",
             "Latest release artifacts (if present):",
             f"release_summary.json:\n{release_summary}".rstrip(),
@@ -472,6 +487,13 @@ def _safe_read_text(path: Path, *, allowed_roots: list[Path]) -> str:
     raise FeatureReviewContextError(f"path is outside allowed roots: {path}")
 
 
+def _repo_relative(path: Path, repo_root: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(repo_root.resolve()))
+    except ValueError:
+        return str(path)
+
+
 def _safe_glob_files(root: Path, *, pattern: str) -> list[Path]:
     root_resolved = root.resolve()
     if not root_resolved.exists():
@@ -569,6 +591,25 @@ def _process_error_message(stdout: str, stderr: str) -> str:
     if not message:
         return "Reviewer backend failed with no output."
     return message
+
+
+def _bounded_review_text(
+    text: str,
+    *,
+    max_chars: int,
+    evidence_path: str,
+    label: str,
+) -> str:
+    if len(text) <= max_chars:
+        return text
+    head = max_chars // 2
+    tail = max_chars - head
+    omitted = len(text) - max_chars
+    marker = (
+        f"\n\n[feature review context truncated: {label} exceeded {max_chars} chars; "
+        f"{omitted} chars omitted. Inspect full evidence at {evidence_path}.]\n\n"
+    )
+    return text[:head].rstrip() + marker + text[-tail:].lstrip()
 
 
 def _blocked_feature_review_decision(
