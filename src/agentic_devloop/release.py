@@ -1180,11 +1180,12 @@ def _run_feature_review_and_repair_loop(
             if unknown:
                 _report(
                     progress,
-                    "event=feature_review_verification_rerun_invalid_commands commands="
+                    "event=feature_review_verification_commands_ignored commands="
                     + json.dumps(unknown, sort_keys=True),
                 )
-                return False
-            commands = list(decision.rerun_verification_commands)
+            requested = [cmd for cmd in decision.rerun_verification_commands if cmd in allowed]
+            if requested:
+                commands = requested
         return _run_integration_verification_rerun(
             repo_path=config.repo_path,
             integration_branch=integration_branch,

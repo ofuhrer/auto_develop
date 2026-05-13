@@ -1725,6 +1725,100 @@ def test_run_release_feature_review_reruns_requested_verification_subset(tmp_pat
     assert rerun.call_args.kwargs["commands"] == ["test -d docs"]
 
 
+def test_run_release_feature_review_ignores_unknown_rerun_commands_and_uses_default_profile(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            "model_roles": {
+                "worker": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+                "reviewer": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            },
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["test -d docs", "test -f README.md"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+    decisions = [
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Needs a repair.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [".venv/bin/python -m pytest"],
+                "findings": [
+                    {
+                        "finding_id": "finding-1",
+                        "severity": "high",
+                        "summary": "Fix required.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Update docs."],
+                        "optional_follow_ups": [],
+                    }
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Repairs applied.",
+                "recommendation": "approve",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [],
+            }
+        ),
+    ]
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    def fake_invoke_feature_reviewer(*_args, **_kwargs):
+        if not decisions:
+            raise AssertionError("unexpected reviewer invocation")
+        return FakeBackendResult(decisions.pop(0))
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer), patch(
+        "agentic_devloop.release._run_integration_verification_rerun",
+        return_value=True,
+    ) as rerun:
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    assert result.decision == Decision.ACCEPTED
+    assert rerun.call_args.kwargs["commands"] == ["test -d docs", "test -f README.md"]
+    assert "event=feature_review_verification_commands_ignored" in result.log_path.read_text(encoding="utf-8")
+
+
 def test_run_release_feature_review_optional_findings_are_accepted_not_resolved(tmp_path: Path) -> None:
     repo = _repo_with_initial_commit(tmp_path / "repo")
     config_dir = tmp_path / "configs"
