@@ -1,0 +1,60 @@
+task_id: pgm-0004
+release_id: persistent-governor-memory
+title: Use governor memory during backlog planning
+task_type: code_only
+budget_class: M
+objective: Update deterministic and strong-model backlog planning inputs so completed,
+  skipped, blocked, active, reviewed, and candidate epic memory is loaded from repo_state_path.
+  Reject or filter duplicate/already-completed epics, avoid selecting skipped or blocked
+  epics without an explicit rationale, and surface warnings explaining stale active
+  objectives/contracts when durable state indicates they should no longer be current
+  planning inputs. Include unresolved reviewer finding and compact outcome memory
+  in strong-model backlog planner context.
+allowed_files:
+- src/agentic_devloop/backlog.py
+- src/agentic_devloop/state_store.py
+- tests/test_backlog.py
+- tests/test_state_store.py
+forbidden_changes:
+- Do not change the BacklogPlan JSON schema except through existing warnings, roadmap_updates,
+  repo_state_updates, and epics fields.
+- Do not remove deterministic fallback planning.
+- Do not make backlog planning read every file under runs/ as a substitute for repo_state
+  memory.
+- Do not write objectives, contracts, or repo_state unless existing write_objective
+  behavior explicitly requests objective output.
+- Do not alter run-release task execution semantics.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_backlog.py tests/test_state_store.py
+- test assertion showing completed duplicate epics are rejected or warned and not
+  selected
+- test assertion showing stale active state produces an explanatory warning
+- git diff --check output
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_backlog.py
+    tests/test_state_store.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if duplicate detection would require fuzzy semantic matching beyond deterministic
+  ID, release ID, normalized title, or explicit memory records.
+- Stop if preserving BacklogPlan schema compatibility becomes impossible.
+- Stop if strong-model prompt context would exceed existing truncation boundaries
+  without a compact state rendering.
+- Stop if this requires changing release_plan.yaml compatibility behavior.
+- Stop if scope or verification cannot remain within the generated contract.
+non_goals:
+- Do not ingest release outcomes.
+- Do not implement an N-epic governor loop.
+- Do not add new CLI flags unless strictly required by existing tests.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- pgm-0001
+- pgm-0003

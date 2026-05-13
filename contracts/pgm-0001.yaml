@@ -1,0 +1,50 @@
+task_id: pgm-0001
+release_id: persistent-governor-memory
+title: Define durable governor memory schema
+task_type: code_only
+budget_class: M
+objective: Add typed state-store models and transition helpers for durable governor
+  memory, including active, candidate, reviewed, completed, skipped, and blocked epics;
+  compact outcome references; retry and repair counts; blocked reasons; unresolved
+  finding references; and state-review snapshot references. Preserve loading of existing
+  backlog_state.yaml files that only contain the current legacy fields.
+allowed_files:
+- src/agentic_devloop/state_store.py
+- tests/test_state_store.py
+forbidden_changes:
+- Do not change run-release, run-backlog, or planner behavior in this task.
+- Do not remove support for existing backlog_state.yaml keys active_goal, governor_mode,
+  current_focus, active_epic, completed_epics, blocked_epics, candidate_epics, recent_run_summaries,
+  last_reviewed, notes, or unknown compatibility fields.
+- Do not introduce writes outside the configured repo_state_path parent.
+- Do not edit documentation or example repo_state files in this task.
+- Do not weaken Pydantic validation by allowing empty IDs or empty structured reason
+  strings.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_state_store.py
+- git diff --check output
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_state_store.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if preserving unknown backlog_state.yaml compatibility fields conflicts with
+  typed validation for new memory records.
+- Stop if the schema requires changing existing release_plan.yaml semantics.
+- Stop if any proposed model requires raw run directories to remain available as the
+  only source of truth.
+- Stop if state transitions cannot be made deterministic without consulting an agent
+  backend.
+non_goals:
+- Do not ingest release artifacts.
+- Do not update backlog planner prompts.
+- Do not wire state updates into run-release.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

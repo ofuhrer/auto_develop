@@ -1,0 +1,27 @@
+release_id: persistent-governor-memory
+title: Persist authoritative multi-epic governor memory
+objective: Make backlog and repo-state memory authoritative across repeated autonomous
+  cycles by persisting completed, skipped, blocked, active, candidate, and reviewed
+  epics, compact release and epic outcome summaries, unresolved review findings, retry
+  counts, and state-review snapshot references.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- Governor state persists completed, skipped, blocked, active, reviewed, and candidate
+  epics in a typed durable format under repo_state for self-development and compatible
+  target-state paths for external repositories.
+- Release and epic outcome ingestion writes compact summaries from release_summary.json,
+  feature_review.json, feature_review_recheck.json, metrics, budgets, tuning reports,
+  and state_review_snapshot.json without relying on raw runs as the only memory source.
+- Unresolved reviewer findings, accepted-with-rationale findings, retry exhaustion,
+  repair attempts, and blocked reasons are available to future backlog planning as
+  structured repo-state inputs.
+- Backlog planning rejects duplicate or already-completed epics and can explain when
+  stale active objectives/contracts should no longer be used as current planning inputs.
+- State updates are auditable and deterministic where possible, with roadmap_updates
+  and repo_state_updates surfaced rather than silently mutating unrelated documentation.
+- Tests cover state schema validation, release outcome ingestion, unresolved finding
+  persistence, duplicate epic avoidance, and compatibility with existing backlog_state.yaml/release_plan.yaml
+  behavior.
+- Documentation distinguishes the implemented persistent-memory behavior from the
+  still-planned N-epic governor loop.
