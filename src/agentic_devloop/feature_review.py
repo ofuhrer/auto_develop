@@ -6,7 +6,7 @@ import shutil
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Literal
 
 from agentic_devloop.config import load_project_config
 from agentic_devloop.git_state import git_text
@@ -59,6 +59,37 @@ class FeatureReviewBackendResult:
     stderr_path: Path
     metadata_path: Path
     raw_output: str
+
+
+FeatureReviewFindingClassification = Literal[
+    "blocker",
+    "soft_finding",
+    "duplicate",
+    "false_positive",
+    "scope_expansion",
+    "backlog_follow_up",
+]
+FeatureReviewFindingAction = Literal["repair", "accept", "defer"]
+
+
+@dataclass(frozen=True)
+class FeatureReviewFindingConvergenceResult:
+    finding_id: str
+    classification: FeatureReviewFindingClassification
+    selected_action: FeatureReviewFindingAction
+    matched_previous_finding_id: str | None
+    repeated_by_finding_id: bool
+    adjacent_similarity: float
+    verification_false_positive_candidate: bool
+
+
+@dataclass(frozen=True)
+class FeatureReviewConvergenceResult:
+    findings: list[FeatureReviewFindingConvergenceResult]
+    blocking_finding_ids: list[str]
+    accepted_finding_ids: list[str]
+    deferred_finding_ids: list[str]
+    false_positive_candidate_ids: list[str]
 
 
 UNSAFE_REPAIR_FILENAMES: frozenset[str] = frozenset(
@@ -451,6 +482,83 @@ def generate_repair_contracts_for_required_findings(
             )
         )
     return generated
+
+
+def classify_feature_review_findings_for_convergence(
+    *,
+    decision: FeatureReviewDecision,
+    previous_decisions: list[FeatureReviewDecision],
+    verification_passed: bool,
+) -> FeatureReviewConvergenceResult:
+    previous_findings = [finding for item in previous_decisions for finding in item.findings]
+    classified: list[FeatureReviewFindingConvergenceResult] = []
+    for finding in decision.findings:
+        previous_match, repeated_by_id, adjacent_similarity = _match_previous_finding(
+            finding=finding,
+            previous_findings=previous_findings,
+        )
+        verification_false_positive_candidate = (
+            verification_passed and bool(finding.required_repairs) and _is_verification_only_finding(finding)
+        )
+        if finding.required_repairs:
+            result = FeatureReviewFindingConvergenceResult(
+                finding_id=finding.finding_id,
+                classification="blocker",
+                selected_action="repair",
+                matched_previous_finding_id=previous_match.finding_id if previous_match else None,
+                repeated_by_finding_id=repeated_by_id,
+                adjacent_similarity=adjacent_similarity,
+                verification_false_positive_candidate=verification_false_positive_candidate,
+            )
+            classified.append(result)
+            continue
+        if finding.optional_follow_ups and previous_match is not None:
+            classified.append(
+                FeatureReviewFindingConvergenceResult(
+                    finding_id=finding.finding_id,
+                    classification="duplicate",
+                    selected_action="defer",
+                    matched_previous_finding_id=previous_match.finding_id,
+                    repeated_by_finding_id=repeated_by_id,
+                    adjacent_similarity=adjacent_similarity,
+                    verification_false_positive_candidate=False,
+                )
+            )
+            continue
+        if finding.optional_follow_ups:
+            classified.append(
+                FeatureReviewFindingConvergenceResult(
+                    finding_id=finding.finding_id,
+                    classification="soft_finding",
+                    selected_action="accept",
+                    matched_previous_finding_id=None,
+                    repeated_by_finding_id=False,
+                    adjacent_similarity=0.0,
+                    verification_false_positive_candidate=False,
+                )
+            )
+            continue
+        classified.append(
+            FeatureReviewFindingConvergenceResult(
+                finding_id=finding.finding_id,
+                classification="false_positive",
+                selected_action="accept",
+                matched_previous_finding_id=previous_match.finding_id if previous_match else None,
+                repeated_by_finding_id=repeated_by_id,
+                adjacent_similarity=adjacent_similarity,
+                verification_false_positive_candidate=False,
+            )
+        )
+
+    return FeatureReviewConvergenceResult(
+        findings=classified,
+        blocking_finding_ids=sorted(item.finding_id for item in classified if item.classification == "blocker"),
+        accepted_finding_ids=sorted(item.finding_id for item in classified if item.selected_action == "accept"),
+        deferred_finding_ids=sorted(item.finding_id for item in classified if item.selected_action == "defer"),
+        false_positive_candidate_ids=sorted(
+            item.finding_id for item in classified if item.verification_false_positive_candidate
+        ),
+    )
 
 
 def _repair_scope_finding(finding: FeatureReviewFinding) -> FeatureReviewFinding:
@@ -870,3 +978,67 @@ def _unique_strings(values: Any) -> list[str]:
         seen.add(item)
         ordered.append(item)
     return ordered
+
+
+def _match_previous_finding(
+    *,
+    finding: FeatureReviewFinding,
+    previous_findings: list[FeatureReviewFinding],
+) -> tuple[FeatureReviewFinding | None, bool, float]:
+    for previous in previous_findings:
+        if previous.finding_id == finding.finding_id:
+            return previous, True, 1.0
+
+    best_match: FeatureReviewFinding | None = None
+    best_similarity = 0.0
+    for previous in previous_findings:
+        file_overlap = _has_file_overlap(finding.affected_files, previous.affected_files)
+        if not file_overlap:
+            continue
+        similarity = _summary_similarity(finding.summary, previous.summary)
+        if similarity < 0.35:
+            continue
+        if similarity > best_similarity:
+            best_match = previous
+            best_similarity = similarity
+    return best_match, False, best_similarity
+
+
+def _has_file_overlap(current_files: list[str], previous_files: list[str]) -> bool:
+    current = {item.strip().lstrip("./") for item in current_files if item.strip()}
+    previous = {item.strip().lstrip("./") for item in previous_files if item.strip()}
+    return bool(current.intersection(previous))
+
+
+def _summary_similarity(current: str, previous: str) -> float:
+    current_tokens = _normalized_summary_tokens(current)
+    previous_tokens = _normalized_summary_tokens(previous)
+    if not current_tokens or not previous_tokens:
+        return 0.0
+    intersection = len(current_tokens.intersection(previous_tokens))
+    union = len(current_tokens.union(previous_tokens))
+    if union == 0:
+        return 0.0
+    return intersection / union
+
+
+def _normalized_summary_tokens(summary: str) -> set[str]:
+    token = []
+    tokens: set[str] = set()
+    for char in summary.lower():
+        if char.isalnum():
+            token.append(char)
+            continue
+        if token:
+            tokens.add("".join(token))
+            token = []
+    if token:
+        tokens.add("".join(token))
+    return tokens
+
+
+def _is_verification_only_finding(finding: FeatureReviewFinding) -> bool:
+    if not finding.evidence_paths:
+        return False
+    verification_markers = ("verification", "pytest", "test", "junit")
+    return all(any(marker in str(path).lower() for marker in verification_markers) for path in finding.evidence_paths)

@@ -11,6 +11,7 @@ from agentic_devloop.feature_review import (
     MAX_FEATURE_REVIEW_DIFF_CHARS,
     FeatureReviewContext,
     assemble_feature_review_context,
+    classify_feature_review_findings_for_convergence,
     generate_repair_contracts_for_required_findings,
     invoke_feature_reviewer,
     load_feature_review_branches,
@@ -464,3 +465,154 @@ def test_generate_repair_contracts_for_required_findings_stops_on_unmapped_file(
             decision=decision,
             source_contracts=[source_contract],
         )
+
+
+def test_classify_feature_review_findings_for_convergence_preserves_required_repairs_as_blockers() -> None:
+    decision = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-8",
+            "reviewer": "strong_model",
+            "summary": "Required and optional findings.",
+            "recommendation": "require_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "required-1",
+                    "severity": "high",
+                    "summary": "Restore validation guard",
+                    "affected_files": ["src/a.py"],
+                    "required_repairs": ["Restore guard"],
+                    "evidence_paths": ["runs/rel-8/verification.log"],
+                },
+                {
+                    "finding_id": "optional-1",
+                    "severity": "low",
+                    "summary": "Naming cleanup",
+                    "affected_files": ["src/a.py"],
+                    "optional_follow_ups": ["Rename helper"],
+                },
+            ],
+        }
+    )
+    result = classify_feature_review_findings_for_convergence(
+        decision=decision,
+        previous_decisions=[],
+        verification_passed=True,
+    )
+
+    required = next(item for item in result.findings if item.finding_id == "required-1")
+    optional = next(item for item in result.findings if item.finding_id == "optional-1")
+    assert required.classification == "blocker"
+    assert required.selected_action == "repair"
+    assert required.verification_false_positive_candidate
+    assert optional.classification == "soft_finding"
+    assert optional.selected_action == "accept"
+    assert result.blocking_finding_ids == ["required-1"]
+    assert result.accepted_finding_ids == ["optional-1"]
+    assert result.false_positive_candidate_ids == ["required-1"]
+
+
+def test_classify_feature_review_findings_for_convergence_marks_duplicate_by_finding_id() -> None:
+    previous = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-9",
+            "reviewer": "strong_model",
+            "summary": "Prior pass",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "dup-1",
+                    "severity": "moderate",
+                    "summary": "Optional cleanup in parser",
+                    "affected_files": ["src/parser.py"],
+                    "optional_follow_ups": ["Extract helper"],
+                }
+            ],
+        }
+    )
+    current = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-9",
+            "reviewer": "strong_model",
+            "summary": "Second pass",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "dup-1",
+                    "severity": "low",
+                    "summary": "Optional cleanup in parser",
+                    "affected_files": ["src/parser.py"],
+                    "optional_follow_ups": ["Extract helper"],
+                }
+            ],
+        }
+    )
+    result = classify_feature_review_findings_for_convergence(
+        decision=current,
+        previous_decisions=[previous],
+        verification_passed=False,
+    )
+
+    finding = result.findings[0]
+    assert finding.classification == "duplicate"
+    assert finding.selected_action == "defer"
+    assert finding.matched_previous_finding_id == "dup-1"
+    assert finding.repeated_by_finding_id
+    assert result.deferred_finding_ids == ["dup-1"]
+
+
+def test_classify_feature_review_findings_for_convergence_marks_adjacent_similarity_duplicate() -> None:
+    previous = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-10",
+            "reviewer": "strong_model",
+            "summary": "Prior pass",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "prior-a",
+                    "severity": "moderate",
+                    "summary": "Parser error guard missing for empty payload",
+                    "affected_files": ["src/parser.py"],
+                    "optional_follow_ups": ["Guard empty payload"],
+                }
+            ],
+        }
+    )
+    current = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-10",
+            "reviewer": "strong_model",
+            "summary": "Second pass",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "new-b",
+                    "severity": "low",
+                    "summary": "Missing guard for empty parser payload handling",
+                    "affected_files": ["src/parser.py"],
+                    "optional_follow_ups": ["Add parser guard"],
+                }
+            ],
+        }
+    )
+    result = classify_feature_review_findings_for_convergence(
+        decision=current,
+        previous_decisions=[previous],
+        verification_passed=False,
+    )
+
+    finding = result.findings[0]
+    assert finding.classification == "duplicate"
+    assert finding.selected_action == "defer"
+    assert finding.matched_previous_finding_id == "prior-a"
+    assert finding.adjacent_similarity > 0.35
