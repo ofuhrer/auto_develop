@@ -932,7 +932,7 @@ Run-backlog evidence records artifact paths when produced, including:
 - release budget (`release_budget.json`);
 - release tuning (`release_tuning.md`).
 
-Planner contract generation can still fail deterministic admission today. In the target autonomous path, useful but invalid generated contracts should be normalized once before stopping: add missing required evidence such as `git diff`, normalize worktree-local `.venv` commands to configured shared-runtime commands, preserve scope and intent, then rerun deterministic contract validation.
+Planner contract generation can still fail deterministic admission today. The implemented repair path is one bounded normalization pass before stop: add missing required evidence such as `git diff` and changed-files lists, normalize worktree-local `.venv` commands to configured shared-runtime commands, preserve scope and intent, then rerun deterministic contract validation. If the repaired contract still fails, release execution stops with the admission evidence trail instead of silently bypassing the gate. Hard stops include unsafe release IDs, forbidden path changes, generated-artifact, lockfile, or migration scope changes, missing hard evidence, weak stop conditions, and whole-repo scope. Reviewer- and supervisor-output normalization extensions remain planned and should not be documented as shipped.
 
 ### `agent-loop status`
 
@@ -1160,7 +1160,7 @@ Current important limits:
 
 - The strongest workflow still depends on well-written objectives and contracts.
 - Cohesive medium epics still benefit from normalization and review convergence before the broader governor is reliable.
-- Raw planner/reviewer output normalization is implemented for repairable schema drift; strict schema gates still block only the cases where the candidate would broaden scope, change intent, or omit hard evidence.
+- Raw planner/reviewer output normalization is implemented for repairable schema drift, but the planner admission-repair path is the only shipped normalization/revalidation pass today; strict schema gates still block only the cases where the candidate would broaden scope, change intent, or omit hard evidence.
 - Fully dynamic model-driven orchestration is still evolving.
 - The broader multi-epic governor loop remains planned beyond the shipped repeated-cycle shell.
 - Full agent-driven pre-epic state-review decisioning before backlog selection remains planned.
