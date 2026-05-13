@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import warnings
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal
@@ -592,6 +592,13 @@ class ScopeRiskBudgetPolicyDecision(SupervisorDecisionBase):
     affected_scope: ScopeRiskAffectedScope
     affected_task_id: str | None = None
     hard_safety_findings: list[str] = Field(default_factory=list)
+
+    @field_validator("decided_at")
+    @classmethod
+    def decided_at_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
     @field_validator("evidence_paths")
     @classmethod

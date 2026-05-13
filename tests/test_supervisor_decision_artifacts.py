@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -146,7 +146,7 @@ def _scope_risk_budget_policy_decision(*, evidence_paths: list[Path]) -> ScopeRi
             "schema_version": SCHEMA_VERSION_V1,
             "decision_id": "scope-risk-001",
             "release_id": "soft-scope-budget-policy",
-            "decided_at": datetime(2026, 5, 13, 10, 0, 0),
+            "decided_at": datetime(2026, 5, 13, 10, 0, 0, tzinfo=UTC),
             "decided_by": "supervisor-agent",
             "rationale": "Broad edits are cohesive and mechanically safe with stronger verification reruns.",
             "evidence_paths": evidence_paths,
@@ -551,6 +551,35 @@ def test_scope_risk_budget_policy_artifact_serialization_and_round_trip(tmp_path
     assert serialized["fallback_plan"]
     assert serialized["validators_to_rerun"]
     assert serialized["evidence_paths"]
+
+
+def test_scope_risk_budget_policy_normalizes_naive_decided_at_to_utc() -> None:
+    decision = ScopeRiskBudgetPolicyDecision.model_validate(
+        {
+            "schema_version": SCHEMA_VERSION_V1,
+            "decision_id": "scope-risk-naive-001",
+            "release_id": "soft-scope-budget-policy",
+            "decided_at": datetime(2026, 5, 13, 10, 0, 0),
+            "decided_by": "supervisor-agent",
+            "rationale": "Naive decided_at must be normalized deterministically.",
+            "evidence_paths": [Path("scope-risk.log")],
+            "decision_type": SupervisorDecisionType.SCOPE_RISK_BUDGET_POLICY,
+            "classification": ScopeRiskClassification.COHESIVE,
+            "selected_action": ScopeRiskAction.ACCEPT_WITH_GUARDS,
+            "outcome": ScopeRiskOutcome.ACCEPTED_WITH_GUARDS,
+            "fallback_plan": "Split and retry if verification regresses.",
+            "validators_to_rerun": ["verification"],
+            "configured_changed_files_limit": 8,
+            "actual_changed_files": 10,
+            "configured_diff_size_limit": 500,
+            "actual_diff_size": 650,
+            "affected_scope": ScopeRiskAffectedScope.TASK,
+            "affected_task_id": "soft-scope-budget-policy-0001",
+            "hard_safety_findings": [],
+        }
+    )
+
+    assert decision.decided_at.tzinfo is UTC
 
 
 def test_load_supervisor_decision_artifact_fails_when_missing(tmp_path: Path) -> None:
