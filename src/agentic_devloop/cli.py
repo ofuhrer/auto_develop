@@ -824,6 +824,7 @@ def main(argv: list[str] | None = None) -> int:
                         config_dir=Path(args.config_dir),
                         force=False,
                         include_integration_branch=False,
+                        runs_dir=Path(args.runs_dir),
                     )
                     cleanup_payload = _cleanup_result(cleanup_result)
                     cleanup_path = cleanup_reports_dir / f"cycle_{index:03d}_{cycle.release.release_id}_cleanup.json"
@@ -891,6 +892,7 @@ def main(argv: list[str] | None = None) -> int:
                 config_dir=Path(args.config_dir),
                 force=args.force,
                 include_integration_branch=args.include_integration_branch,
+                runs_dir=Path(getattr(args, "runs_dir", "runs")),
             )
         except Exception as error:
             parser.exit(2, f"error: {error}\n")
@@ -1066,6 +1068,15 @@ def _cleanup_result(result) -> dict[str, object]:
         "worktree_paths": [str(path) for path in result.worktree_paths],
         "task_branches": result.task_branches,
         "integration_branch": result.integration_branch,
+        "eligible_worktree_paths": [str(path) for path in getattr(result, "eligible_worktree_paths", [])],
+        "skipped_worktree_paths": getattr(result, "skipped_worktree_paths", []),
+        "eligible_branches": getattr(result, "eligible_branches", []),
+        "skipped_branches": getattr(result, "skipped_branches", []),
+        "finalization_evidence_path": (
+            str(getattr(result, "finalization_evidence_path"))
+            if getattr(result, "finalization_evidence_path", None) is not None
+            else None
+        ),
         "removed_worktrees": [str(path) for path in result.removed_worktrees],
         "deleted_branches": result.deleted_branches,
         "errors": result.errors,

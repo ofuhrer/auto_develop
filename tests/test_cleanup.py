@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from agentic_devloop.cleanup import cleanup_release_artifacts
+from agentic_devloop.cleanup import _remove_worktree, cleanup_release_artifacts
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -73,6 +73,9 @@ def test_cleanup_release_artifacts_dry_run_reports_candidates(tmp_path) -> None:
     assert report.worktree_paths == [stale_worktree]
     assert report.task_branches == ["agent/v1.0.0/demo-0001"]
     assert report.integration_branch == "feature/v1.0.0"
+    assert report.eligible_worktree_paths == [stale_worktree]
+    assert report.eligible_branches == ["agent/v1.0.0/demo-0001", "feature/v1.0.0"]
+    assert report.skipped_branches == []
     assert stale_worktree.exists()
     assert "agent/v1.0.0/demo-0001" in _git(repo, "branch", "--format=%(refname:short)")
 
@@ -108,3 +111,75 @@ def test_cleanup_release_artifacts_force_removes_stale_artifacts(tmp_path) -> No
     assert ignored_worktree.exists()
     assert "agent/v1.0.0/demo-0001" not in branches
     assert "feature/v1.0.0" not in branches
+
+
+def test_cleanup_release_artifacts_refuses_current_branch_deletion(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    worktree_root = tmp_path / "worktrees"
+    config_dir = tmp_path / "configs"
+    _create_repo(repo)
+    _write_config(config_dir, repo, worktree_root)
+    _git(repo, "checkout", "-b", "feature/v1.0.0")
+    _git(repo, "branch", "agent/v1.0.0/demo-0001")
+
+    report = cleanup_release_artifacts(
+        project_id="demo",
+        release_id="v1.0.0",
+        config_dir=config_dir,
+        force=True,
+        include_integration_branch=True,
+    )
+
+    branches = _git(repo, "branch", "--format=%(refname:short)")
+    assert report.deleted_branches == ["agent/v1.0.0/demo-0001"]
+    assert {"branch": "feature/v1.0.0", "reason": "current_branch"} in report.skipped_branches
+    assert "feature/v1.0.0" in branches
+
+
+def test_cleanup_release_artifacts_refuses_unmerged_integration_branch_deletion(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    worktree_root = tmp_path / "worktrees"
+    config_dir = tmp_path / "configs"
+    _create_repo(repo)
+    _write_config(config_dir, repo, worktree_root)
+    _git(repo, "checkout", "-b", "feature/v1.0.0")
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    _git(repo, "add", "feature.txt")
+    _git(repo, "commit", "-m", "feature only")
+    _git(repo, "checkout", "main")
+    _git(repo, "checkout", "-b", "agent/v1.0.0/demo-0001")
+    (repo / "task.txt").write_text("task\n", encoding="utf-8")
+    _git(repo, "add", "task.txt")
+    _git(repo, "commit", "-m", "task only")
+    _git(repo, "checkout", "main")
+
+    report = cleanup_release_artifacts(
+        project_id="demo",
+        release_id="v1.0.0",
+        config_dir=config_dir,
+        force=True,
+        include_integration_branch=True,
+    )
+
+    branches = _git(repo, "branch", "--format=%(refname:short)")
+    assert report.deleted_branches == []
+    assert {"branch": "agent/v1.0.0/demo-0001", "reason": "unmerged_into_feature/v1.0.0"} in report.skipped_branches
+    assert {
+        "branch": "feature/v1.0.0",
+        "reason": "integration_branch_not_merged_into_main",
+    } in report.skipped_branches
+    assert "feature/v1.0.0" in branches
+    assert "agent/v1.0.0/demo-0001" in branches
+
+
+def test_remove_worktree_refuses_path_outside_worktree_root(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    _create_repo(repo)
+    worktree_root = tmp_path / "worktrees"
+    worktree_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    error = _remove_worktree(repo, worktree_root, outside)
+
+    assert error == f"refusing_to_remove_path_outside_worktree_root={outside}"
