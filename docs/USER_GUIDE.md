@@ -833,6 +833,14 @@ Relationship to nearby commands:
 
 `run-release` writes a deterministic `release_review.md` evidence summary. If the project config also defines `model_roles.reviewer`, it invokes a separate reviewer agent over `base..feature`, writes `feature_review.json`, generates bounded repair contracts for required findings, reruns verification using validated reviewer-requested commands or the default verification profile, writes `feature_review_recheck.json`, and blocks PR/merge/push finalization when required findings remain unresolved.
 
+Implemented `feature_review_recheck.json` stop reasons:
+- `resolved`: no findings remained after re-check.
+- `accepted_with_rationale`: only optional findings remained; explicit acceptance rationale is persisted in `feature_review.json` (`accepted_risks`) if the reviewer response omitted one.
+- `blocked_by_retry_budget`: required findings remained after bounded repair retries.
+- `blocked_by_hard_gate`: reviewer escalation, repair-contract generation failure, repair-task failure, or verification rerun failure blocked progression.
+
+Finalization gating treats unresolved required findings from the reviewer decision as authoritative, and also treats unresolved blocked-state recheck findings as required unless the same finding IDs are explicitly optional in the latest reviewer decision.
+
 The planned multi-epic governor should expose one parent log stream:
 
 ```text

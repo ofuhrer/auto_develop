@@ -1234,6 +1234,19 @@ def _run_feature_review_and_repair_loop(
         if not required_findings:
             stop_reason = "resolved" if not decision.findings else "accepted_with_rationale"
             optional_finding_ids = {finding.finding_id for finding in optional_findings}
+            if stop_reason == "accepted_with_rationale" and not decision.accepted_risks:
+                decision = decision.model_copy(
+                    update={
+                        "accepted_risks": [
+                            (
+                                "Accepted optional findings after reviewer re-check with no required repairs; "
+                                "follow-up remains non-blocking for release finalization."
+                            )
+                        ]
+                    }
+                )
+                feature_review_decision = decision
+                feature_review_path = write_feature_review_decision(release_root, decision)
             feature_review_recheck = FeatureReviewRecheckRecord(
                 release_id=release_id,
                 unresolved_finding_ids=[],
@@ -1757,7 +1770,7 @@ def _build_release_finalization_gate(
     feature_review_recheck: FeatureReviewRecheckRecord | None,
 ) -> dict[str, object]:
     unresolved_finding_ids = set(feature_review_recheck.unresolved_finding_ids) if feature_review_recheck else set()
-    required_finding_ids = (
+    required_finding_ids_from_decision = (
         {
             finding.finding_id
             for finding in feature_review_decision.findings
@@ -1766,7 +1779,26 @@ def _build_release_finalization_gate(
         if feature_review_decision
         else set()
     )
-    unresolved_required_finding_ids = sorted(unresolved_finding_ids.intersection(required_finding_ids))
+    optional_finding_ids_from_decision = (
+        {
+            finding.finding_id
+            for finding in feature_review_decision.findings
+            if not finding.required_repairs and finding.optional_follow_ups
+        }
+        if feature_review_decision
+        else set()
+    )
+    unresolved_required_finding_ids = sorted(unresolved_finding_ids.intersection(required_finding_ids_from_decision))
+    if (
+        not unresolved_required_finding_ids
+        and unresolved_finding_ids
+        and not required_finding_ids_from_decision
+        and feature_review_recheck is not None
+        and feature_review_recheck.stop_reason in {"blocked_by_retry_budget", "blocked_by_hard_gate"}
+    ):
+        # Recheck unresolved findings are authoritative when the latest decision no longer
+        # carries explicit required findings but the loop still ended in a blocked state.
+        unresolved_required_finding_ids = sorted(unresolved_finding_ids.difference(optional_finding_ids_from_decision))
     if unresolved_required_finding_ids:
         return {
             "allowed": False,

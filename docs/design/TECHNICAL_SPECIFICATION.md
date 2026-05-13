@@ -710,6 +710,16 @@ class FeatureReviewer:
 
 `FeatureReviewPacket` should include the release objective, task contracts, integrated branch, base branch, diff, changed files, evidence links, verification results, soft-gate decisions, metrics, and architecture/context references. `FeatureReviewDecision` should include structured findings, required repairs, optional follow-ups, accepted risks, and a merge/PR/finalization recommendation. Required findings become bounded repair contracts, and the re-check artifacts are part of the evidence trail for the reviewer pass.
 
+Implemented re-check stop taxonomy for `feature_review_recheck.json`:
+- `resolved`
+- `accepted_with_rationale`
+- `blocked_by_retry_budget`
+- `blocked_by_hard_gate`
+
+`accepted_with_rationale` means only optional findings remained at re-check time; if the reviewer omitted acceptance rationale, the release flow persists an explicit rationale entry in `feature_review.json.accepted_risks`.
+
+Release finalization gating uses unresolved required findings from the latest reviewer decision. For blocked re-check states, unresolved re-check findings are treated as required unless they are explicitly classified as optional in the latest reviewer decision, preventing false-positive finalization when unresolved required findings persist.
+
 ## Security and Auth
 
 ### State Handling
