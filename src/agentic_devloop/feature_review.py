@@ -685,13 +685,17 @@ def _blocked_feature_review_decision(
     reason: str,
     evidence_paths: list[Path],
 ) -> FeatureReviewDecision:
+    remediation_hint = _blocked_feature_review_remediation_hint()
     finding = FeatureReviewFinding(
         finding_id=f"{release_id}:feature_review_blocked",
         severity=FeatureReviewSeverity.CRITICAL,
-        summary=reason,
+        summary=f"{reason.rstrip()}\n\n{remediation_hint}",
         affected_files=["feature_review_context"],
         evidence_paths=evidence_paths,
-        required_repairs=["Restore reviewer backend or provide missing context and retry feature review."],
+        required_repairs=[
+            "Restore the reviewer backend and re-run feature review.",
+            "If you do not want semantic review, unset `model_roles.reviewer` and re-run `run-release`.",
+        ],
     )
     return FeatureReviewDecision(
         release_id=release_id,
@@ -701,6 +705,18 @@ def _blocked_feature_review_decision(
         findings=[finding],
         accepted_risks=[],
         rerun_verification_commands=[],
+    )
+
+
+def _blocked_feature_review_remediation_hint() -> str:
+    return "\n".join(
+        [
+            "Remediation hints:",
+            "- Ensure the Codex CLI is installed and on PATH (`codex --version`).",
+            "- Ensure the configured reviewer backend is supported (`executor.type: codex_cli`).",
+            "- Verify `model_roles.reviewer` is configured only when you intend to run semantic feature review.",
+            "- If the environment cannot run a reviewer backend, choose deterministic or human review for the release.",
+        ]
     )
 
 
