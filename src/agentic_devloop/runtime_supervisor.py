@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -599,7 +599,7 @@ class RuntimeSupervisor:
         decision = build_model_output_normalization_decision(
             decision_id=decision_id,
             release_id=release_id,
-            decided_at=decided_at or datetime.now(),
+            decided_at=decided_at or datetime.now(UTC),
             decided_by=decided_by,
             risk_level=risk_level,
             evidence_paths=evidence_paths,
