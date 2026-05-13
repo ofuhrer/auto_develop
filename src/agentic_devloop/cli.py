@@ -214,6 +214,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="objectives",
         help="Directory where selected objective YAML should be written.",
     )
+    run_governor_parser.add_argument(
+        "--cleanup-accepted-cycles-dry-run",
+        action="store_true",
+        help=(
+            "Generate per-cycle cleanup dry-run reports for accepted releases. "
+            "Also runs implicitly when --release-finalize is not none."
+        ),
+    )
 
     status_parser = subparsers.add_parser("status", help="Show orchestrator status.")
     status_parser.add_argument(
@@ -805,7 +813,10 @@ def main(argv: list[str] | None = None) -> int:
                     artifacts=cycle_artifacts["release"] + cycle_artifacts["review"] + cycle_artifacts["decision"],
                 )
                 cleanup_result = None
-                if str(cycle.release.decision) == "accepted":
+                should_collect_cleanup_dry_run = (
+                    args.cleanup_accepted_cycles_dry_run or args.release_finalize != "none"
+                )
+                if str(cycle.release.decision) == "accepted" and should_collect_cleanup_dry_run:
                     cleanup_result = cleanup_release_artifacts(
                         project_id=args.project,
                         release_id=cycle.release.release_id,
