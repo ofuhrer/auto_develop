@@ -967,6 +967,88 @@ class PlannerAdmissionFailureSupervisorInput(StrictModel):
         return values
 
 
+class PlannerAdmissionRepairAction(StrEnum):
+    SPLIT_TASK = "split_task"
+    NARROW_SCOPE = "narrow_scope"
+    ACCEPT_BROAD_BUT_MECHANICAL = "accept_broad_but_mechanical"
+    REPLAN = "replan"
+    STOP = "stop"
+
+
+class PlannerAdmissionRepairOutcome(StrEnum):
+    SPLIT_AND_RETRY = "split_and_retry"
+    NARROW_AND_RETRY = "narrow_and_retry"
+    ACCEPT_WITH_MECHANICAL_GUARDS = "accept_with_mechanical_guards"
+    REPLAN_AND_RETRY = "replan_and_retry"
+    STOP_AND_ESCALATE = "stop_and_escalate"
+
+
+class PlannerAdmissionRepairActionPayload(StrictModel):
+    admission_failure_inputs: list[PlannerAdmissionFailureSupervisorInput] = Field(default_factory=list)
+    selected_action: PlannerAdmissionRepairAction
+    outcome: PlannerAdmissionRepairOutcome
+    rationale: str = Field(min_length=1)
+    fallback_plan: str = Field(min_length=1)
+    validators_to_rerun: list[str]
+    evidence_paths: list[Path]
+    split_task_ids: list[str] = Field(default_factory=list)
+    narrowed_allowed_files: list[str] = Field(default_factory=list)
+    accepted_scope_notes: list[str] = Field(default_factory=list)
+    replan_reason: str | None = None
+    stop_reason: str | None = None
+
+    @field_validator("validators_to_rerun", "evidence_paths")
+    @classmethod
+    def required_list_fields_must_not_be_empty(cls, values: list[str] | list[Path]) -> list[str] | list[Path]:
+        if not values:
+            raise ValueError("planner admission repair required list fields must not be empty")
+        return values
+
+    @field_validator("split_task_ids", "narrowed_allowed_files", "accepted_scope_notes", mode="before")
+    @classmethod
+    def normalize_optional_string_lists(cls, values: object) -> object:
+        return _normalize_non_empty_string_list(
+            values,
+            error_message="planner admission repair optional list fields must not include empty values",
+        )
+
+    @field_validator("validators_to_rerun")
+    @classmethod
+    def validators_to_rerun_must_not_include_empty_values(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("validators to rerun must not include empty values")
+        return values
+
+    @model_validator(mode="after")
+    def selected_action_must_match_outcome(self) -> "PlannerAdmissionRepairActionPayload":
+        outcome_by_action = {
+            PlannerAdmissionRepairAction.SPLIT_TASK: PlannerAdmissionRepairOutcome.SPLIT_AND_RETRY,
+            PlannerAdmissionRepairAction.NARROW_SCOPE: PlannerAdmissionRepairOutcome.NARROW_AND_RETRY,
+            PlannerAdmissionRepairAction.ACCEPT_BROAD_BUT_MECHANICAL: PlannerAdmissionRepairOutcome.ACCEPT_WITH_MECHANICAL_GUARDS,
+            PlannerAdmissionRepairAction.REPLAN: PlannerAdmissionRepairOutcome.REPLAN_AND_RETRY,
+            PlannerAdmissionRepairAction.STOP: PlannerAdmissionRepairOutcome.STOP_AND_ESCALATE,
+        }
+        if self.outcome != outcome_by_action[self.selected_action]:
+            raise ValueError("selected_action must match outcome")
+
+        if self.selected_action == PlannerAdmissionRepairAction.SPLIT_TASK:
+            if not self.split_task_ids:
+                raise ValueError("split_task requires split_task_ids")
+        if self.selected_action == PlannerAdmissionRepairAction.NARROW_SCOPE:
+            if not self.narrowed_allowed_files:
+                raise ValueError("narrow_scope requires narrowed_allowed_files")
+        if self.selected_action == PlannerAdmissionRepairAction.ACCEPT_BROAD_BUT_MECHANICAL:
+            if not self.accepted_scope_notes:
+                raise ValueError("accept_broad_but_mechanical requires accepted_scope_notes")
+        if self.selected_action == PlannerAdmissionRepairAction.REPLAN:
+            if self.replan_reason is None or not self.replan_reason.strip():
+                raise ValueError("replan requires replan_reason")
+        if self.selected_action == PlannerAdmissionRepairAction.STOP:
+            if self.stop_reason is None or not self.stop_reason.strip():
+                raise ValueError("stop requires stop_reason")
+        return self
+
+
 class ModelOutputNormalizationActionPayload(StrictModel):
     raw_artifact_paths: list[Path] = Field(default_factory=list)
     validation_errors: list[ModelOutputValidationError] = Field(default_factory=list)

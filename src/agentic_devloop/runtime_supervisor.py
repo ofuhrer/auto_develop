@@ -13,6 +13,7 @@ from agentic_devloop.contracts import normalize_planner_contract_plan_payload
 from agentic_devloop.models import (
     ContractPlan,
     ModelOutputNormalizationActionPayload,
+    PlannerAdmissionRepairActionPayload,
     TaskContract,
 )
 from agentic_devloop.supervisor_decisions import (
@@ -267,6 +268,13 @@ class ModelOutputNormalizationDecisionProposal:
     action_kind: RepairActionKind = RepairActionKind.MODEL_OUTPUT_NORMALIZATION
 
 
+@dataclass(frozen=True)
+class PlannerAdmissionRepairActionProposal:
+    action_payload: PlannerAdmissionRepairActionPayload
+    source_evidence_paths: tuple[Path, ...]
+    action_kind: RepairActionKind = RepairActionKind.PLANNER_CONTRACT_NORMALIZATION
+
+
 RepairProposal = (
     PlannerContractNormalizationProposal
     | TaskSplitOrScopeNarrowingProposal
@@ -276,6 +284,7 @@ RepairProposal = (
     | ModelEscalationRecommendation
     | RepoStateUpdateProposal
     | ModelOutputNormalizationDecisionProposal
+    | PlannerAdmissionRepairActionProposal
 )
 
 
@@ -610,6 +619,21 @@ class RuntimeSupervisor:
             applied=True,
             proposal=ModelOutputNormalizationDecisionProposal(
                 decision=decision,
+                source_evidence_paths=source_evidence_paths,
+            ),
+        )
+
+    def apply_planner_admission_repair_action(
+        self,
+        *,
+        source_evidence_paths: tuple[Path, ...],
+        action_payload: PlannerAdmissionRepairActionPayload,
+    ) -> RuntimeSupervisorApplierResult:
+        return RuntimeSupervisorApplierResult(
+            action_kind=RepairActionKind.PLANNER_CONTRACT_NORMALIZATION,
+            applied=True,
+            proposal=PlannerAdmissionRepairActionProposal(
+                action_payload=action_payload,
                 source_evidence_paths=source_evidence_paths,
             ),
         )
