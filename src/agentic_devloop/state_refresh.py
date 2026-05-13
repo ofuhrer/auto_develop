@@ -147,6 +147,46 @@ def write_post_cycle_state_refresh_artifact(
     return path
 
 
+def build_no_actionable_post_cycle_state_refresh(
+    *,
+    epic_id: str,
+    release_id: str = "no_actionable_work",
+    reason: str = "no_actionable_work",
+    now: datetime | None = None,
+) -> tuple[PostCycleStateRefreshArtifact, EpicRefreshOutcome]:
+    captured_at = now or datetime.now(UTC)
+    refresh_outcome = EpicRefreshOutcome(
+        lifecycle_state="skipped",
+        status_reason=reason,
+        next_recommendations=[],
+        outcome_references=[
+            OutcomeReference(
+                release_id=release_id,
+                outcome=None,
+                run_summary_path=None,
+                recorded_at=captured_at,
+            )
+        ],
+        finalization_outcome_references=[
+            FinalizationOutcomeReference(
+                release_id=release_id,
+                outcome=None,
+                run_summary_path=None,
+                recommended_backlog_state="skipped",
+                recorded_at=captured_at,
+            )
+        ],
+    )
+    refresh_artifact = PostCycleStateRefreshArtifact(
+        captured_at=captured_at,
+        epic_id=epic_id,
+        release_id=release_id,
+        lifecycle_state="skipped",
+        status_reason=reason,
+    )
+    return refresh_artifact, refresh_outcome
+
+
 def _release_decision_value(release: object | None) -> str | None:
     if release is None:
         return None
