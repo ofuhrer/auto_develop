@@ -63,6 +63,15 @@
 - The next strategy increment should implement a one-shot worker runner instead
   of continuing to describe one-shot as fully executable.
 
+## Current Gap: execution-strategy stop artifact
+
+- `stop` execution-strategy outcomes are currently recorded in
+  `execution_strategy_selection.json` only.
+- Typed `execution_strategy` supervisor decision artifacts are written for
+  executable and replanning actions, but not for blocked `stop` outcomes.
+- The target design should add typed blocked-decision persistence so all
+  strategy outcomes have one uniform supervisor-decision trail.
+
 ## Current Gap: review-loop convergence
 
 - `release_review.md` is a deterministic evidence summary; semantic review now

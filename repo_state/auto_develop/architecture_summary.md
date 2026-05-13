@@ -7,7 +7,7 @@ Current flow:
 1. The roadmap governor reads repository documentation, roadmap, repo-state memory, run artifacts, metrics, and the configured repository goal.
 2. The governor selects the next highest-reward epic and emits a validated `BacklogPlan`.
 3. `run-backlog` can select one epic, write or reuse its release objective, plan contracts, and execute the resulting release.
-4. The shipped one-epic execution-strategy seam lets the supervisor choose execution strategy before contract generation: one-shot input materialization, sequential contracts, parallel contracts, stacked branches, patch handoff, replanning, or stop.
+4. The shipped one-epic execution-strategy seam lets the supervisor choose execution strategy before contract generation: one-shot input materialization, sequential contracts, parallel contracts, stacked branches, patch handoff, replanning, or stop. `stop` currently persists selection JSON only; typed blocked-decision persistence remains planned.
 5. If decomposition is selected, the planner decomposes the objective into bounded task contracts; if `one_shot` is selected today, planning writes `one_shot_execution_input.json` and stops before worker execution.
 6. Release execution creates isolated task worktrees and branches.
 7. Worker agents implement inside the selected strategy and task boundaries.
@@ -23,22 +23,24 @@ Target additions:
 
 1. Before selecting an epic, the state-review governor should expand beyond snapshot capture to full decisioning over live repository state: branch status, dirty state, open feature/agent branches, source layout drift, changed docs, recent release artifacts, release reviews, metrics, tuning reports, unresolved findings, and tracked repo-state memory.
 2. Implement the one-shot worker runner that consumes `one_shot_execution_input.json`, runs a bounded high-capability implementation, verifies it, records evidence, and produces a mergeable feature branch.
-3. Before generating contracts, the supervisor should normalize useful planner, reviewer, and supervisor output into strict typed artifacts before hard gates decide whether to stop.
-4. The implemented release-local feature-review loop should be composed into the broader governor so every epic receives PR-style semantic review before PR, merge, or autonomous finalization.
-5. Reviewer findings already become bounded repair contracts in one release; the target addition is output normalization, convergence policy, and durable memory across repeated epic cycles.
-6. The system should finalize only after required reviewer findings are resolved, explicitly accepted with rationale, or stopped by retry budget, hard gates, missing policy/credentials, or configured human escalation.
+3. Add typed blocked-decision persistence for `stop` execution-strategy outcomes.
+4. Before generating contracts, the supervisor should normalize useful planner, reviewer, and supervisor output into strict typed artifacts before hard gates decide whether to stop.
+5. The implemented release-local feature-review loop should be composed into the broader governor so every epic receives PR-style semantic review before PR, merge, or autonomous finalization.
+6. Reviewer findings already become bounded repair contracts in one release; the target addition is output normalization, convergence policy, and durable memory across repeated epic cycles.
+7. The system should finalize only after required reviewer findings are resolved, explicitly accepted with rationale, or stopped by retry budget, hard gates, missing policy/credentials, or configured human escalation.
 
 Prioritized architectural gaps:
 
 1. One-shot worker execution from `one_shot_execution_input.json`.
-2. Model-output normalization before strict validation for planner, reviewer, and supervisor artifacts.
-3. State-review governor before backlog selection.
-4. Review-loop convergence policy for repeated reviewer/repair cycles.
-5. N-epic governor command once selection, review, memory, scheduling, strategy, and normalization are reliable.
-6. Governor cockpit expansion for full multi-epic visibility.
-7. Shared verification runtime and bounded environment repair.
-8. Executor liveness supervision.
-9. Target artifact ownership and onboarding bootstrap.
+2. Typed blocked-decision persistence for `stop` execution-strategy outcomes.
+3. Model-output normalization before strict validation for planner, reviewer, and supervisor artifacts.
+4. State-review governor before backlog selection.
+5. Review-loop convergence policy for repeated reviewer/repair cycles.
+6. N-epic governor command once selection, review, memory, scheduling, strategy, and normalization are reliable.
+7. Governor cockpit expansion for full multi-epic visibility.
+8. Shared verification runtime and bounded environment repair.
+9. Executor liveness supervision.
+10. Target artifact ownership and onboarding bootstrap.
 
 The orchestrator owns policy, state, budgets, verification, evidence, roadmap governance, and finalization. Worker agents own implementation inside narrow task contracts. Humans provide goals and hard safety boundaries rather than routine approvals.
 

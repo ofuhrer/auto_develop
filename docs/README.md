@@ -47,6 +47,7 @@ Implemented capabilities include:
 - `run-backlog` for chaining backlog planning into objective and release execution;
 - supervisor-owned execution-strategy selection for one-epic releases, including `one_shot`, `sequential_contracts`, `parallel_contracts`, `stacked_branches`, `patch_handoff`, `replan`, and `stop` outcomes;
 - one-shot planning/input materialization: `one_shot` currently writes a bounded `one_shot_execution_input.json` and returns `release: null`; the one-shot worker execution path is still planned, so `run-backlog` keeps executable decomposition as its default until that runner exists;
+- `stop` strategy recording in `execution_strategy_selection.json`; a typed `execution_strategy` supervisor decision artifact is written for executable/replan actions today, while typed blocked-decision persistence for `stop` remains planned;
 - bounded planner-output normalization for repairable generated-contract drift;
 - typed supervisor decision records under `runs/<run-id>/**/supervisor_decisions/` for auditable scheduling, repair, and soft-budget decisions;
 - governor-level log artifacts for `run-backlog` invocations;

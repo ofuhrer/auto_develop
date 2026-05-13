@@ -368,6 +368,9 @@ def test_run_backlog_selects_one_epic_reuses_objective_and_runs_release(tmp_path
     assert result.supervisor_decision_path is not None
     assert result.supervisor_decision_path.exists()
     assert result.one_shot_execution_input_path is None
+    selection = json.loads(result.execution_strategy_selection_path.read_text(encoding="utf-8"))
+    assert selection["selected_action"] == "sequential_contracts"
+    assert selection["reason"] == "coupled_sequential"
     assert result.release_id == "demo-agent-selected-governor"
     assert result.release.decision == "accepted"
     assert result.release_summary_path == result.release.summary_path

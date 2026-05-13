@@ -249,6 +249,13 @@ def _build_execution_strategy_inputs(
     objective: ReleaseObjective,
     runs_dir: Path,
 ) -> dict[str, object]:
+    """Build the current executable default strategy inputs for one-epic runs.
+
+    Until a one-shot worker runner consumes one_shot_execution_input.json,
+    run-backlog intentionally selects decomposed contract execution. Explicit
+    callers can still pass cohesive_scope=True to plan-release/run-objective to
+    materialize the one-shot input artifact.
+    """
     prior_release_run_dir = _latest_release_run_dir(runs_dir=runs_dir, release_id=objective.release_id)
     release_review_path = (
         (prior_release_run_dir / "release_review.md") if prior_release_run_dir is not None else None
