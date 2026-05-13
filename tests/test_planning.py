@@ -730,6 +730,43 @@ def test_parse_planner_output_repairs_tail_brace_and_wrapper_depends_on() -> Non
     assert any("depends_on" in warning for warning in plan.warnings)
 
 
+def test_parse_planner_output_normalizes_docs_and_tests_task_type() -> None:
+    plan = parse_planner_output(
+        {
+            "release_id": "v0.3.24",
+            "planner": "strong-model",
+            "generated_contracts": [
+                {
+                    "task_id": "v0.3.24-0001",
+                    "title": "Document and verify",
+                    "objective": "Update docs and run final verification.",
+                    "rationale": "Planner used a descriptive task type outside the strict enum.",
+                    "suggested_contract": {
+                        "task_id": "v0.3.24-0001",
+                        "release_id": "v0.3.24",
+                        "title": "Document and verify",
+                        "task_type": "docs_and_tests",
+                        "budget_class": "S",
+                        "objective": "Update docs and run final verification.",
+                        "allowed_files": ["docs/USER_GUIDE.md", "tests/test_cli.py"],
+                        "forbidden_changes": ["Do not change runtime code."],
+                        "required_evidence": ["git diff"],
+                        "verification": {"commands": ["true"]},
+                        "stop_conditions": ["Stop if documentation cannot remain truthful."],
+                    },
+                }
+            ],
+            "warnings": [],
+        },
+        release_id="v0.3.24",
+        planner="strong-model",
+    )
+
+    contract = plan.generated_contracts[0].suggested_contract
+    assert contract.task_type == "release_preparation"
+    assert any("task_type" in warning for warning in plan.warnings)
+
+
 def test_parse_planner_output_stops_with_structured_evidence_for_overbroad_allowed_files() -> None:
     with pytest.raises(PlannerNormalizationError) as exc:
         parse_planner_output(

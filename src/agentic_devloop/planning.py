@@ -776,6 +776,9 @@ def _normalize_planner_contract_payloads(raw_plan: dict[str, Any], *, release_id
         if "required_evidence" not in contract_payload:
             contract_payload["required_evidence"] = ["git diff", "changed-files list"]
             changed_fields.append("required_evidence")
+        if contract_payload.get("task_type") == "docs_and_tests":
+            contract_payload["task_type"] = "release_preparation"
+            changed_fields.append("task_type")
         if isinstance(contract_payload.get("verification"), list):
             contract_payload["verification"] = {"commands": contract_payload["verification"]}
             changed_fields.append("verification")
