@@ -54,6 +54,10 @@ class BacklogRunResult:
     release_budget_path: Path | None = None
     release_tuning_path: Path | None = None
     state_refresh_summary_path: Path | None = None
+    finalization_policy: str | None = None
+    finalization_result: dict[str, Any] | None = None
+    cleanup_result: dict[str, Any] | None = None
+    blocked_finalization: dict[str, Any] | None = None
     evidence_manifest: BacklogEvidenceManifest | None = None
 
 

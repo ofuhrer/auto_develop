@@ -768,6 +768,10 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as error:
             parser.exit(2, f"error: {error}\n")
 
+        cleanup_reports_dir = governor_writer.paths.run_root / "cleanup"
+        cleanup_reports_dir.mkdir(parents=True, exist_ok=True)
+        cleanup_payloads_by_cycle: dict[int, dict[str, object]] = {}
+
         for index, cycle in enumerate(result.cycles, start=1):
             governor_writer.write(
                 event_type=GovernorEventType.EPIC_SELECTED,
@@ -791,11 +795,39 @@ def main(argv: list[str] | None = None) -> int:
                     message=f"cycle={index} release_id={cycle.release.release_id} decision={cycle.release.decision}",
                     artifacts=_release_artifact_links(cycle.release),
                 )
-                if args.release_finalize != "none":
+                cleanup_result = None
+                if str(cycle.release.decision) == "accepted":
+                    cleanup_result = cleanup_release_artifacts(
+                        project_id=args.project,
+                        release_id=cycle.release.release_id,
+                        config_dir=Path(args.config_dir),
+                        force=False,
+                        include_integration_branch=False,
+                    )
+                    cleanup_payload = _cleanup_result(cleanup_result)
+                    cleanup_payloads_by_cycle[index] = cleanup_payload
+                    cleanup_path = cleanup_reports_dir / f"cycle_{index:03d}_{cycle.release.release_id}_cleanup.json"
+                    cleanup_path.write_text(json.dumps(cleanup_payload, indent=2) + "\n", encoding="utf-8")
+                    governor_writer.write(
+                        event_type=GovernorEventType.STATE_REFRESHED,
+                        message=(
+                            f"cycle={index} release_id={cycle.release.release_id} "
+                            f"cleanup_handoff dry_run={cleanup_payload['dry_run']}"
+                        ),
+                        artifacts=[cleanup_path],
+                    )
+                if args.release_finalize != "none" or getattr(cycle, "finalization_result", None) is not None:
+                    finalization_artifacts = [cycle.release.summary_path]
+                    if cleanup_result is not None:
+                        finalization_artifacts.append(cleanup_path)
                     governor_writer.write(
                         event_type=GovernorEventType.FINALIZATION_COMPLETED,
-                        message=f"cycle={index} release_id={cycle.release.release_id} mode={args.release_finalize}",
-                        artifacts=[cycle.release.summary_path],
+                        message=(
+                            f"cycle={index} release_id={cycle.release.release_id} "
+                            f"mode={args.release_finalize} blocked="
+                            f"{getattr(cycle, 'blocked_finalization', None) is not None}"
+                        ),
+                        artifacts=finalization_artifacts,
                     )
         governor_writer.write(
             event_type=GovernorEventType.GOVERNOR_COMPLETED,
@@ -808,6 +840,10 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         output = _backlog_multi_run_result(result)
+        for index, cycle_payload in enumerate(output["cycles"], start=1):
+            cleanup_payload = cleanup_payloads_by_cycle.get(index)
+            if cleanup_payload is not None:
+                cycle_payload["cleanup_result"] = cleanup_payload
         output["governor_log_path"] = str(governor_writer.paths.log_path)
         output["governor_events_path"] = str(governor_writer.paths.events_path)
         print(json.dumps(output, indent=2))
@@ -987,6 +1023,14 @@ def _backlog_run_result(result) -> dict[str, object]:
         output["one_shot_execution_input_path"] = str(result.one_shot_execution_input_path)
     if getattr(result, "release", None) is not None:
         output["release"] = _release_run_result(result.release)
+    if getattr(result, "finalization_policy", None) is not None:
+        output["finalization_policy"] = result.finalization_policy
+    if getattr(result, "finalization_result", None) is not None:
+        output["finalization_result"] = result.finalization_result
+    if getattr(result, "cleanup_result", None) is not None:
+        output["cleanup_result"] = result.cleanup_result
+    if getattr(result, "blocked_finalization", None) is not None:
+        output["blocked_finalization"] = result.blocked_finalization
     return output
 
 

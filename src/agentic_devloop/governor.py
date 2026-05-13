@@ -207,6 +207,9 @@ class GovernorLoop:
             if result.release is None:
                 stop_reason = GovernorStopReason.PLANNING_ONLY_STRATEGY
                 break
+            if result.blocked_finalization is not None:
+                stop_reason = "blocked_finalization"
+                break
             if not _release_was_accepted(result.release):
                 if stop_on_failure:
                     stop_reason = GovernorStopReason.RELEASE_NOT_ACCEPTED
@@ -435,6 +438,12 @@ class GovernorLoop:
             release_metrics_path=release.metrics_path if release is not None else None,
             release_budget_path=release.budget_path if release is not None else None,
             release_tuning_path=release.tuning_path if release is not None else None,
+            finalization_policy=release_finalize if release is not None else None,
+            finalization_result=_release_finalization_result(release),
+            blocked_finalization=_blocked_finalization_result(
+                release=release,
+                finalization_policy=release_finalize,
+            ),
             evidence_manifest=evidence_manifest,
             state_refresh_summary_path=plan.state_refresh_summary_path,
         )
@@ -566,3 +575,55 @@ def _release_decision_value(release: object) -> str | None:
 
 def _release_was_accepted(release: object) -> bool:
     return _release_decision_value(release) == "accepted"
+
+
+def _release_finalization_result(release: object | None) -> dict[str, object] | None:
+    if release is None:
+        return None
+    gate = getattr(release, "finalization_gate", None)
+    finalize = getattr(release, "finalization", None)
+    result: dict[str, object] = {}
+    if gate is not None:
+        result["gate"] = gate
+    if finalize is not None:
+        result["result"] = {
+            "merged": bool(getattr(finalize, "merged", False)),
+            "pushed": bool(getattr(finalize, "pushed", False)),
+            "failed_step": getattr(finalize, "failed_step", None),
+            "error": getattr(finalize, "error", None),
+        }
+    return result or None
+
+
+def _blocked_finalization_result(
+    *,
+    release: object | None,
+    finalization_policy: str,
+) -> dict[str, object] | None:
+    if release is None or finalization_policy == "none" or _release_decision_value(release) != "accepted":
+        return None
+    gate = getattr(release, "finalization_gate", None)
+    if gate is not None and not bool(gate.get("allowed", False)):
+        return {
+            "type": "finalization_gate_blocked",
+            "policy": finalization_policy,
+            "reason": str(gate.get("reason", "unknown")),
+            "decision": str(gate.get("decision", "unknown")),
+            "unresolved_required_finding_ids": list(gate.get("unresolved_required_finding_ids", [])),
+        }
+    finalize = getattr(release, "finalization", None)
+    if finalize is None:
+        return {
+            "type": "finalization_result_missing",
+            "policy": finalization_policy,
+            "reason": "finalization result was not produced for accepted release",
+        }
+    error = getattr(finalize, "error", None)
+    if error:
+        return {
+            "type": "finalization_failed",
+            "policy": finalization_policy,
+            "reason": str(error),
+            "failed_step": getattr(finalize, "failed_step", None),
+        }
+    return None
