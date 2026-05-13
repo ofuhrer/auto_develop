@@ -486,7 +486,7 @@ After the run, inspect `release_metrics.json`, `release_budget.json`, and `relea
 
 If the report shows routing pressure, reduce task size or adjust `model_routing` and `budget.max_changed_files_per_task`, `budget.max_diff_lines_per_task`, or `budget.max_context_chars_per_task` before launching the next release. Small budget overages should be treated as review findings rather than automatic waste: a reviewer/supervisor agent should decide whether a cohesive verified diff is acceptable, whether to split follow-up work, or whether to rerun with a narrower contract.
 
-Soft-gate decisions are written next to the evidence they describe. Task-level exceptions land in `runs/<run-id>/<task-id>/evidence/soft_gate_decision.json`; release-level budget exceptions land in `runs/<run-id>/soft_gate_decisions.json`. Each record stores `finding_id`, `severity`, `risk`, `recommended_actions`, `evidence_paths`, `decision`, `rationale`, `fallback_plan`, and `validators_rerun`. The rerun list is the audit trail for which checks the reviewer or supervisor should repeat or re-read before treating the soft exception as durable. Hard validation still runs first; soft findings only decide how to handle already-passed hard gates.
+Soft-gate decisions are written next to the evidence they describe. Task-level exceptions land in `runs/<run-id>/<task-id>/evidence/soft_gate_decision.json` and also emit a typed supervisor decision record under `runs/<run-id>/<task-id>/evidence/supervisor_decisions/soft_budget_acceptance__<id>.json`; release-level budget exceptions land in `runs/<run-id>/soft_gate_decisions.json`. Each soft-gate record stores `finding_id`, `severity`, `risk`, `recommended_actions`, `evidence_paths`, `decision`, `rationale`, `fallback_plan`, and `validators_rerun`; typed supervisor decision records store the same rationale and evidence references plus normalized fields such as `budget_name`, `configured_limit`, `actual`, and `outcome`. These typed records are the implemented audit trail for supervisor-owned scheduling, repair continuation, finding adjudication, contract normalization, and environment repair. The rerun list is the audit trail for which checks the reviewer or supervisor should repeat or re-read before treating the soft exception as durable. Hard validation still runs first; soft findings only decide how to handle already-passed hard gates.
 
 Common release modes:
 
@@ -829,7 +829,7 @@ Relationship to nearby commands:
 - `run-objective` skips backlog selection and starts from an existing objective file.
 - `run-backlog` forwards the usual release execution and finalization flags, so `--commit-on-accept`, `--merge-on-accept`, `--push-on-accept`, and `--release-finalize` still control task commits and release finalization.
 
-`run-backlog` is intentionally one epic per invocation. A multi-epic governor command is planned but not yet the documented user workflow.
+`run-backlog` is intentionally one epic per invocation. A multi-epic governor command is still planned and is not yet the documented user workflow.
 
 `run-release` writes a deterministic `release_review.md` evidence summary. If the project config also defines `model_roles.reviewer`, it invokes a separate reviewer agent over `base..feature`, writes `feature_review.json`, generates bounded repair contracts for required findings, reruns verification using validated reviewer-requested commands or the default verification profile, writes `feature_review_recheck.json`, and blocks PR/merge/push finalization while unresolved required findings remain.
 
@@ -847,7 +847,7 @@ Implemented `feature_review_recheck.json` stop reasons:
 
 Finalization gating blocks when unresolved finding IDs from `feature_review_recheck.json` intersect with required findings from the latest `feature_review.json` decision. In a blocked re-check state (`blocked_by_retry_budget` / `blocked_by_hard_gate`) where the latest reviewer decision carries no required findings but unresolved finding IDs remain, the gate treats those unresolved IDs as required unless the same IDs are explicitly optional findings in the latest reviewer decision. (Today the gate does not consult the re-check record's `accepted_finding_ids` / `resolved_finding_ids`; it relies on unresolved IDs plus the latest reviewer decision's required/optional classification.)
 
-The implemented adjudication path is intentionally narrow: it can accept false-positive required findings such as "confirm syntax/imports" only after the integration verification rerun passes, and it does not accept findings that require implementation changes. That keeps the reviewer loop bounded to the integrated feature branch while leaving broader multi-epic review orchestration, persistent memory, and pre-epic state refresh as planned work.
+The implemented adjudication path is intentionally narrow: it can accept false-positive required findings such as "confirm syntax/imports" only after the integration verification rerun passes, and it does not accept findings that require implementation changes. That keeps the reviewer loop bounded to the integrated feature branch while leaving broader multi-epic review orchestration, persistent memory, and pre-epic state refresh as planned work. Typed supervisor decision records already exist for the bounded soft-budget and repair decisions that support this loop; the N-epic governor that would consume them across repeated epics is still planned.
 
 The planned multi-epic governor should expose one parent log stream:
 
@@ -1090,7 +1090,7 @@ Then decide whether to repair manually, narrow the contract, or rerun from a cle
 
 ## Current Limits
 
-`auto_develop` is useful for bounded autonomous development today. The current implementation includes one-epic planning, runtime-supervisor repair/resume, deterministic state-review snapshot capture, and an independent feature-review pass when `model_roles.reviewer` is configured. The active direction is a complete autonomous project governor with runtime supervision: it should review current repository state, choose epics from docs/roadmap/state/artifacts, decompose them, run workers, verify, run independent feature review, repair reviewer findings and contract-contained failures, update memory, and continue until configured stopping criteria are reached.
+`auto_develop` is useful for bounded autonomous development today. The current implementation includes one-epic planning, runtime-supervisor repair/resume, deterministic state-review snapshot capture, typed supervisor decision records for auditable soft and repair decisions, and an independent feature-review pass when `model_roles.reviewer` is configured. The active direction is a complete autonomous project governor with runtime supervision: it should review current repository state, choose epics from docs/roadmap/state/artifacts, decompose them, run workers, verify, run independent feature review, repair reviewer findings and contract-contained failures, update memory, and continue until configured stopping criteria are reached.
 
 Current important limits:
 
@@ -1099,6 +1099,7 @@ Current important limits:
 - The broader multi-epic governor loop remains planned.
 - Full agent-driven pre-epic state-review decisioning before backlog selection remains planned.
 - Multi-epic orchestration of reviewer-agent findings and repair-agent loops remains planned; the currently shipped reviewer/repair loop runs only when `model_roles.reviewer` is configured and is release-local to one `run-release` execution.
+- Typed supervisor decision records are implemented for bounded scheduling, repair, and soft-budget decisions; the N-epic loop that would consume them across repeated epics remains planned.
 - Pull request creation is not yet automated by the CLI.
 - Remote execution adapters, such as cluster or SLURM execution, are still project-specific work.
 - Human review is still recommended before merging significant work into `main`.

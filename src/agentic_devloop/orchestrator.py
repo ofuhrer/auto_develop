@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -52,6 +53,13 @@ from agentic_devloop.models import (
     TaskRun,
     TaskState,
 )
+from agentic_devloop.supervisor_decisions import (
+    BudgetAcceptanceOutcome,
+    SoftBudgetAcceptanceDecision,
+    SupervisorDecisionType,
+    load_supervisor_decision_artifact,
+    write_supervisor_decision_artifact,
+)
 from agentic_devloop.runtime_supervisor import (
     BacklogStateReference,
     BudgetLedgerPaths,
@@ -72,6 +80,14 @@ from agentic_devloop.scientific import analyze_scientific_changes
 from agentic_devloop.verification import VerificationRunner
 from agentic_devloop.worktree import create_worktree
 from agentic_devloop.yaml_io import load_yaml_model
+
+
+@dataclass(frozen=True)
+class _SoftBudgetDetails:
+    budget_name: str
+    configured_limit: float
+    actual: float
+    parsed: bool
 
 
 class ExecutorProtocol(Protocol):
@@ -297,6 +313,7 @@ def run_task(
     decision, bundle = _apply_budget_soft_gate_decision(
         decision=decision,
         bundle=bundle,
+        release_id=task.release_id,
     )
     bundle = write_scientific_outputs(bundle, task, scientific_review)
     if any(result.exit_code != 0 for result in verification_results):
@@ -437,6 +454,7 @@ def _apply_budget_soft_gate_decision(
     *,
     decision: ReviewDecision,
     bundle: EvidenceBundle,
+    release_id: str,
 ) -> tuple[ReviewDecision, EvidenceBundle]:
     if not decision.soft_gate_findings:
         return decision, bundle
@@ -453,16 +471,21 @@ def _apply_budget_soft_gate_decision(
             ]
         }
     )
+    budget_details = _soft_budget_details_from_finding(finding.risk, finding_id=finding.finding_id)
     if severe:
         outcome = SoftGateDecisionOutcome.REJECT
         final_decision = Decision.NEEDS_REVISION
         rationale = "Budget overage severity is high; task must be split before acceptance."
         fallback_plan = "Split the task scope and rerun verification."
+        supervisor_outcome = BudgetAcceptanceOutcome.SPLIT_TASK
     else:
         outcome = SoftGateDecisionOutcome.ACCEPT_WITH_MITIGATION
         final_decision = Decision.ACCEPTED
         rationale = "Minor budget overage accepted because hard invariants and verification passed."
         fallback_plan = "Escalate to task split if overage repeats in the next attempt."
+        supervisor_outcome = BudgetAcceptanceOutcome.ACCEPT_OVERAGE
+    if not budget_details.parsed:
+        rationale = f"{rationale} Raw budget risk was unparseable and recorded for audit: {finding.risk}"
 
     bundle = write_task_soft_gate_decision(
         bundle,
@@ -479,6 +502,39 @@ def _apply_budget_soft_gate_decision(
             ),
         ),
     )
+    soft_gate_path = bundle.soft_gate_decision_path
+    if soft_gate_path is None:
+        raise RuntimeError("soft gate decision artifact was not written")
+    artifact_path = write_supervisor_decision_artifact(
+        release_bundle_path=bundle.bundle_path,
+        decision=SoftBudgetAcceptanceDecision.model_validate(
+            {
+                "decision_id": f"{decision.task_id}__{finding.finding_id}".replace(":", "_"),
+                "release_id": release_id,
+                "decided_at": datetime.now(UTC),
+                "decided_by": "deterministic_kernel",
+                "rationale": rationale,
+                "evidence_paths": [
+                    bundle.changed_files_path,
+                    bundle.git_diff_path,
+                    bundle.run_state_path,
+                    bundle.verification_log_path,
+                    soft_gate_path,
+                ],
+                "decision_type": SupervisorDecisionType.SOFT_BUDGET_ACCEPTANCE,
+                "budget_name": budget_details.budget_name,
+                "configured_limit": budget_details.configured_limit,
+                "actual": budget_details.actual,
+                "outcome": supervisor_outcome,
+            }
+        ),
+    )
+    loaded_decision = load_supervisor_decision_artifact(artifact_path)
+    if (
+        isinstance(loaded_decision, SoftBudgetAcceptanceDecision)
+        and loaded_decision.outcome != BudgetAcceptanceOutcome.ACCEPT_OVERAGE
+    ):
+        final_decision = Decision.NEEDS_REVISION
     return (
         decision.model_copy(
             update={
@@ -488,6 +544,45 @@ def _apply_budget_soft_gate_decision(
             }
         ),
         bundle,
+    )
+
+
+_SOFT_BUDGET_RISK_PATTERN = re.compile(
+    r"over budget:\s*(?P<actual>\d+)\s+exceeds\s+(?P<limit>\d+)"
+)
+
+
+def _soft_budget_details_from_finding(risk: str, *, finding_id: str) -> _SoftBudgetDetails:
+    budget_name = "soft_budget"
+    if finding_id.endswith(":changed_files_budget"):
+        budget_name = "max_changed_files_per_task"
+    elif finding_id.endswith(":diff_lines_budget"):
+        budget_name = "max_diff_lines_per_task"
+
+    match = _SOFT_BUDGET_RISK_PATTERN.search(risk)
+    if match is None:
+        return _SoftBudgetDetails(
+            budget_name=f"{budget_name}_unparsed",
+            configured_limit=1.0,
+            actual=1.0,
+            parsed=False,
+        )
+
+    actual = float(match.group("actual"))
+    configured_limit = float(match.group("limit"))
+    if configured_limit <= 0 or actual < configured_limit:
+        return _SoftBudgetDetails(
+            budget_name=f"{budget_name}_unparsed",
+            configured_limit=1.0,
+            actual=1.0,
+            parsed=False,
+        )
+
+    return _SoftBudgetDetails(
+        budget_name=budget_name,
+        configured_limit=configured_limit,
+        actual=actual,
+        parsed=True,
     )
 
 

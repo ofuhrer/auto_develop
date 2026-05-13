@@ -20,12 +20,12 @@
   validated `BacklogPlan`.
 - `run-backlog` now chains selected-epic backlog planning into objective,
   contract, and release execution for one epic.
-- Runtime supervision, planner-output normalization, and one-epic governor
-  logging are now partially implemented. The remaining governor gap is the
-  high-level loop around them: before selecting the next epic, the governor
-  should inspect live repository state, branch state, source layout, recent run
-  artifacts, release reviews, metrics, tuning reports, unresolved findings, and
-  tracked repo-state memory.
+- Runtime supervision, planner-output normalization, typed supervisor decision
+  records, and one-epic governor logging are now partially implemented. The
+  remaining governor gap is the high-level loop around them: before selecting
+  the next epic, the governor should inspect live repository state, branch
+  state, source layout, recent run artifacts, release reviews, metrics,
+  tuning reports, unresolved findings, and tracked repo-state memory.
 - The current governor can select one epic, but it does not yet own a durable
   state-review snapshot, update memory before prioritization, or loop over the
   next N highest-reward epics.
@@ -86,6 +86,8 @@
   already implemented.
 - State notes should only describe verified seams and keep the multi-epic
   governor explicitly marked as planned until the code supports it.
+- Typed supervisor decision records should be described as implemented while
+  the multi-epic governor loop stays explicitly planned.
 - The useful learning from the docs task is to preserve the distinction
   between implemented `GovernorLoop`, `StateStore`, and `RepairPolicy` seams
   and the still-planned multi-epic loop.

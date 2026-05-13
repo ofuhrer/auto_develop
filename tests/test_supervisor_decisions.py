@@ -1,0 +1,174 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+import pytest
+from pydantic import ValidationError
+
+from agentic_devloop.models import ContractNormalizationRefusalReason
+from agentic_devloop.supervisor_decisions import (
+    ContractNormalizationDecision,
+    ContractNormalizationOutcome,
+    DecisionRiskLevel,
+    EnvironmentRepairDecision,
+    EnvironmentRepairOutcome,
+    FindingAdjudicationOutcome,
+    FindingSeverity,
+    ReleaseSchedulingDecision,
+    RepairLoopContinuationDecision,
+    RepairLoopOutcome,
+    SCHEMA_VERSION_V1,
+    SchedulingOutcome,
+    SoftBudgetAcceptanceDecision,
+    SupervisorDecisionType,
+    parse_supervisor_decision,
+)
+
+
+BASE = {
+    "schema_version": SCHEMA_VERSION_V1,
+    "decision_id": "decision-001",
+    "release_id": "supervisor-decision-records",
+    "decided_at": datetime(2026, 5, 13, 8, 0, 0),
+    "decided_by": "supervisor-agent",
+    "rationale": "Evidence supports this action.",
+}
+
+
+def test_parse_release_scheduling_decision() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.RELEASE_SCHEDULING,
+        "risk_level": DecisionRiskLevel.MODERATE,
+        "overlap_findings": ["src/release.py"],
+        "outcome": SchedulingOutcome.PROCEED_SEQUENTIAL,
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, ReleaseSchedulingDecision)
+    assert decision.schema_version == SCHEMA_VERSION_V1
+    assert decision.decision_type == SupervisorDecisionType.RELEASE_SCHEDULING
+
+
+def test_repair_loop_attempt_must_not_exceed_max_attempts() -> None:
+    with pytest.raises(ValidationError, match="attempt must be less than or equal"):
+        RepairLoopContinuationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.REPAIR_LOOP_CONTINUATION,
+                "risk_level": DecisionRiskLevel.HIGH,
+                "attempt": 4,
+                "max_attempts": 3,
+                "outcome": RepairLoopOutcome.STOP,
+            }
+        )
+
+
+def test_soft_budget_acceptance_requires_actual_at_or_above_limit() -> None:
+    with pytest.raises(ValidationError, match="actual must be greater than or equal"):
+        SoftBudgetAcceptanceDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.SOFT_BUDGET_ACCEPTANCE,
+                "budget_name": "max_changed_files_per_task",
+                "configured_limit": 8,
+                "actual": 7,
+                "outcome": "accept_overage",
+            }
+        )
+
+
+def test_contract_normalization_decision_requires_outcome_consistency() -> None:
+    with pytest.raises(ValidationError, match="requires changed_fields"):
+        ContractNormalizationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.CONTRACT_NORMALIZATION,
+                "outcome": ContractNormalizationOutcome.NORMALIZE_AND_RETRY,
+                "changed_fields": [],
+                "refusal_reasons": [],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="requires refusal_reasons"):
+        ContractNormalizationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.CONTRACT_NORMALIZATION,
+                "outcome": ContractNormalizationOutcome.REFUSE_AND_STOP,
+                "changed_fields": [],
+                "refusal_reasons": [],
+            }
+        )
+
+
+def test_contract_normalization_refusal_reason_is_typed() -> None:
+    decision = ContractNormalizationDecision.model_validate(
+        {
+            **BASE,
+            "decision_type": SupervisorDecisionType.CONTRACT_NORMALIZATION,
+            "outcome": ContractNormalizationOutcome.REFUSE_AND_STOP,
+            "changed_fields": [],
+            "refusal_reasons": [ContractNormalizationRefusalReason.UNSAFE_NORMALIZATION],
+        }
+    )
+
+    assert decision.refusal_reasons == [ContractNormalizationRefusalReason.UNSAFE_NORMALIZATION]
+
+
+def test_contract_normalization_refusal_reason_supports_missing_required_evidence() -> None:
+    decision = ContractNormalizationDecision.model_validate(
+        {
+            **BASE,
+            "decision_type": SupervisorDecisionType.CONTRACT_NORMALIZATION,
+            "outcome": ContractNormalizationOutcome.REFUSE_AND_STOP,
+            "changed_fields": [],
+            "refusal_reasons": [ContractNormalizationRefusalReason.MISSING_REQUIRED_EVIDENCE],
+        }
+    )
+
+    assert decision.refusal_reasons == [ContractNormalizationRefusalReason.MISSING_REQUIRED_EVIDENCE]
+
+
+def test_parse_review_finding_adjudication_decision() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.REVIEW_FINDING_ADJUDICATION,
+        "finding_id": "fr-123",
+        "severity": FindingSeverity.HIGH,
+        "outcome": FindingAdjudicationOutcome.REQUIRED_REPAIR,
+        "repair_task_ids": ["repair-0001"],
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert decision.decision_type == SupervisorDecisionType.REVIEW_FINDING_ADJUDICATION
+
+
+def test_parse_environment_repair_decision() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.ENVIRONMENT_REPAIR,
+        "outcome": EnvironmentRepairOutcome.APPLY_AND_RETRY,
+        "capture_commands": ["python -V", "pip list"],
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, EnvironmentRepairDecision)
+    assert decision.outcome == EnvironmentRepairOutcome.APPLY_AND_RETRY
+
+
+def test_invalid_schema_version_is_rejected() -> None:
+    payload = {
+        **BASE,
+        "schema_version": "2.0",
+        "decision_type": SupervisorDecisionType.RELEASE_SCHEDULING,
+        "risk_level": DecisionRiskLevel.LOW,
+        "overlap_findings": [],
+        "outcome": SchedulingOutcome.PROCEED_PARALLEL,
+    }
+
+    with pytest.raises(ValidationError):
+        parse_supervisor_decision(payload)

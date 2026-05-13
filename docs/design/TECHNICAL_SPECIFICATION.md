@@ -630,7 +630,7 @@ Current limitation: the implemented control plane now supports deterministic sta
 
 ### Feature Review and Repair Flow
 
-The existing `release_review.md` is a deterministic release evidence summary. When `model_roles.reviewer` is configured, `run-release` now also runs a separate semantic feature-review loop. This loop is release-scoped: it reviews one integrated feature branch, produces structured findings, writes `feature_review.json` and `feature_review_recheck.json`, converts required findings into bounded repair contracts, reruns verification, and does not imply persistent governor memory or the planned N-epic control plane.
+The existing `release_review.md` is a deterministic release evidence summary. When `model_roles.reviewer` is configured, `run-release` now also runs a separate semantic feature-review loop. This loop is release-scoped: it reviews one integrated feature branch, produces structured findings, writes `feature_review.json` and `feature_review_recheck.json`, converts required findings into bounded repair contracts, reruns verification, and does not imply persistent governor memory or the planned N-epic control plane. Typed supervisor decision records capture the bounded scheduling, finding, repair, and soft-budget choices that support this release-scoped loop; the broader multi-epic governor that would consume them is still planned.
 
 1. After accepted task branches are integrated into `feature/<release>`, build a review packet containing objective, contracts, `base..feature` diff, changed-files list, release summary, verification logs, soft-gate artifacts, metrics, tuning reports, docs touched, and relevant architecture constraints.
 2. Invoke a reviewer agent that did not implement the worker tasks.
@@ -723,7 +723,7 @@ Implemented re-check stop taxonomy for `feature_review_recheck.json`:
 
 Release finalization gating uses unresolved finding IDs from `feature_review_recheck.json` plus required/optional classification from the latest reviewer decision in `feature_review.json`. Finalization is blocked when any unresolved finding IDs overlap required findings from the latest reviewer decision. For blocked re-check states where the latest reviewer decision carries no required findings but unresolved IDs remain, the gate treats those unresolved IDs as required unless the same IDs are explicitly optional in the latest reviewer decision.
 
-Required-finding adjudication is deliberately narrow: verification-only or conditional findings can be accepted after passing verification, while findings that require implementation changes remain blocking. This is the implemented boundary for the reviewer loop; the broader pre-epic governor review and persistent memory layers remain planned.
+Required-finding adjudication is deliberately narrow: verification-only or conditional findings can be accepted after passing verification, while findings that require implementation changes remain blocking. This is the implemented boundary for the reviewer loop; the broader pre-epic governor review and persistent memory layers remain planned, even though typed supervisor decision records already exist to hold the auditable decision trail.
 
 ## Security and Auth
 

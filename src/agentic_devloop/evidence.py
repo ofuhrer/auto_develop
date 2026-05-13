@@ -32,6 +32,10 @@ def _normalized_string_list(values: list[str]) -> list[str]:
     return normalized
 
 
+def supervisor_decisions_artifacts_dir(release_bundle_path: Path) -> Path:
+    return release_bundle_path / "supervisor_decisions"
+
+
 class EvidenceCollector:
     def collect(
         self,
