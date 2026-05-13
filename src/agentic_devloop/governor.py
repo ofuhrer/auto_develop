@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable, Protocol
@@ -32,9 +33,20 @@ from agentic_devloop.state_review import (
     write_state_refresh_summary_artifact,
     write_state_review_snapshot_artifact,
 )
+from agentic_devloop.state_refresh import (
+    build_no_actionable_post_cycle_state_refresh,
+    build_post_cycle_state_refresh,
+    write_post_cycle_state_refresh_artifact,
+)
 from agentic_devloop.state_store import StateStore
-from agentic_devloop.state_store import FinalizationOutcomeReference
 from agentic_devloop.yaml_io import load_yaml_model, write_yaml_model
+
+
+class PostCycleStateRefreshFailedError(RuntimeError):
+    def __init__(self, *, message: str, error_artifact_path: Path) -> None:
+        super().__init__(message)
+        self.error_artifact_path = error_artifact_path
+
 
 class PlanBacklogFn(Protocol):
     def __call__(
@@ -198,7 +210,32 @@ class GovernorLoop:
             )
             cycles.append(result)
             if self._state_store is not None:
-                self._record_finalization_memory_for_cycle(result=result, recorded_at=now)
+                try:
+                    self._apply_post_cycle_refresh_for_cycle(
+                        result=result,
+                        runs_dir=runs_dir,
+                        cycle_index=cycle_index,
+                        recorded_at=now,
+                    )
+                except PostCycleStateRefreshFailedError as error:
+                    stop_reason = GovernorStopReason.STATE_REFRESH_FAILED
+                    continuation = GovernorCycleContinuation(
+                        action=GovernorContinuationAction.STOP,
+                        stop_reason=GovernorContinuationStopReason.STATE_REFRESH_FAILED,
+                    )
+                    evidence_manifest = result.evidence_manifest
+                    if evidence_manifest is None:
+                        evidence_manifest = BacklogEvidenceManifest(state_refresh_error_path=error.error_artifact_path)
+                    else:
+                        evidence_manifest = evidence_manifest.model_copy(
+                            update={"state_refresh_error_path": error.error_artifact_path}
+                        )
+                    cycles[-1] = replace(
+                        result,
+                        governor_cycle_continuation=continuation,
+                        evidence_manifest=evidence_manifest,
+                    )
+                    break
             if result.release is None and result.release_id == "no_actionable_work":
                 stop_reason = GovernorStopReason.NO_ACTIONABLE_WORK
                 break
@@ -496,47 +533,77 @@ class GovernorLoop:
             state_refresh_summary_path=plan.state_refresh_summary_path,
         )
 
-    def _record_finalization_memory_for_cycle(
+    def _apply_post_cycle_refresh_for_cycle(
         self,
         *,
         result: BacklogRunResult,
+        runs_dir: Path,
+        cycle_index: int,
         recorded_at: datetime | None,
     ) -> None:
-        if result.release_id in {"no_actionable_work"}:
+        if self._state_store is None:
             return
-        summary_payload = _load_release_summary_payload_from_path(result.release_summary_path)
-        unresolved_ids = _unresolved_finding_ids_from_cycle(result)
-        branch = _read_string(summary_payload, "integration_branch") or _read_string(summary_payload, "branch")
-        commit = _read_string(summary_payload, "integration_commit") or _read_string(summary_payload, "head_commit")
-        cleanup_report = _path_from_summary_payload(summary_payload, "cleanup_report_path")
-        blocked_reason = None
-        blocked_type = None
-        finalization_outcome = None
-        if result.blocked_finalization is not None:
-            blocked_reason_raw = result.blocked_finalization.get("reason")
-            blocked_type_raw = result.blocked_finalization.get("type")
-            blocked_reason = str(blocked_reason_raw) if blocked_reason_raw is not None else None
-            blocked_type = str(blocked_type_raw) if blocked_type_raw is not None else None
-            finalization_outcome = "blocked"
-        else:
-            finalization_outcome = _release_decision_value(result.release) if result.release is not None else None
-        self._state_store.add_epic_finalization_outcome_reference(
-            result.selected_epic_id,
-            FinalizationOutcomeReference(
-                release_id=result.release_id,
-                outcome=finalization_outcome,
-                run_summary_path=result.release_summary_path,
-                finalization_policy=result.finalization_policy,
-                branch=branch,
-                commit=commit,
-                cleanup_report_path=cleanup_report,
-                blocked_reason=blocked_reason,
-                blocked_type=blocked_type,
-                unresolved_finding_ids=unresolved_ids,
-                recommended_backlog_state=_recommended_backlog_state(result),
-                recorded_at=recorded_at or datetime.now(UTC),
-            ),
+
+        refresh_dir = _post_cycle_state_refresh_artifacts_dir(
+            runs_dir=runs_dir,
+            release_id=result.release_id,
+            epic_id=result.selected_epic_id,
+            cycle_index=cycle_index,
+            now=recorded_at,
         )
+        phase = "build_post_cycle_state_refresh"
+        partial_artifact_paths: list[Path] = []
+        try:
+            if result.release is None and result.release_id == "no_actionable_work":
+                refresh_artifact, refresh_outcome = build_no_actionable_post_cycle_state_refresh(
+                    epic_id=result.selected_epic_id,
+                    now=recorded_at,
+                )
+            else:
+                refresh_artifact, refresh_outcome = build_post_cycle_state_refresh(
+                    result=result,
+                    retry_count=_read_epic_retry_count(self._state_store, result.selected_epic_id),
+                    repair_count=_read_epic_repair_count(self._state_store, result.selected_epic_id),
+                    now=recorded_at,
+                )
+            phase = "write_post_cycle_state_refresh_artifact"
+            refresh_artifact_path = write_post_cycle_state_refresh_artifact(
+                artifact=refresh_artifact,
+                artifacts_dir=refresh_dir,
+            )
+            partial_artifact_paths.append(refresh_artifact_path)
+            phase = "apply_epic_refresh_outcome"
+            self._state_store.apply_epic_refresh_outcome(
+                result.selected_epic_id,
+                refresh_outcome,
+            )
+        except Exception as error:
+            refresh_dir.mkdir(parents=True, exist_ok=True)
+            error_path = refresh_dir / "state_refresh_error.json"
+            error_path.write_text(
+                json.dumps(
+                    {
+                        "phase": phase,
+                        "release_id": result.release_id,
+                        "epic_id": result.selected_epic_id,
+                        "error_type": type(error).__name__,
+                        "error": str(error),
+                        "partial_artifact_paths": [str(path) for path in partial_artifact_paths if path.exists()],
+                        "recommended_continuation": "stop_governor_until_durable_state_is_repaired",
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            raise PostCycleStateRefreshFailedError(
+                message=(
+                    "post-cycle state refresh failed after epic execution; "
+                    f"phase={phase}; error_artifact={error_path}"
+                ),
+                error_artifact_path=error_path,
+            ) from error
 
     def _no_actionable_reason_for_selected_epic(
         self,
@@ -975,6 +1042,50 @@ def _read_string(payload: dict[str, object], key: str) -> str | None:
 def _path_from_summary_payload(payload: dict[str, object], key: str) -> Path | None:
     value = _read_string(payload, key)
     return Path(value) if value is not None else None
+
+
+def _read_epic_retry_count(state_store: StateStore, epic_id: str) -> int:
+    state = state_store.load()
+    for records in (
+        state.active_epics,
+        state.reviewed_epics,
+        state.completed_epic_records,
+        state.blocked_epic_records,
+        state.skipped_epics,
+    ):
+        for record in records:
+            if record.epic_id == epic_id:
+                return record.retry_count
+    return 0
+
+
+def _read_epic_repair_count(state_store: StateStore, epic_id: str) -> int:
+    state = state_store.load()
+    for records in (
+        state.active_epics,
+        state.reviewed_epics,
+        state.completed_epic_records,
+        state.blocked_epic_records,
+        state.skipped_epics,
+    ):
+        for record in records:
+            if record.epic_id == epic_id:
+                return record.repair_count
+    return 0
+
+
+def _post_cycle_state_refresh_artifacts_dir(
+    *,
+    runs_dir: Path,
+    release_id: str,
+    epic_id: str,
+    cycle_index: int,
+    now: datetime | None,
+) -> Path:
+    timestamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%SZ")
+    safe_release = release_id.replace("/", "-")
+    safe_epic = epic_id.replace("/", "-")
+    return runs_dir / f"{timestamp}_governor_cycle_{cycle_index:03d}_{safe_release}_{safe_epic}_state_refresh"
 
 
 def _unresolved_finding_ids_from_cycle(result: BacklogRunResult) -> list[str]:

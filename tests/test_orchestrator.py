@@ -359,6 +359,14 @@ def test_run_task_writes_typed_soft_budget_acceptance_decision(tmp_path) -> None
 
     loaded = load_supervisor_decision_artifact(artifacts[0])
     assert isinstance(loaded, SoftBudgetAcceptanceDecision)
+    payload = json.loads(artifacts[0].read_text(encoding="utf-8"))
+    assert payload["evidence_paths"] == [
+        "changed_files.txt",
+        "git_diff.patch",
+        "run_state.json",
+        "verification.log",
+        "soft_gate_decision.json",
+    ]
     assert loaded.outcome == BudgetAcceptanceOutcome.ACCEPT_OVERAGE
     assert loaded.budget_name == "max_changed_files_per_task"
     assert loaded.configured_limit == 10.0
