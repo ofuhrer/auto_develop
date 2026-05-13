@@ -188,7 +188,12 @@ def render_feature_review_prompt(
             label=path.name,
         )
 
-    docs_section = _render_docs_design_section(context, docs_design_root)
+    docs_section = _render_docs_design_section(
+        context=context,
+        repo_root=repo_root,
+        runs_root=runs_root,
+        docs_design_root=docs_design_root,
+    )
     diff_text = _bounded_review_text(
         context.diff_text,
         max_chars=MAX_FEATURE_REVIEW_DIFF_CHARS,
@@ -530,16 +535,55 @@ def _safe_glob_files(root: Path, *, pattern: str) -> list[Path]:
     return files
 
 
-def _render_docs_design_section(context: FeatureReviewContext, docs_design_root: Path) -> str:
+def _render_docs_design_section(
+    *,
+    context: FeatureReviewContext,
+    repo_root: Path,
+    runs_root: Path,
+    docs_design_root: Path,
+) -> str:
     if not context.docs_design_paths:
         return "docs/design:\n- (missing)\n"
-    relative = []
+
+    relative_paths: list[str] = []
     for path in context.docs_design_paths:
         try:
-            relative.append(str(path.resolve().relative_to(docs_design_root.resolve())))
+            relative_paths.append(str(path.resolve().relative_to(docs_design_root.resolve())))
         except Exception:
-            relative.append(path.name)
-    return "\n".join(["docs/design files:", *[f"- {path}" for path in relative]])
+            relative_paths.append(path.name)
+
+    selected = [
+        ("ARCHITECTURE.md", "docs/design/ARCHITECTURE.md"),
+        ("TECHNICAL_SPECIFICATION.md", "docs/design/TECHNICAL_SPECIFICATION.md"),
+        ("ROADMAP_AND_BACKLOG.md", "docs/design/ROADMAP_AND_BACKLOG.md"),
+    ]
+    excerpts: list[str] = []
+    for filename, evidence_path in selected:
+        path = docs_design_root / filename
+        if not path.exists():
+            continue
+        text = _safe_read_text(path, allowed_roots=[repo_root, runs_root, docs_design_root])
+        bounded = _bounded_review_text(
+            text,
+            max_chars=MAX_FEATURE_REVIEW_ARTIFACT_CHARS,
+            evidence_path=evidence_path,
+            label=filename,
+        )
+        excerpts.append(f"{evidence_path}:\n{bounded}".rstrip())
+
+    return "\n".join(
+        [
+            "docs/design files:",
+            *[f"- {path}" for path in relative_paths],
+            "",
+            "docs/design excerpts (bounded):",
+            *(
+                ["- (no excerptable design docs found)"]
+                if not excerpts
+                else [block for excerpt in excerpts for block in (excerpt, "")]
+            ),
+        ]
+    ).rstrip()
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:
