@@ -23,6 +23,7 @@ from agentic_devloop.planning import (
 )
 from agentic_devloop.runtime_supervisor import RuntimeSupervisorApplierStopKind
 from agentic_devloop.supervisor_decisions import (
+    ModelOutputNormalizationDecision,
     ExecutionStrategyDecision,
     load_supervisor_decision_artifact,
 )
@@ -807,6 +808,100 @@ def test_parse_planner_output_hard_stops_when_normalization_changes_guarded_sema
 
     assert exc.value.stop_evidence.kind == RuntimeSupervisorApplierStopKind.BYPASSES_HARD_GATE
     assert "allowed_files" in exc.value.stop_evidence.reason
+
+
+def test_strong_model_plan_persists_model_output_normalization_decision_with_validation_errors(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# demo\n", encoding="utf-8")
+    objective_path = tmp_path / "objective.yaml"
+    _write_yaml(
+        objective_path,
+        {
+            "release_id": "v0.4.1",
+            "title": "Normalization evidence",
+            "objective": "Persist model-output normalization decisions.",
+            "acceptance_criteria": ["Normalization artifact is persisted."],
+        },
+    )
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "worker", "max_walltime_minutes": 5},
+            "model_roles": {
+                "planner": {"type": "codex_cli", "model": "gpt-5.5", "max_walltime_minutes": 5}
+            },
+            "model_routing": {"default_role": "planner"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 1,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    class DriftPlannerBackend:
+        def generate(self, **_: object) -> PlannerBackendResult:
+            output_dir = tmp_path / "planner_backend"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            stdout_path = output_dir / "planner_stdout.log"
+            stderr_path = output_dir / "planner_stderr.log"
+            metadata_path = output_dir / "planner_metadata.json"
+            stdout_path.write_text("planner output", encoding="utf-8")
+            stderr_path.write_text("", encoding="utf-8")
+            metadata_path.write_text("{}", encoding="utf-8")
+            return PlannerBackendResult(
+                raw_output={
+                    "release_id": "v0.4.1",
+                    "planner": "strong-model",
+                    "generated_contracts": [
+                        {
+                            "task_id": "v0.4.1-0001",
+                            "title": "Wrapper drift",
+                            "objective": "Normalize schema drift.",
+                            "rationale": "Useful output with alias keys.",
+                                "suggested_contract": {
+                                    "allowedFiles": ["src/agentic_devloop/planning.py"],
+                                    "forbiddenChanges": ["Do not touch release flow."],
+                                    "verificationCommands": ["true"],
+                                    "stopConditions": ["Stop when scope expands."],
+                                },
+                            }
+                        ],
+                    "warnings": [],
+                },
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                metadata_path=metadata_path,
+            )
+
+    result = plan_release_contracts(
+        objective_path=objective_path,
+        contracts_dir=tmp_path / "contracts",
+        runs_dir=tmp_path / "runs",
+        mode="strong-model",
+        project_id="demo",
+        config_dir=config_dir,
+        planner_backend=DriftPlannerBackend(),
+    )
+
+    warning = next(
+        item for item in result.plan.warnings if item.startswith("model_output_normalization_decision_path=")
+    )
+    decision_path = Path(warning.split("=", 1)[1])
+    decision = load_supervisor_decision_artifact(decision_path)
+    assert isinstance(decision, ModelOutputNormalizationDecision)
+    assert decision.validation_errors
+    assert any(error.field.startswith("generated_contracts.0.suggested_contract") for error in decision.validation_errors)
+    assert decision.normalized_artifact_path is not None
 
 
 def test_validate_generated_contracts_rejects_task_id_mismatch() -> None:
