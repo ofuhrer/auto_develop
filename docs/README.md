@@ -10,7 +10,7 @@ This directory contains user, maintainer, and design documentation for `agentic-
 
 ## Project Summary
 
-`agentic-devloop` is an autonomous-first orchestration layer around coding agents. The current governor path is split into a one-epic `GovernorLoop` service, a typed `StateStore` persistence seam, a `RepairPolicy` decision seam, typed supervisor decision records for repair/scheduling/finding adjudication, and implemented runtime-supervisor repair/resume seams for structured release failures. Those seams support roadmap/backlog analysis for the current epic, state persistence, bounded repair decisions, contract normalization, governor-level logging, and deterministic state-review snapshot capture (`state_review_snapshot.json`) with contract-plan plumbing through `state_review_snapshot_path`. The target architecture still needs two explicit agentic loops: full pre-epic state-review decisioning that drives epic selection from live repository evidence, and an independent feature-review/repair loop where a reviewer agent inspects the integrated feature branch and repair agents address reviewer findings before finalization. The broader multi-epic governor loop and fully automated state refresh remain planned. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, and configured Git finalization. Coding agents own implementation inside narrow task contracts.
+`agentic-devloop` is an autonomous-first orchestration layer around coding agents. The current governor path is split into a one-epic `GovernorLoop` service, a typed `StateStore` persistence seam, a `RepairPolicy` decision seam, typed supervisor decision records for repair/scheduling/finding adjudication, a release-local feature-review/repair loop, and implemented runtime-supervisor repair/resume seams for structured release failures. Those seams support roadmap/backlog analysis for the current epic, state persistence, bounded repair decisions, contract normalization, governor-level logging, semantic review of one integrated feature branch, and deterministic state-review snapshot capture (`state_review_snapshot.json`) with contract-plan plumbing through `state_review_snapshot_path`. The target architecture still needs full pre-epic state-review decisioning from live repository evidence, multi-epic governor looping, and fully automated state refresh across repeated cycles. The orchestrator owns policy, task boundaries, state transitions, budgets, verification, evidence, and configured Git finalization. Coding agents own implementation inside narrow task contracts.
 
 The project prioritizes:
 
@@ -61,7 +61,7 @@ Important remaining gaps:
 
 - multi-epic governor looping beyond the current one-epic service boundary;
 - full pre-epic repository state-review decision pass over source state, branches, docs, repo-state memory, recent runs, metrics, and artifacts before selecting the next epic;
-- independent agentic feature-review pass over `main..feature/<release>` plus a reviewer-comment repair loop before PR, merge, or autonomous finalization;
+- multi-epic orchestration of the implemented release-local feature-review/repair loop;
 - top-level governor log stream for monitoring an N-epic run across backlog planning, contract generation, release execution, repair, review, finalization, and state refresh;
 - always-on state refresh across repeated epic cycles;
 - reduction of deterministic heuristic code once supervisor-backed decisions are available; candidate areas include backlog scoring, contract-normalization heuristics, failure classification, budget-tuning prose, exact-overlap rejection, hard rejection for small budget overages, brittle verification-command assumptions, and cockpit-summary filtering;
@@ -69,7 +69,7 @@ Important remaining gaps:
 - executor liveness classification from process, output, heartbeat, and file/diff activity rather than elapsed time alone;
 - target-artifact ownership: external targets should keep durable `.auto_develop/repo_state`, objectives, contracts, and compact outcome history in the target repo or a dedicated control repo, not in the `auto_develop` source checkout;
 - broader multi-epic governor automation remains planned;
-- the typed supervisor-decision-record seam is implemented, but the N-epic governor loop that consumes it is still planned;
+- supervisor-owned scheduling decisions are still planned; typed supervisor-decision records exist, but normal source-file overlap still needs to become a supervisor-owned DAG decision rather than a deterministic stop;
 - stronger model-based repeated-failure diagnosis backend;
 - richer semantic merge-conflict repair and broader repair strategies;
 - automated pull-request creation;

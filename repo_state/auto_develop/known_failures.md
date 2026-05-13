@@ -1,10 +1,5 @@
 # Known Failures
 
-## ad-0001
-
-- Earlier runs failed when the configured Codex model hit quota.
-- Earlier verification used `.venv/bin/python` relative to the task worktree; self-test contracts now use the main worktree virtual environment by absolute path.
-
 ## Closed-loop run learning: unsupported primary worker
 
 - The first full release run showed that `gpt-5.3-codex-spark` is not
@@ -20,17 +15,18 @@
   validated `BacklogPlan`.
 - `run-backlog` now chains selected-epic backlog planning into objective,
   contract, and release execution for one epic.
-- Runtime supervision, planner-output normalization, typed supervisor decision
-  records, and one-epic governor logging are now partially implemented. The
+- Runtime supervision, planner-output normalization, persistent governor memory
+  seams, typed supervisor decision records, and one-epic governor logging are now
+  partially implemented. The
   remaining governor gap is the high-level loop around them: before selecting
   the next epic, the governor should inspect live repository state, branch
   state, source layout, recent run artifacts, release reviews, metrics,
   tuning reports, unresolved findings, and tracked repo-state memory.
-- The current governor can select one epic, but it does not yet own a durable
-  state-review snapshot, update memory before prioritization, or loop over the
-  next N highest-reward epics.
+- The current governor can select one epic and persist bounded state-review
+  snapshots, but it does not yet run a full agent-driven state review before
+  prioritization or loop over the next N highest-reward epics.
 
-## Current Gap: independent feature review
+## Current Gap: review-loop convergence
 
 - `release_review.md` is a deterministic evidence summary; semantic review now
   lives in `feature_review.json` and `feature_review_recheck.json` when a
@@ -42,9 +38,10 @@
   conditional findings can be accepted with rationale after the configured
   integration verification rerun passes; findings that require implementation
   changes remain blocking.
-- Remaining gap: this adjudication is still local to one release. The broader
-  governor should own a typed evidence-backed reviewer/supervisor decision
-  rather than accumulating procedural heuristics in `release.py`.
+- Remaining gap: this adjudication is still local to one release and lacks
+  convergence policy for repeated adjacent findings. The broader governor should
+  own typed evidence-backed reviewer/supervisor decisions rather than
+  accumulating procedural heuristics in `release.py`.
 
 ## Closed-loop run learning: run-backlog autonomous loop
 
