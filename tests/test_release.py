@@ -405,6 +405,7 @@ def test_run_release_executes_ordered_contracts_and_writes_summary(tmp_path) -> 
                 "max_walltime_minutes": 5,
             },
             "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "release_finalization_policy": {"policy": "local_merge", "required_credential_env_vars": []},
             "budget": {
                 "max_executor_attempts_per_task": 2,
                 "max_strong_model_calls_per_release": 10,
@@ -658,8 +659,103 @@ def test_run_release_can_finalize_feature_branch_into_main(tmp_path) -> None:
     assert result.integration_branch == "feature/v0.1.0"
     assert result.finalization is not None
     assert result.finalization.merged is True
+    assert result.finalization_decision_path is not None
+    assert result.finalization_decision_path.exists()
+    decision = json.loads(result.finalization_decision_path.read_text(encoding="utf-8"))
+    assert decision["outcome"] == "executed"
+    assert decision["policy"]["policy"] == "local_merge"
+    assert decision["stop_reason"] is None
+    assert decision["finalization"]["merged"] is True
     assert (repo / "docs" / "demo-0001.md").exists()
     assert _git_output(repo, "branch", "--show-current").strip() == "main"
+
+
+def test_run_release_finalization_stops_when_policy_missing(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    result = run_release(
+        project_id="demo",
+        release_id="v0.1.0",
+        config_dir=config_dir,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FakeExecutor(),
+        merge_on_accept=True,
+        release_finalize="merge-main",
+    )
+
+    assert result.finalization is None
+    assert result.finalization_decision_path is not None
+    decision = json.loads(result.finalization_decision_path.read_text(encoding="utf-8"))
+    assert decision["outcome"] == "stopped"
+    assert decision["stop_reason"] == "missing_policy"
+    assert decision["git_commands"] == []
+    assert not _git_object_exists(repo, "main:docs/demo-0001.md")
+
+
+def test_run_release_finalization_stops_when_credentials_missing(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = _write_demo_config(
+        tmp_path,
+        repo,
+        release_finalization_policy={"policy": "local_merge", "required_credential_env_vars": ["DEMO_CRED"]},
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    with patch.dict("os.environ", {}, clear=True):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=FakeExecutor(),
+            merge_on_accept=True,
+            release_finalize="merge-main",
+        )
+
+    assert result.finalization is None
+    assert result.finalization_decision_path is not None
+    decision = json.loads(result.finalization_decision_path.read_text(encoding="utf-8"))
+    assert decision["outcome"] == "stopped"
+    assert decision["stop_reason"] == "missing_credentials"
+    assert decision["missing_credentials"] == ["DEMO_CRED"]
+    assert decision["git_commands"] == []
+    assert not _git_object_exists(repo, "main:docs/demo-0001.md")
 
 
 def test_run_release_writes_metrics_and_final_log_summary(tmp_path) -> None:
@@ -1970,6 +2066,7 @@ def test_run_release_feature_review_repair_loop_records_artifacts(tmp_path: Path
             },
             "model_routing": {"default_role": "worker"},
             "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "release_finalization_policy": {"policy": "local_merge", "required_credential_env_vars": []},
             "budget": {
                 "max_executor_attempts_per_task": 2,
                 "max_strong_model_calls_per_release": 10,
@@ -2083,6 +2180,7 @@ def test_run_release_feature_review_uses_all_release_contracts_for_continuation_
             },
             "model_routing": {"default_role": "worker"},
             "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "release_finalization_policy": {"policy": "local_merge", "required_credential_env_vars": []},
             "budget": {
                 "max_executor_attempts_per_task": 2,
                 "max_strong_model_calls_per_release": 10,
@@ -2186,6 +2284,7 @@ def test_run_release_feature_review_reruns_requested_verification_subset(tmp_pat
             },
             "model_routing": {"default_role": "worker"},
             "verification_profiles": {"default": {"commands": ["test -d docs", "test -f README.md"]}},
+            "release_finalization_policy": {"policy": "local_merge", "required_credential_env_vars": []},
             "budget": {
                 "max_executor_attempts_per_task": 2,
                 "max_strong_model_calls_per_release": 10,
@@ -2280,6 +2379,7 @@ def test_run_release_feature_review_ignores_unknown_rerun_commands_and_uses_defa
             },
             "model_routing": {"default_role": "worker"},
             "verification_profiles": {"default": {"commands": ["test -d docs", "test -f README.md"]}},
+            "release_finalization_policy": {"policy": "local_merge", "required_credential_env_vars": []},
             "budget": {
                 "max_executor_attempts_per_task": 2,
                 "max_strong_model_calls_per_release": 10,
@@ -2374,6 +2474,7 @@ def test_run_release_feature_review_normalizes_derivable_empty_evidence_paths(tm
             },
             "model_routing": {"default_role": "worker"},
             "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "release_finalization_policy": {"policy": "local_merge", "required_credential_env_vars": []},
             "budget": {
                 "max_executor_attempts_per_task": 2,
                 "max_strong_model_calls_per_release": 10,
@@ -3340,6 +3441,7 @@ def test_run_release_feature_review_repair_recheck_allows_finalization_gate(tmp_
             },
             "model_routing": {"default_role": "worker"},
             "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "release_finalization_policy": {"policy": "local_merge", "required_credential_env_vars": []},
             "budget": {
                 "max_executor_attempts_per_task": 2,
                 "max_strong_model_calls_per_release": 10,
@@ -3461,6 +3563,7 @@ def test_run_release_feature_review_end_to_end_flow_opens_finalization_gate(tmp_
             },
             "model_routing": {"default_role": "worker"},
             "verification_profiles": {"default": {"commands": ["test -d docs", "test -f README.md"]}},
+            "release_finalization_policy": {"policy": "local_merge", "required_credential_env_vars": []},
             "budget": {
                 "max_executor_attempts_per_task": 2,
                 "max_strong_model_calls_per_release": 10,
@@ -3577,6 +3680,7 @@ def test_run_release_feature_review_full_repair_recheck_finalization_regression(
             },
             "model_routing": {"default_role": "worker"},
             "verification_profiles": {"default": {"commands": ["test -d docs", "test -f README.md"]}},
+            "release_finalization_policy": {"policy": "local_merge", "required_credential_env_vars": []},
             "budget": {
                 "max_executor_attempts_per_task": 2,
                 "max_strong_model_calls_per_release": 10,
@@ -3770,6 +3874,12 @@ def test_run_release_blocks_finalization_on_unresolved_required_feature_review_f
     assert result.finalization_gate["unresolved_required_finding_ids"] == ["finding-required-1"]
     assert summary["finalization_gate"]["reason"] == "unresolved_required_findings"
     assert summary["finalization_gate"]["unresolved_required_finding_ids"] == ["finding-required-1"]
+    finalization_decision_path = Path(summary["finalization_decision_path"])
+    assert finalization_decision_path.exists()
+    finalization_decision = json.loads(finalization_decision_path.read_text(encoding="utf-8"))
+    assert finalization_decision["outcome"] == "stopped"
+    assert finalization_decision["stop_reason"] == "failed_gate"
+    assert finalization_decision["git_commands"] == []
     assert "- Gate reason: `unresolved_required_findings`" in review
     assert "- Unresolved required findings: `1`" in review
 
@@ -4323,6 +4433,7 @@ def _write_demo_config(
     max_strong_model_calls_per_release: int = 10,
     verification_command: str = "test -d docs",
     unsafe_overlap_paths: list[str] | None = None,
+    release_finalization_policy: dict | None = None,
 ) -> Path:
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
@@ -4340,6 +4451,9 @@ def _write_demo_config(
             },
             "verification_profiles": {"default": {"commands": [verification_command]}},
             "unsafe_overlap_paths": unsafe_overlap_paths or [],
+            "release_finalization_policy": release_finalization_policy
+            if release_finalization_policy is not None
+            else {"policy": "local_merge", "required_credential_env_vars": []},
             "budget": {
                 "max_executor_attempts_per_task": 2,
                 "max_strong_model_calls_per_release": max_strong_model_calls_per_release,
