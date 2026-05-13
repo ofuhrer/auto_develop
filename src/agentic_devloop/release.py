@@ -1413,6 +1413,7 @@ def _run_feature_review_and_repair_loop(
             *,
             attempt: int,
             accepted_required_finding_ids: set[str] | None = None,
+            write_stable_latest: bool = True,
         ) -> dict[str, Path]:
             accepted_required_finding_ids = accepted_required_finding_ids or set()
             written: dict[str, Path] = {}
@@ -1432,7 +1433,7 @@ def _run_feature_review_and_repair_loop(
                 evidence_paths: list[str] = []
                 if feature_review_path is not None:
                     evidence_paths.append(str(feature_review_path.resolve()))
-                if is_accepted and last_verification_log_path is not None:
+                if last_verification_log_path is not None and (write_stable_latest or is_accepted):
                     evidence_paths.append(str(last_verification_log_path.resolve()))
                 stable_decision_id = f"{release_id}__feature_review_finding__{finding_id}"
                 attempt_decision_id = f"{stable_decision_id}__attempt_{attempt}"
@@ -1462,9 +1463,9 @@ def _run_feature_review_and_repair_loop(
                 )
                 written[finding_id] = attempt_path
 
-                # Maintain a stable, "latest" decision id that always points at the most recent attempt.
-                stable_record = decision_record.model_copy(update={"decision_id": stable_decision_id})
-                write_supervisor_decision_artifact(release_bundle_path=release_root, decision=stable_record)
+                if write_stable_latest:
+                    stable_record = decision_record.model_copy(update={"decision_id": stable_decision_id})
+                    write_supervisor_decision_artifact(release_bundle_path=release_root, decision=stable_record)
                 _report(
                     progress,
                     "event=feature_review_finding_classified attempt="
@@ -1577,6 +1578,7 @@ def _run_feature_review_and_repair_loop(
         write_non_blocking_finding_classifications(attempt=loop_index + 1)
 
         if decision.recommendation == FeatureReviewRecommendation.ESCALATE:
+            write_required_finding_classifications(attempt=loop_index + 1, write_stable_latest=True)
             gating_decision = Decision.ESCALATED
             unresolved_finding_ids = [finding.finding_id for finding in decision.findings]
             if not unresolved_finding_ids and outstanding_required_finding_ids:
@@ -1695,11 +1697,12 @@ def _run_feature_review_and_repair_loop(
                 gating_decision=gating_decision,
             )
 
-        write_required_finding_classifications(attempt=loop_index + 1)
+        write_required_finding_classifications(attempt=loop_index + 1, write_stable_latest=False)
 
         repair_blocker_ids = set(convergence.blocking_finding_ids)
         if not repair_blocker_ids:
             gating_decision = Decision.ACCEPTED
+            write_required_finding_classifications(attempt=loop_index + 1, write_stable_latest=True)
             feature_review_recheck = FeatureReviewRecheckRecord(
                 release_id=release_id,
                 unresolved_finding_ids=[],
@@ -1816,6 +1819,7 @@ def _run_feature_review_and_repair_loop(
                 feature_review_proposals=current_proposals(),
                 gating_decision=gating_decision,
             )
+        write_required_finding_classifications(attempt=loop_index + 1, write_stable_latest=True)
         decision = run_review(attempt=loop_index + 2)
         previous_review_decisions.append(decision)
 
