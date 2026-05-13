@@ -928,6 +928,45 @@ def _release_run_result(result) -> dict[str, object]:
         "budget_path": str(result.budget_path) if getattr(result, "budget_path", None) else None,
         "tuning_path": str(result.tuning_path) if getattr(result, "tuning_path", None) else None,
         "integration_branch": getattr(result, "integration_branch", None),
+        "feature_review_path": str(result.feature_review_path) if getattr(result, "feature_review_path", None) else None,
+        "feature_review_recheck_path": (
+            str(result.feature_review_recheck_path) if getattr(result, "feature_review_recheck_path", None) else None
+        ),
+        "final_review_continuation_decision_path": (
+            str(result.final_review_continuation_decision_path)
+            if getattr(result, "final_review_continuation_decision_path", None)
+            else None
+        ),
+        "final_integration_verification_path": (
+            str(result.final_integration_verification_path)
+            if getattr(result, "final_integration_verification_path", None)
+            else None
+        ),
+        "feature_review_prompt_path": (
+            str(result.feature_review_prompt_path) if getattr(result, "feature_review_prompt_path", None) else None
+        ),
+        "feature_review_stdout_path": (
+            str(result.feature_review_stdout_path) if getattr(result, "feature_review_stdout_path", None) else None
+        ),
+        "feature_review_stderr_path": (
+            str(result.feature_review_stderr_path) if getattr(result, "feature_review_stderr_path", None) else None
+        ),
+        "feature_review_metadata_path": (
+            str(result.feature_review_metadata_path) if getattr(result, "feature_review_metadata_path", None) else None
+        ),
+        "feature_review_output_normalization_decision_path": (
+            str(result.feature_review_output_normalization_decision_path)
+            if getattr(result, "feature_review_output_normalization_decision_path", None)
+            else None
+        ),
+        "feature_review_normalized_artifact_path": (
+            str(result.feature_review_normalized_artifact_path)
+            if getattr(result, "feature_review_normalized_artifact_path", None)
+            else None
+        ),
+        "feature_review_proposals": [
+            proposal.model_dump(mode="json") for proposal in getattr(result, "feature_review_proposals", [])
+        ],
         "decision": result.decision,
         "tasks": [_task_run_result(task_result) for task_result in result.task_results],
     }

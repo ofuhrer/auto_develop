@@ -2450,7 +2450,15 @@ def test_run_release_feature_review_normalizes_derivable_empty_evidence_paths(tm
 
     summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
     normalized_decision = json.loads(Path(summary["feature_review_path"]).read_text(encoding="utf-8"))
+    normalization_decision_path = Path(summary["feature_review_output_normalization_decision_path"])
+    normalized_artifact_path = Path(summary["feature_review_normalized_artifact_path"])
     assert result.decision == Decision.ACCEPTED
+    assert Path(summary["feature_review_prompt_path"]).exists()
+    assert Path(summary["feature_review_stdout_path"]).exists()
+    assert Path(summary["feature_review_stderr_path"]).exists()
+    assert Path(summary["feature_review_metadata_path"]).exists()
+    assert normalization_decision_path.exists()
+    assert normalized_artifact_path.exists()
     assert normalized_decision["findings"][0]["evidence_paths"] == ["docs/demo-0001.md"]
 
     decision_path = supervisor_decision_artifact_path(
@@ -2461,6 +2469,7 @@ def test_run_release_feature_review_normalizes_derivable_empty_evidence_paths(tm
     decision = load_supervisor_decision_artifact(decision_path)
     assert decision.selected_action.value == "apply_normalization"
     assert decision.validators_to_rerun == ["FeatureReviewDecision", "ReviewDecision"]
+    assert normalization_decision_path == decision_path
 
 
 def test_run_release_feature_review_normalization_rejects_semantic_changes(tmp_path: Path) -> None:
@@ -4140,9 +4149,11 @@ def test_run_release_persists_final_review_continuation_decision_artifact(tmp_pa
     assert continuation["outcome"] == "hard_stop"
     assert continuation["feature_review_path"] == summary["feature_review_path"]
     assert continuation["feature_review_recheck_path"] == summary["feature_review_recheck_path"]
+    assert continuation["final_integration_verification_path"] == summary["final_integration_verification_path"]
     assert continuation["finding_ids"] == []
     assert isinstance(continuation["hard_stop_reason"], str)
     assert continuation["hard_stop_reason"]
+    assert Path(summary["final_integration_verification_path"]).exists()
     assert "final_review_continuation_decision_path" in summary
 
 

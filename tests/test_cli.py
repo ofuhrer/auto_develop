@@ -118,6 +118,16 @@ def test_run_release_command_outputs_budget_artifact_paths(monkeypatch, capsys, 
         budget_path=tmp_path / "runs" / "release_budget.json",
         tuning_path=tmp_path / "runs" / "release_tuning.md",
         integration_branch="feature/v1.0.0",
+        feature_review_path=tmp_path / "runs" / "feature_review.json",
+        feature_review_recheck_path=tmp_path / "runs" / "feature_review_recheck.json",
+        final_review_continuation_decision_path=tmp_path / "runs" / "final_review_continuation_decision.json",
+        final_integration_verification_path=tmp_path / "runs" / "final_integration_verification.json",
+        feature_review_prompt_path=tmp_path / "runs" / "feature_review_prompt.md",
+        feature_review_stdout_path=tmp_path / "runs" / "feature_review_stdout.log",
+        feature_review_stderr_path=tmp_path / "runs" / "feature_review_stderr.log",
+        feature_review_metadata_path=tmp_path / "runs" / "feature_review_metadata.json",
+        feature_review_output_normalization_decision_path=tmp_path / "runs" / "feature_review_output_normalization_decision.json",
+        feature_review_normalized_artifact_path=tmp_path / "runs" / "normalized_feature_review_decision.json",
         decision="accepted",
         task_results=[],
     )
@@ -133,6 +143,9 @@ def test_run_release_command_outputs_budget_artifact_paths(monkeypatch, capsys, 
     assert "release_budget.json" in captured.out
     assert '"tuning_path":' in captured.out
     assert "release_tuning.md" in captured.out
+    assert '"feature_review_prompt_path":' in captured.out
+    assert '"final_review_continuation_decision_path":' in captured.out
+    assert '"final_integration_verification_path":' in captured.out
 
 
 def test_run_release_command_outputs_finalization_gate(monkeypatch, capsys, tmp_path) -> None:
