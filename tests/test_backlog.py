@@ -23,6 +23,11 @@ from agentic_devloop.models import (
     GovernorContinuationStopReason,
     GovernorStopReason,
 )
+from agentic_devloop.state_refresh import (
+    PostCycleStateRefreshArtifact,
+    build_post_cycle_state_refresh,
+    write_post_cycle_state_refresh_artifact,
+)
 from agentic_devloop.state_store import StateStore
 
 
@@ -1378,6 +1383,168 @@ def test_governor_persists_blocked_finalization_memory_before_second_cycle(tmp_p
     assert str(finalization_memory.cleanup_report_path).endswith("cleanup_report.json")
     assert finalization_memory.unresolved_finding_ids == ["finding-1"]
     assert finalization_memory.recommended_backlog_state == "blocked"
+
+
+def test_state_refresh_builder_completed_finalized_with_review_details(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    release_dir = tmp_path / "runs" / "demo-epic-0001_release"
+    release_dir.mkdir(parents=True, exist_ok=True)
+    feature_review_path = release_dir / "feature_review.json"
+    feature_review_path.write_text(
+        json.dumps(
+            {
+                "findings": [
+                    {
+                        "finding_id": "finding-1",
+                        "severity": "moderate",
+                        "summary": "Required file overlap remains unresolved.",
+                    }
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    feature_review_recheck_path = release_dir / "feature_review_recheck.json"
+    feature_review_recheck_path.write_text(
+        json.dumps({"unresolved_finding_ids": ["finding-1"]}) + "\n",
+        encoding="utf-8",
+    )
+    release_summary_path = release_dir / "release_summary.json"
+    release_summary_path.write_text(
+        json.dumps(
+            {
+                "integration_branch": "feature/demo-epic-0001",
+                "integration_commit": "deadbeef",
+                "cleanup_report_path": str(release_dir / "cleanup_report.json"),
+                "feature_review_path": str(feature_review_path),
+                "feature_review_recheck_path": str(feature_review_recheck_path),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    result = SimpleNamespace(
+        selected_epic_id="epic-0001",
+        release_id="demo-epic-0001",
+        release=SimpleNamespace(decision="accepted"),
+        release_summary_path=release_summary_path,
+        release_metrics_path=release_dir / "release_metrics.json",
+        release_budget_path=release_dir / "release_budget.json",
+        release_tuning_path=release_dir / "release_tuning.md",
+        finalization_policy="push-feature",
+        finalization_result={"result": {"merged": True, "pushed": True}},
+        blocked_finalization=None,
+        governor_cycle_continuation=None,
+    )
+
+    artifact, refresh_outcome = build_post_cycle_state_refresh(result=result, retry_count=1, repair_count=2)
+    validated = PostCycleStateRefreshArtifact.model_validate(artifact.model_dump(mode="json"))
+
+    assert validated.lifecycle_state == "completed"
+    assert validated.status_reason == "accepted_and_finalized"
+    assert len(validated.unresolved_finding_references) == 1
+    assert validated.unresolved_finding_references[0].finding_id == "finding-1"
+    assert validated.unresolved_finding_references[0].summary == "Required file overlap remains unresolved."
+    assert validated.unresolved_finding_references[0].source_path == feature_review_path
+    assert refresh_outcome.finalization_outcome_references[0].branch == "feature/demo-epic-0001"
+    assert refresh_outcome.finalization_outcome_references[0].commit == "deadbeef"
+
+
+def test_state_refresh_builder_blocked_finalization_from_gate(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    release_dir = tmp_path / "runs" / "demo-epic-0002_release"
+    release_dir.mkdir(parents=True, exist_ok=True)
+    release_summary_path = release_dir / "release_summary.json"
+    release_summary_path.write_text(json.dumps({"integration_branch": "feature/demo-epic-0002"}) + "\n", encoding="utf-8")
+    result = SimpleNamespace(
+        selected_epic_id="epic-0002",
+        release_id="demo-epic-0002",
+        release=SimpleNamespace(decision="accepted"),
+        release_summary_path=release_summary_path,
+        release_metrics_path=None,
+        release_budget_path=None,
+        release_tuning_path=None,
+        finalization_policy="push-feature",
+        finalization_result={"gate": {"allowed": False}},
+        blocked_finalization={
+            "type": "finalization_gate_blocked",
+            "reason": "unresolved_required_findings",
+            "unresolved_required_finding_ids": ["finding-2"],
+        },
+        governor_cycle_continuation=None,
+    )
+
+    artifact, refresh_outcome = build_post_cycle_state_refresh(result=result)
+    assert artifact.lifecycle_state == "blocked"
+    assert artifact.status_reason == "blocked:unresolved_required_findings"
+    assert artifact.unresolved_finding_references[0].finding_id == "finding-2"
+    assert refresh_outcome.blocked_reason == "unresolved_required_findings"
+    assert refresh_outcome.finalization_outcome_references[0].outcome == "blocked"
+
+
+def test_state_refresh_builder_failed_release_marks_blocked(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    release_dir = tmp_path / "runs" / "demo-epic-0003_release"
+    release_dir.mkdir(parents=True, exist_ok=True)
+    result = SimpleNamespace(
+        selected_epic_id="epic-0003",
+        release_id="demo-epic-0003",
+        release=SimpleNamespace(decision="failed"),
+        release_summary_path=release_dir / "release_summary.json",
+        release_metrics_path=None,
+        release_budget_path=None,
+        release_tuning_path=None,
+        finalization_policy="local-merge",
+        finalization_result=None,
+        blocked_finalization=None,
+        governor_cycle_continuation=None,
+    )
+
+    artifact, refresh_outcome = build_post_cycle_state_refresh(result=result)
+    assert artifact.lifecycle_state == "blocked"
+    assert artifact.status_reason == "release_failed"
+    assert refresh_outcome.lifecycle_state == "blocked"
+    assert refresh_outcome.outcome_references[0].outcome == "failed"
+
+
+def test_state_refresh_builder_manual_merge_completed_and_writes_artifact(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    release_dir = tmp_path / "runs" / "demo-epic-0004_release"
+    release_dir.mkdir(parents=True, exist_ok=True)
+    release_summary_path = release_dir / "release_summary.json"
+    release_summary_path.write_text(
+        json.dumps({"integration_branch": "feature/demo-epic-0004", "integration_commit": "cafe1234"}) + "\n",
+        encoding="utf-8",
+    )
+    result = SimpleNamespace(
+        selected_epic_id="epic-0004",
+        release_id="demo-epic-0004",
+        release=SimpleNamespace(decision="accepted"),
+        release_summary_path=release_summary_path,
+        release_metrics_path=release_dir / "release_metrics.json",
+        release_budget_path=release_dir / "release_budget.json",
+        release_tuning_path=release_dir / "release_tuning.md",
+        finalization_policy="stop_missing_policy_or_credentials",
+        finalization_result={"result": {"merged": False, "pushed": False}},
+        blocked_finalization=None,
+        governor_cycle_continuation=None,
+    )
+
+    artifact, refresh_outcome = build_post_cycle_state_refresh(result=result)
+    written = write_post_cycle_state_refresh_artifact(artifact=artifact, artifacts_dir=release_dir)
+    payload = json.loads(written.read_text(encoding="utf-8"))
+
+    assert artifact.lifecycle_state == "completed"
+    assert artifact.status_reason == "accepted_manual_merge_or_completed"
+    assert "record manual merge/completion outcome in repo-state memory" in artifact.next_recommendations
+    assert payload["status_reason"] == "accepted_manual_merge_or_completed"
+    assert payload["finalization_outcome_path"].endswith("release_summary.json")
+    assert refresh_outcome.finalization_outcome_references[0].recommended_backlog_state == "completed"
 
 
 def test_governor_cycle_continuation_records_unresolved_review_stop_reason(tmp_path) -> None:
