@@ -429,6 +429,53 @@ def test_write_and_load_model_output_normalization_refused_from_reusable_api(tmp
     assert loaded.model_dump(mode="json")["outcome"] == "refused_and_stop"
 
 
+@pytest.mark.parametrize(
+    "refusal_reason",
+    [
+        "Unsafe normalization would change contract intent.",
+        "Unsafe normalization would invent hard evidence requirements.",
+        "Unsafe normalization would weaken verification constraints.",
+        "Unsafe normalization would violate allowed-file/forbidden-change policy boundaries.",
+    ],
+)
+def test_model_output_normalization_refusal_persists_semantic_safety_categories(
+    tmp_path: Path,
+    refusal_reason: str,
+) -> None:
+    evidence_file = tmp_path / "normalization-evidence.log"
+    evidence_file.write_text("refused\n", encoding="utf-8")
+    raw_artifact = tmp_path / "planner.raw.json"
+    raw_artifact.write_text("{}\n", encoding="utf-8")
+
+    action_payload = ModelOutputNormalizationActionPayload.model_validate(
+        {
+            "raw_artifact_paths": [Path("planner.raw.json")],
+            "validation_errors": [{"field": "generated_contracts", "message": "Invalid shape", "error_type": "mapping_type"}],
+            "selected_action": "refuse",
+            "outcome": "refused_and_stop",
+            "rationale": "Refuse unsafe semantic rewrite.",
+            "fallback_plan": "Stop and request a fresh planner run.",
+            "validators_to_rerun": ["contract_plan"],
+            "refusal_reason": refusal_reason,
+        }
+    )
+    decision = build_model_output_normalization_decision(
+        decision_id="normalization-refused-semantic-001",
+        release_id="planner-normalization-generalization",
+        decided_at=datetime(2026, 5, 13, 10, 0, 0),
+        decided_by="supervisor-agent",
+        risk_level=DecisionRiskLevel.HIGH,
+        evidence_paths=[Path("normalization-evidence.log")],
+        action_payload=action_payload,
+    )
+
+    artifact_path = write_supervisor_decision_artifact(release_bundle_path=tmp_path, decision=decision)
+    loaded = load_supervisor_decision_artifact(artifact_path)
+
+    assert loaded == decision
+    assert loaded.refusal_reason == refusal_reason
+
+
 def test_write_and_load_feature_review_finding_classification_artifact_round_trip(tmp_path: Path) -> None:
     evidence_file = tmp_path / "finding-classification-evidence.log"
     evidence_file.write_text("duplicate accepted with evidence\n", encoding="utf-8")
