@@ -7,6 +7,7 @@ import pytest
 
 from agentic_devloop.state_store import (
     BacklogState,
+    FinalizationOutcomeReference,
     OutcomeReference,
     StateReviewSnapshotReference,
     StateStore,
@@ -438,3 +439,35 @@ def test_record_recent_run_summary_requires_positive_max_entries(tmp_path: Path)
 
     with pytest.raises(ValueError, match="max_entries"):
         store.record_recent_run_summary(Path("runs/demo/review_summary.json"), max_entries=0)
+
+
+def test_add_epic_finalization_outcome_reference_persists_memory_fields(tmp_path: Path) -> None:
+    state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
+    store = StateStore(state_path)
+    store.mark_completed_epic("epic-1")
+
+    state = store.add_epic_finalization_outcome_reference(
+        "epic-1",
+        FinalizationOutcomeReference(
+            release_id="autonomous-finalization-and-cleanup",
+            outcome="accepted",
+            run_summary_path=Path("runs/release/release_summary.json"),
+            finalization_policy="push-feature",
+            branch="feature/autonomous-finalization-and-cleanup",
+            commit="abc123",
+            cleanup_report_path=Path("runs/release/cleanup_report.json"),
+            recommended_backlog_state="completed",
+            recorded_at=datetime(2026, 5, 13, 12, 0, tzinfo=UTC),
+        ),
+    )
+
+    record = state.completed_epic_records[0]
+    assert record.epic_id == "epic-1"
+    assert len(record.finalization_outcome_references) == 1
+    finalization = record.finalization_outcome_references[0]
+    assert finalization.release_id == "autonomous-finalization-and-cleanup"
+    assert str(finalization.run_summary_path).endswith("release_summary.json")
+    assert finalization.branch == "feature/autonomous-finalization-and-cleanup"
+    assert finalization.commit == "abc123"
+    assert str(finalization.cleanup_report_path).endswith("cleanup_report.json")
+    assert finalization.recommended_backlog_state == "completed"
