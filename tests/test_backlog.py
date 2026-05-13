@@ -10,6 +10,7 @@ import yaml
 
 from agentic_devloop.backlog import BacklogPlannerBackendResult, parse_backlog_planner_output, plan_backlog
 from agentic_devloop.backlog import run_backlog
+import agentic_devloop.governor as governor_module
 from agentic_devloop.execution_strategy import (
     ExecutionStrategyAction,
     ExecutionStrategyReason,
@@ -786,6 +787,57 @@ def test_governor_loop_runs_one_epic_and_builds_evidence_manifest(tmp_path) -> N
     summary_payload = json.loads(result.state_refresh_summary_path.read_text(encoding="utf-8"))
     assert summary_payload["state_review_snapshot_path"].endswith("state_review_snapshot.json")
     assert summary_payload["status_count"] >= 0
+
+
+def test_governor_loop_state_refresh_failure_writes_error_artifact(tmp_path, monkeypatch) -> None:
+    runs_dir = tmp_path / "runs"
+    objectives_dir = tmp_path / "objectives"
+    roadmap_path = tmp_path / "ROADMAP.md"
+    roadmap_path.write_text("# Roadmap\n", encoding="utf-8")
+    config_dir = _write_project_config(tmp_path)
+
+    def fail_state_refresh(**_kwargs):
+        raise ValueError("git status unavailable")
+
+    monkeypatch.setattr(governor_module, "collect_state_review_snapshot", fail_state_refresh)
+
+    with pytest.raises(RuntimeError, match="governor state refresh failed before epic selection") as exc:
+        GovernorLoop(
+            plan_backlog=lambda **_kwargs: pytest.fail("planning should not run after state refresh failure"),
+            run_objective=lambda **_kwargs: pytest.fail("objective should not run after state refresh failure"),
+        ).run_one_epic(
+            project_id="demo",
+            goal="Run one epic.",
+            roadmap_path=roadmap_path,
+            selected_epic_id=None,
+            config_dir=config_dir,
+            contracts_dir=tmp_path / "contracts",
+            runs_dir=runs_dir,
+            objectives_dir=objectives_dir,
+            mode="deterministic",
+            planner_backend=None,
+            objective_planner_backend=FakeObjectivePlannerBackend(),
+            executor=FakeExecutor(),
+            verification_timeout_seconds=60,
+            allow_dirty=True,
+            commit_on_accept=False,
+            merge_on_accept=False,
+            push_on_accept=False,
+            release_finalize="none",
+            integration_branch=None,
+            stop_on_failure=True,
+            execution_mode="sequential",
+            debug_keep_artifacts=False,
+            progress=None,
+            now=datetime(2026, 5, 12, 12, 0, tzinfo=UTC),
+        )
+
+    error_path = Path(str(exc.value).split("error_artifact=", 1)[1])
+    payload = json.loads(error_path.read_text(encoding="utf-8"))
+    assert payload["phase"] == "collect_state_review_snapshot"
+    assert payload["error_type"] == "ValueError"
+    assert payload["error"] == "git status unavailable"
+    assert payload["partial_artifact_paths"] == []
 
 
 def test_governor_loop_marks_planning_only_strategy_as_reviewed_not_blocked(tmp_path) -> None:

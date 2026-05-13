@@ -285,25 +285,17 @@ class GovernorLoop:
             runs_dir=runs_dir,
             now=now,
         )
-        snapshot = collect_state_review_snapshot(
+        (
+            state_review_snapshot_path,
+            state_refresh_summary_path,
+            state_refresh_summary_payload,
+        ) = _collect_governor_state_refresh(
             repo_path=config.repo_path,
             repo_state_path=config.repo_state_path,
             runs_dir=runs_dir,
+            artifacts_dir=state_refresh_artifacts_dir,
             now=now,
         )
-        state_review_snapshot_path = write_state_review_snapshot_artifact(
-            snapshot=snapshot,
-            artifacts_dir=state_refresh_artifacts_dir,
-        )
-        state_refresh_summary = build_state_refresh_summary(
-            snapshot=snapshot,
-            state_review_snapshot_path=state_review_snapshot_path,
-        )
-        state_refresh_summary_path = write_state_refresh_summary_artifact(
-            summary=state_refresh_summary,
-            artifacts_dir=state_refresh_artifacts_dir,
-        )
-        state_refresh_summary_payload = state_refresh_summary.model_dump(mode="json")
 
         plan_result = self._plan_backlog(
             project_id=project_id,
@@ -569,6 +561,71 @@ class GovernorLoop:
 def _state_refresh_artifacts_dir(*, runs_dir: Path, now: datetime | None) -> Path:
     timestamp = (now or datetime.now(UTC)).strftime("%Y%m%dT%H%M%SZ")
     return runs_dir / f"{timestamp}_governor_state_refresh"
+
+
+def _collect_governor_state_refresh(
+    *,
+    repo_path: Path,
+    repo_state_path: Path | None,
+    runs_dir: Path,
+    artifacts_dir: Path,
+    now: datetime | None,
+) -> tuple[Path, Path, dict[str, object]]:
+    phase = "collect_state_review_snapshot"
+    written_paths: list[Path] = []
+    try:
+        snapshot = collect_state_review_snapshot(
+            repo_path=repo_path,
+            repo_state_path=repo_state_path,
+            runs_dir=runs_dir,
+            now=now,
+        )
+        phase = "write_state_review_snapshot"
+        state_review_snapshot_path = write_state_review_snapshot_artifact(
+            snapshot=snapshot,
+            artifacts_dir=artifacts_dir,
+        )
+        written_paths.append(state_review_snapshot_path)
+        phase = "build_state_refresh_summary"
+        state_refresh_summary = build_state_refresh_summary(
+            snapshot=snapshot,
+            state_review_snapshot_path=state_review_snapshot_path,
+        )
+        phase = "write_state_refresh_summary"
+        state_refresh_summary_path = write_state_refresh_summary_artifact(
+            summary=state_refresh_summary,
+            artifacts_dir=artifacts_dir,
+        )
+        written_paths.append(state_refresh_summary_path)
+        return (
+            state_review_snapshot_path,
+            state_refresh_summary_path,
+            state_refresh_summary.model_dump(mode="json"),
+        )
+    except Exception as error:
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+        error_path = artifacts_dir / "state_refresh_error.json"
+        error_path.write_text(
+            json.dumps(
+                {
+                    "phase": phase,
+                    "repo_path": str(repo_path),
+                    "repo_state_path": str(repo_state_path) if repo_state_path is not None else None,
+                    "runs_dir": str(runs_dir),
+                    "error_type": type(error).__name__,
+                    "error": str(error),
+                    "partial_artifact_paths": [str(path) for path in written_paths if path.exists()],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        raise RuntimeError(
+            "governor state refresh failed before epic selection; "
+            f"phase={phase}; error_artifact={error_path}"
+        ) from error
 
 
 def _build_execution_strategy_inputs(
