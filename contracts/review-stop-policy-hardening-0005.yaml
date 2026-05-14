@@ -35,7 +35,8 @@ verification:
   - git diff --check
   profile: null
 stop_conditions:
-- Stop if docs would need to describe behavior not implemented by tasks 0001-0004.
+- Stop if docs would need to describe behavior not implemented by tasks 0002-0004
+  or the baseline 0001 schema task.
 - Stop if documentation changes require committing generated runtime evidence or repo_state
   artifacts.
 - Stop if docs would imply human judgment is still required after green verification

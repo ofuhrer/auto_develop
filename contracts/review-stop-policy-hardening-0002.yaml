@@ -53,5 +53,4 @@ fixture_changes_allowed: true
 tolerance_changes_allowed: false
 benchmark_delta_required: false
 remote_dispatch: null
-depends_on:
-- review-stop-policy-hardening-0001
+depends_on: []
