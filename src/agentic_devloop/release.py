@@ -119,6 +119,8 @@ from agentic_devloop.state_review import (
     collect_state_review_snapshot,
     write_state_review_snapshot_artifact,
 )
+from agentic_devloop.state_store import FinalReviewFollowUpMemoryReference, StateStore
+from agentic_devloop.yaml_io import load_yaml_model
 
 
 def _load_supervisor_decision_artifact_silencing_legacy_warning(path: Path) -> StrictModel:
@@ -129,8 +131,6 @@ def _load_supervisor_decision_artifact_silencing_legacy_warning(path: Path) -> S
             category=UserWarning,
         )
         return load_supervisor_decision_artifact(path)
-from agentic_devloop.state_store import FinalReviewFollowUpMemoryReference, StateStore
-from agentic_devloop.yaml_io import load_yaml_model
 
 
 @dataclass(frozen=True)
