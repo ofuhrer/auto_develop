@@ -87,6 +87,8 @@ class FinalReviewFollowUpMemoryReference(BaseModel):
     @field_validator("evidence_paths")
     @classmethod
     def _evidence_paths_must_not_be_empty(cls, values: list[Path]) -> list[Path]:
+        if not values:
+            raise ValueError("final review follow-up evidence paths must include at least one path")
         if any(not str(value).strip() for value in values):
             raise ValueError("final review follow-up evidence paths must not be empty")
         return values

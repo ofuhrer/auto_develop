@@ -36,6 +36,7 @@ from agentic_devloop.release import (
     _runtime_supervisor_classification_for_task_result,
     _verification_adjudicated_required_finding_ids,
     _multiplexed_progress,
+    _persist_compact_final_review_follow_up_memory,
     _release_dependency_map,
     _should_preserve_task_branch,
     _should_preserve_task_worktree,
@@ -5010,6 +5011,36 @@ def test_run_release_feature_review_convergence_limit_uses_release_evidence_when
     memories = active_epics[0].get("final_review_follow_up_memories", []) if active_epics else []
     assert memories
     assert any(item["classification"] == "backlog_follow_up" for item in memories)
+
+
+def test_persist_compact_final_review_follow_up_memory_returns_none_for_noop(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    continuation_path = tmp_path / "runs" / "final_review_continuation_decision.json"
+    continuation_path.parent.mkdir(parents=True)
+    decision = FinalReviewContinuationDecision(
+        release_id="review-convergence-adjudicator",
+        outcome=FinalReviewContinuationOutcome.ACCEPTED_RISK,
+        feature_review_path=Path("feature_review.json"),
+        feature_review_recheck_path=Path("feature_review_recheck.json"),
+        final_integration_verification_path=Path("final_integration_verification.json"),
+        finding_ids=["accepted-risk-1"],
+        finding_adjudication_paths=[],
+        rerun_validator_evidence_paths=[Path("feature_review/verification_rerun_01/verification.log")],
+        accepted_risk_rationale="No remaining finding needed compact memory.",
+    )
+    continuation_path.write_text(decision.model_dump_json(indent=2) + "\n", encoding="utf-8")
+
+    path = _persist_compact_final_review_follow_up_memory(
+        config_repo_path=repo,
+        repo_state_path=Path("repo_state/demo"),
+        release_id="review-convergence-adjudicator",
+        continuation_decision_path=continuation_path,
+    )
+
+    assert path is None
+    assert not (repo / "repo_state" / "demo" / "backlog_state.yaml").exists()
+
 
 def test_release_finalization_gate_only_counts_required_findings() -> None:
     decision = FeatureReviewDecision.model_validate(

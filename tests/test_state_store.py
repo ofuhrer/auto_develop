@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from agentic_devloop.state_store import (
     BacklogState,
@@ -617,3 +618,19 @@ def test_add_epic_final_review_follow_up_memory_persists_compact_record(tmp_path
         Path("runs/r1/feature_review.json"),
         Path("runs/r1/final_integration_verification.json"),
     ]
+
+
+def test_final_review_follow_up_memory_requires_evidence_paths() -> None:
+    with pytest.raises(ValidationError, match="must include at least one path"):
+        FinalReviewFollowUpMemoryReference(
+            release_id="review-convergence-adjudicator",
+            finding_id="follow-up-1",
+            classification="backlog_follow_up",
+            rationale_summary="Final adjudication deferred this finding to backlog after verification rerun passed.",
+            evidence_paths=[],
+            fallback_plan="Track in next epic planning pass.",
+            validators_rerun=["test -d docs"],
+            adjudication_artifact_path=Path("runs/r1/supervisor_decisions/final_review_finding_adjudication__x.json"),
+            continuation_decision_path=Path("runs/r1/final_review_continuation_decision.json"),
+            recorded_at=datetime(2026, 5, 14, 0, 0, tzinfo=UTC),
+        )

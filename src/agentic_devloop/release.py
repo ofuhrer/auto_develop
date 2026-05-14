@@ -4548,6 +4548,7 @@ def _persist_compact_final_review_follow_up_memory(
     if continuation.outcome in {FinalReviewContinuationOutcome.BLOCKER, FinalReviewContinuationOutcome.HARD_STOP}:
         return None
     continuation_dir = continuation_decision_path.parent
+    wrote_memory = False
     for adjudication_path in continuation.finding_adjudication_paths:
         resolved_adjudication_path = (
             adjudication_path
@@ -4619,7 +4620,8 @@ def _persist_compact_final_review_follow_up_memory(
                 recorded_at=datetime.now(UTC),
             ),
         )
-    return backlog_state_path
+        wrote_memory = True
+    return backlog_state_path if wrote_memory else None
 
 
 def _task_metrics(result: TaskRunResult, raw_log_path: Path) -> dict[str, object]:
