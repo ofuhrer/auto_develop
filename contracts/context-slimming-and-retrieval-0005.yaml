@@ -62,6 +62,4 @@ tolerance_changes_allowed: false
 benchmark_delta_required: false
 remote_dispatch: null
 depends_on:
-- context-slimming-and-retrieval-0002
-- context-slimming-and-retrieval-0003
 - context-slimming-and-retrieval-0004
