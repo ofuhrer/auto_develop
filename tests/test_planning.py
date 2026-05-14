@@ -637,6 +637,59 @@ def test_parse_planner_output_normalizes_contract_wrapper_drift_before_strict_va
     assert any("planner_contract_normalization=" in warning for warning in plan.warnings)
 
 
+def test_parse_planner_output_refuses_unsafe_runtime_command_normalization(tmp_path) -> None:
+    config = _project_config(
+        tmp_path,
+        verification_profiles={
+            "default": {
+                "commands": [
+                    "true",
+                ]
+            }
+        },
+    )
+    config = type(config).model_validate(
+        {
+            **config.model_dump(mode="python"),
+            "verification_runtime": {"python_path": "/shared/.venv/bin/python"},
+        }
+    )
+
+    with pytest.raises(PlannerNormalizationError, match="normalization was refused"):
+        parse_planner_output(
+            {
+                "release_id": "v0.3.23",
+                "planner": "strong-model",
+                "generated_contracts": [
+                    {
+                        "task_id": "v0-3-23-0001",
+                        "title": "Unsafe shell operator",
+                        "objective": "Do the work safely.",
+                        "rationale": "Repairable planner drift.",
+                        "suggested_contract": {
+                            "task_id": "v0-3-23-0001",
+                            "release_id": "v0.3.23",
+                            "title": "Unsafe shell operator",
+                            "task_type": "code_only",
+                            "budget_class": "M",
+                            "objective": "Do the work safely.",
+                            "allowed_files": ["src/agentic_devloop/planning.py"],
+                            "required_evidence": ["git diff", "changed-files list"],
+                            "verification": {
+                                "commands": [".venv/bin/python -m pytest tests/test_planning.py | tee out.log"]
+                            },
+                            "stop_conditions": ["Stop if scope expands."],
+                        },
+                    }
+                ],
+                "warnings": [],
+            },
+            release_id="v0.3.23",
+            planner="strong-model",
+            project_config=config,
+        )
+
+
 def test_parse_planner_output_preserves_implementation_requirements_as_objective_detail() -> None:
     plan = parse_planner_output(
         {
