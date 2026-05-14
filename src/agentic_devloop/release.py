@@ -4609,7 +4609,7 @@ def _persist_compact_final_review_follow_up_memory(
             if isinstance(value, str) and value.strip()
         ]
         fallback_plan = str(payload.get("fallback_plan") or "").strip() or None
-        store.add_epic_final_review_follow_up_memory(
+        store.add_release_final_review_follow_up_memory(
             release_id,
             FinalReviewFollowUpMemoryReference(
                 release_id=release_id,

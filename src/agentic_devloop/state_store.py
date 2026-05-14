@@ -384,13 +384,15 @@ class StateStore:
         self.save(state)
         return state
 
-    def add_epic_final_review_follow_up_memory(
+    def add_release_final_review_follow_up_memory(
         self,
-        epic_id: str,
+        release_id: str,
         reference: FinalReviewFollowUpMemoryReference,
     ) -> BacklogState:
+        if release_id != reference.release_id:
+            raise ValueError("release_id must match reference.release_id")
         state = self.load()
-        record = self._get_or_create_epic_record(state, epic_id)
+        record = self._get_or_create_epic_record(state, release_id)
         record.final_review_follow_up_memories = self._merge_unique_references(
             record.final_review_follow_up_memories,
             [reference],

@@ -587,7 +587,7 @@ completed_epic_records:
     assert state.reviewed_epics[0].status_reason == "refreshed-after-merge"
 
 
-def test_add_epic_final_review_follow_up_memory_persists_compact_record(tmp_path: Path) -> None:
+def test_add_release_final_review_follow_up_memory_persists_compact_record(tmp_path: Path) -> None:
     state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
     store = StateStore(state_path)
     reference = FinalReviewFollowUpMemoryReference(
@@ -603,7 +603,7 @@ def test_add_epic_final_review_follow_up_memory_persists_compact_record(tmp_path
         recorded_at=datetime(2026, 5, 14, 0, 0, tzinfo=UTC),
     )
 
-    state = store.add_epic_final_review_follow_up_memory("review-convergence-adjudicator", reference)
+    state = store.add_release_final_review_follow_up_memory("review-convergence-adjudicator", reference)
 
     assert state.active_epics
     record = state.active_epics[0]
@@ -618,6 +618,24 @@ def test_add_epic_final_review_follow_up_memory_persists_compact_record(tmp_path
         Path("runs/r1/feature_review.json"),
         Path("runs/r1/final_integration_verification.json"),
     ]
+
+
+def test_add_release_final_review_follow_up_memory_requires_matching_release_id(tmp_path: Path) -> None:
+    state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
+    store = StateStore(state_path)
+    reference = FinalReviewFollowUpMemoryReference(
+        release_id="release-a",
+        finding_id="follow-up-1",
+        classification="backlog_follow_up",
+        rationale_summary="Deferred to backlog after final verification passed.",
+        evidence_paths=[Path("runs/r1/feature_review.json")],
+        adjudication_artifact_path=Path("runs/r1/supervisor_decisions/final_review_finding_adjudication__x.json"),
+        continuation_decision_path=Path("runs/r1/final_review_continuation_decision.json"),
+        recorded_at=datetime(2026, 5, 14, 0, 0, tzinfo=UTC),
+    )
+
+    with pytest.raises(ValueError, match="release_id must match"):
+        store.add_release_final_review_follow_up_memory("release-b", reference)
 
 
 def test_final_review_follow_up_memory_requires_evidence_paths() -> None:

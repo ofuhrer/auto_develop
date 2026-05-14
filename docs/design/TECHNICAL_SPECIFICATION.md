@@ -660,6 +660,7 @@ Final adjudication rules:
 - accepted or deferred outcomes are compacted into repo-state memory so the next planning cycle can consume a short summary without rereading the raw reviewer logs.
 
 Raw reviewer artifacts stay in `runs/`. The compact repo-state trail should preserve the outcome references, accepted-risks rationale, and deferred follow-up summaries needed for the next release or planning cycle.
+Compacted follow-up summaries are written into repo-state on an epic record keyed by `release_id` (release-scoped identity); they are not stored under the backlog epic that originally scheduled the release.
 
 Repo-state compaction requires each stored `FinalReviewFollowUpMemoryReference` to carry non-empty `evidence_paths`. If an adjudication payload omits or clears `evidence_paths`, the compaction step backfills them from release-scoped evidence (continuation decision, feature-review artifacts, final verification evidence, and validator rerun evidence paths) so compact memory remains auditable even for `false_positive` and `verification_only` classifications.
 
