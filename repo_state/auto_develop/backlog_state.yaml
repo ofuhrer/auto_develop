@@ -5,8 +5,8 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   subsystem failures, normalizes useful model output before strict validation, and
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
-current_focus: review-convergence-adjudicator
-active_epic: review-convergence-adjudicator
+current_focus: shared-verification-runtime
+active_epic: shared-verification-runtime
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -32,51 +32,45 @@ completed_epics:
 - planner-admission-repair
 - governor-cockpit-v2
 - soft-scope-budget-policy
+- review-convergence-adjudicator
 blocked_epics: []
 candidate_epics:
-- id: review-convergence-adjudicator
-  title: Stop reviewer churn with supervisor-owned final adjudication.
-  rationale: Review agents can keep discovering adjacent findings after bounded repair
-    waves. After configured attempts, the supervisor should run final verification
-    and accept, defer, or block remaining findings with typed rationale.
-  priority: 1
-  next_release_id: review-convergence-adjudicator
 - id: shared-verification-runtime
   title: Make isolated worktrees run tests through a configured shared runtime.
   rationale: Sub-agents repeatedly could not run pytest because task worktrees do
     not contain .venv; verification should use project runtime policy rather than
     worktree-local assumptions.
-  priority: 2
+  priority: 1
   next_release_id: shared-verification-runtime
 - id: environment-repair-actions
   title: Repair safe verification-environment drift autonomously.
   rationale: Stale editable installs, command-not-found errors, missing PYTHONPATH,
     and dependency runtime drift should become bounded repair actions when project
     policy declares a safe repair.
-  priority: 3
+  priority: 2
   next_release_id: environment-repair-actions
 - id: executor-liveness-supervision
   title: Classify active, stalled, hung, and environment-blocked executors.
   rationale: Long-running workers need process/output/file heartbeat evidence so the
     supervisor can wait, inspect, restart, or stop without human guessing.
-  priority: 4
+  priority: 3
   next_release_id: executor-liveness-supervision
 - id: target-artifact-ownership
   title: Store target development memory in the target repo or a durable control repo.
   rationale: Deleting and recloning the auto_develop controller should not lose target
     repo-state, objectives, contracts, completed-epic history, or next-epic planning
     context.
-  priority: 5
+  priority: 4
   next_release_id: target-artifact-ownership
 - id: onboarding-bootstrap
   title: Bootstrap a freshly cloned target repository from one or two onboarding prompts.
   rationale: The target operator experience is minimal setup followed by a high-level
     epic-count loop.
-  priority: 6
+  priority: 5
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
 active_epics:
-- epic_id: review-convergence-adjudicator
+- epic_id: shared-verification-runtime
   next_recommendations: []
   retry_count: 0
   repair_count: 0
@@ -86,9 +80,45 @@ active_epics:
   state_review_snapshot_references: []
   metrics_snapshot_references: []
   tuning_report_references: []
-  updated_at: '2026-05-13T23:36:29.527095Z'
+  updated_at: '2026-05-14T01:33:13Z'
 reviewed_epics: []
 completed_epic_records:
+- epic_id: review-convergence-adjudicator
+  status_reason: completed via feature/review-convergence-adjudicator after a long
+    manual/autonomous hybrid cycle; typed final review finding adjudication artifacts,
+    final integration verification ordering, compact follow-up repo-state memory,
+    documentation, and regression coverage are implemented, but the cycle exposed
+    expensive reviewer churn that still needs higher-level adjudication and review-stop
+    policy hardening
+  next_recommendations:
+  - Treat repeated reviewer waves as a supervisor-governed stop condition; do not
+    keep launching repair waves after full verification passes and findings become
+    policy/observability refinements.
+  retry_count: 3
+  repair_count: 14
+  outcome_references:
+  - release_id: review-convergence-adjudicator
+    outcome: accepted-manual-after-full-suite
+    run_summary_path: runs/review-convergence-adjudicator-cycle/20260514T005002Z_review-convergence-adjudicator_release/release_summary.json
+    recorded_at: '2026-05-14T01:33:13Z'
+  finalization_outcome_references: []
+  unresolved_finding_references:
+  - finding_id: review-convergence-churn
+    summary: Multiple release-review reruns kept discovering adjacent blockers after
+      accepted repairs and green verification; final merge relied on manual architectural
+      judgment and full-suite verification rather than another automated review wave.
+    severity: high
+    source_path: runs/review-convergence-adjudicator-cycle/20260514T005002Z_review-convergence-adjudicator_release/feature_review_recheck.json
+  state_review_snapshot_references: []
+  metrics_snapshot_references:
+  - metrics_path: runs/review-convergence-adjudicator-cycle/20260514T005002Z_review-convergence-adjudicator_release/release_metrics.json
+    recorded_at: '2026-05-14T01:33:13Z'
+    release_id: review-convergence-adjudicator
+  tuning_report_references:
+  - tuning_report_path: runs/review-convergence-adjudicator-cycle/20260514T005002Z_review-convergence-adjudicator_release/release_tuning.md
+    recorded_at: '2026-05-14T01:33:13Z'
+    release_id: review-convergence-adjudicator
+  updated_at: '2026-05-14T01:33:13Z'
 - epic_id: soft-scope-budget-policy
   status_reason: completed via feature/soft-scope-budget-policy after autonomous task
     and repair execution plus manual final-review hardening; typed scope-risk budget

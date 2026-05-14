@@ -63,6 +63,44 @@ class UnresolvedFindingReference(BaseModel):
     source_path: Path | None = None
 
 
+class FinalReviewFollowUpMemoryReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    release_id: str = Field(min_length=1)
+    finding_id: str = Field(min_length=1)
+    classification: Literal[
+        "accepted_risk",
+        "backlog_follow_up",
+        "duplicate",
+        "false_positive",
+        "verification_only",
+        "scope_expansion",
+    ]
+    rationale_summary: str = Field(min_length=1)
+    evidence_paths: list[Path] = Field(default_factory=list)
+    fallback_plan: str | None = Field(default=None, min_length=1)
+    validators_rerun: list[str] = Field(default_factory=list)
+    adjudication_artifact_path: Path
+    continuation_decision_path: Path
+    recorded_at: datetime | None = None
+
+    @field_validator("evidence_paths")
+    @classmethod
+    def _evidence_paths_must_not_be_empty(cls, values: list[Path]) -> list[Path]:
+        if not values:
+            raise ValueError("final review follow-up evidence paths must include at least one path")
+        if any(not str(value).strip() for value in values):
+            raise ValueError("final review follow-up evidence paths must not be empty")
+        return values
+
+    @field_validator("validators_rerun")
+    @classmethod
+    def _validators_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("validators rerun entries must not be empty")
+        return values
+
+
 class StateReviewSnapshotReference(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -101,6 +139,7 @@ class EpicMemoryRecord(BaseModel):
     outcome_references: list[OutcomeReference] = Field(default_factory=list)
     finalization_outcome_references: list[FinalizationOutcomeReference] = Field(default_factory=list)
     unresolved_finding_references: list[UnresolvedFindingReference] = Field(default_factory=list)
+    final_review_follow_up_memories: list[FinalReviewFollowUpMemoryReference] = Field(default_factory=list)
     state_review_snapshot_references: list[StateReviewSnapshotReference] = Field(default_factory=list)
     metrics_snapshot_references: list[MetricsSnapshotReference] = Field(default_factory=list)
     tuning_report_references: list[TuningReportReference] = Field(default_factory=list)
@@ -119,6 +158,7 @@ class EpicRefreshOutcome(BaseModel):
     outcome_references: list[OutcomeReference] = Field(default_factory=list)
     finalization_outcome_references: list[FinalizationOutcomeReference] = Field(default_factory=list)
     unresolved_finding_references: list[UnresolvedFindingReference] = Field(default_factory=list)
+    final_review_follow_up_memories: list[FinalReviewFollowUpMemoryReference] = Field(default_factory=list)
     state_review_snapshot_references: list[StateReviewSnapshotReference] = Field(default_factory=list)
     metrics_snapshot_references: list[MetricsSnapshotReference] = Field(default_factory=list)
     tuning_report_references: list[TuningReportReference] = Field(default_factory=list)
@@ -303,6 +343,10 @@ class StateStore:
             record.unresolved_finding_references,
             outcome.unresolved_finding_references,
         )
+        record.final_review_follow_up_memories = self._merge_unique_references(
+            record.final_review_follow_up_memories,
+            outcome.final_review_follow_up_memories,
+        )
         record.state_review_snapshot_references = self._merge_unique_references(
             record.state_review_snapshot_references,
             outcome.state_review_snapshot_references,
@@ -336,6 +380,23 @@ class StateStore:
         state = self.load()
         record = self._get_or_create_epic_record(state, epic_id)
         record.unresolved_finding_references.append(reference)
+        record.updated_at = datetime.now(UTC)
+        self.save(state)
+        return state
+
+    def add_release_final_review_follow_up_memory(
+        self,
+        release_id: str,
+        reference: FinalReviewFollowUpMemoryReference,
+    ) -> BacklogState:
+        if release_id != reference.release_id:
+            raise ValueError("release_id must match reference.release_id")
+        state = self.load()
+        record = self._get_or_create_epic_record(state, release_id)
+        record.final_review_follow_up_memories = self._merge_unique_references(
+            record.final_review_follow_up_memories,
+            [reference],
+        )
         record.updated_at = datetime.now(UTC)
         self.save(state)
         return state

@@ -13,6 +13,10 @@ from agentic_devloop.supervisor_decisions import (
     DecisionRiskLevel,
     EnvironmentRepairDecision,
     EnvironmentRepairOutcome,
+    FinalReviewFindingAdjudicationAction,
+    FinalReviewFindingAdjudicationClassification,
+    FinalReviewFindingAdjudicationDecision,
+    FinalReviewFindingAdjudicationOutcome,
     ExecutionStrategyAction,
     ExecutionStrategyDecision,
     ExecutionStrategyOutcome,
@@ -556,6 +560,122 @@ def test_feature_review_finding_classification_requires_validators_to_rerun_fiel
                 "selected_action": FeatureReviewFindingAction.REPAIR,
                 "outcome": FeatureReviewFindingOutcome.CONTINUE,
                 "fallback_plan": "Escalate if repair cannot be scoped safely.",
+            }
+        )
+
+
+def test_parse_final_review_finding_adjudication_decision_all_classifications() -> None:
+    classification_cases = [
+        (
+            FinalReviewFindingAdjudicationClassification.BLOCKER,
+            FinalReviewFindingAdjudicationAction.REPAIR,
+            FinalReviewFindingAdjudicationOutcome.CONTINUE,
+        ),
+        (
+            FinalReviewFindingAdjudicationClassification.ACCEPTED_RISK,
+            FinalReviewFindingAdjudicationAction.ACCEPT,
+            FinalReviewFindingAdjudicationOutcome.CONTINUE,
+        ),
+        (
+            FinalReviewFindingAdjudicationClassification.BACKLOG_FOLLOW_UP,
+            FinalReviewFindingAdjudicationAction.DEFER,
+            FinalReviewFindingAdjudicationOutcome.STOP,
+        ),
+        (
+            FinalReviewFindingAdjudicationClassification.DUPLICATE,
+            FinalReviewFindingAdjudicationAction.DEFER,
+            FinalReviewFindingAdjudicationOutcome.STOP,
+        ),
+        (
+            FinalReviewFindingAdjudicationClassification.FALSE_POSITIVE,
+            FinalReviewFindingAdjudicationAction.ACCEPT,
+            FinalReviewFindingAdjudicationOutcome.CONTINUE,
+        ),
+        (
+            FinalReviewFindingAdjudicationClassification.SCOPE_EXPANSION,
+            FinalReviewFindingAdjudicationAction.DEFER,
+            FinalReviewFindingAdjudicationOutcome.STOP,
+        ),
+    ]
+
+    for index, (classification, selected_action, outcome) in enumerate(classification_cases):
+        payload = {
+            **BASE,
+            "decision_id": f"final-adjudication-{index}",
+            "decision_type": SupervisorDecisionType.FINAL_REVIEW_FINDING_ADJUDICATION,
+            "finding_id": f"finding-{index}",
+            "classification": classification,
+            "selected_action": selected_action,
+            "outcome": outcome,
+            "rationale": f"classification={classification.value}",
+            "evidence_paths": [f"runs/release/final_review/finding_{index}.md"],
+            "fallback_plan": "Re-enter bounded repair wave if adjudication evidence changes.",
+            "validators_to_rerun": ["final_integration_verification", "release_review_gate"],
+        }
+
+        decision = parse_supervisor_decision(payload)
+        assert isinstance(decision, FinalReviewFindingAdjudicationDecision)
+        assert decision.classification == classification
+
+
+def test_final_review_finding_adjudication_requires_rationale_evidence_fallback_and_validators() -> None:
+    missing_rationale_payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.FINAL_REVIEW_FINDING_ADJUDICATION,
+        "finding_id": "finding-missing-rationale",
+        "classification": FinalReviewFindingAdjudicationClassification.ACCEPTED_RISK,
+        "selected_action": FinalReviewFindingAdjudicationAction.ACCEPT,
+        "outcome": FinalReviewFindingAdjudicationOutcome.CONTINUE,
+        "evidence_paths": ["runs/release/final_review/finding.md"],
+        "fallback_plan": "Retry bounded repair.",
+        "validators_to_rerun": ["final_integration_verification"],
+    }
+    missing_rationale_payload.pop("rationale", None)
+
+    with pytest.raises(ValidationError, match="Field required"):
+        FinalReviewFindingAdjudicationDecision.model_validate(missing_rationale_payload)
+
+    with pytest.raises(ValidationError, match="evidence_paths must not be empty"):
+        FinalReviewFindingAdjudicationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FINAL_REVIEW_FINDING_ADJUDICATION,
+                "finding_id": "finding-missing-evidence",
+                "classification": FinalReviewFindingAdjudicationClassification.ACCEPTED_RISK,
+                "selected_action": FinalReviewFindingAdjudicationAction.ACCEPT,
+                "outcome": FinalReviewFindingAdjudicationOutcome.CONTINUE,
+                "fallback_plan": "Retry bounded repair.",
+                "validators_to_rerun": ["final_integration_verification"],
+                "evidence_paths": [],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="Field required"):
+        FinalReviewFindingAdjudicationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FINAL_REVIEW_FINDING_ADJUDICATION,
+                "finding_id": "finding-missing-fallback",
+                "classification": FinalReviewFindingAdjudicationClassification.ACCEPTED_RISK,
+                "selected_action": FinalReviewFindingAdjudicationAction.ACCEPT,
+                "outcome": FinalReviewFindingAdjudicationOutcome.CONTINUE,
+                "evidence_paths": ["runs/release/final_review/finding.md"],
+                "validators_to_rerun": ["final_integration_verification"],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="validators to rerun must not be empty"):
+        FinalReviewFindingAdjudicationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FINAL_REVIEW_FINDING_ADJUDICATION,
+                "finding_id": "finding-empty-validators",
+                "classification": FinalReviewFindingAdjudicationClassification.ACCEPTED_RISK,
+                "selected_action": FinalReviewFindingAdjudicationAction.ACCEPT,
+                "outcome": FinalReviewFindingAdjudicationOutcome.CONTINUE,
+                "evidence_paths": ["runs/release/final_review/finding.md"],
+                "fallback_plan": "Retry bounded repair.",
+                "validators_to_rerun": [],
             }
         )
 

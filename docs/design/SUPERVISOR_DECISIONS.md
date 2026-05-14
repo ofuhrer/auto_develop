@@ -29,7 +29,7 @@ Implemented decision types:
 
 - `release_scheduling`
 - `repair_loop_continuation`
-- `review_finding_adjudication`
+- `final_review_finding_adjudication`
 - `soft_budget_acceptance`
 - `contract_normalization`
 - `environment_repair`
@@ -49,22 +49,28 @@ should be used.
   report hash, base-branch commit, execution mode, and release-input hash used
   to detect stale scheduling artifacts.
 
-`repair_loop_continuation` and `review_finding_adjudication` are the decision
+`repair_loop_continuation` and `final_review_finding_adjudication` are the decision
 types that carry release-local review convergence behavior:
 
 - `repair_loop_continuation` records whether a bounded repair pass should keep
   going, stop, or split after a reviewer pass or repair attempt;
-- `review_finding_adjudication` records how a finding is classified for the
-  release-local gate, including blocker, soft finding, duplicate, false
-  positive, scope expansion, or backlog follow-up handling; and
+- `final_review_finding_adjudication` records the supervisor's final release-local
+  classification after the final integration verification rerun on the
+  integrated feature branch, including blocker, soft finding, false positive,
+  verification-only, duplicate, scope expansion, or backlog follow-up
+  handling; and
 - both decision types should retain evidence paths, rationale, fallback plan,
   and validator rerun metadata so the review trail remains inspectable.
 
-Duplicate, scope-expansion, and backlog-follow-up findings are deferred,
-non-blocking classifications. They are written to `deferred_finding_ids` in
+Blocker findings keep the release blocked until they are resolved or the hard
+policy, retry budget, or credentials require escalation. Soft findings and
+false-positive or verification-only findings can continue the release with
+explicit rationale after the final verification rerun passes. Duplicate,
+scope-expansion, and backlog-follow-up findings are deferred, non-blocking
+classifications. They are written to `deferred_finding_ids` in
 `feature_review_recheck.json` and to typed supervisor decision artifacts with
 `selected_action=defer`; they are not `accepted_finding_ids`. Accepted IDs are
-reserved for soft findings and false-positive adjudications that continue the
+reserved for the soft and false-positive adjudications that continue the
 release with explicit rationale.
 
 ## Artifact Layout
