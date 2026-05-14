@@ -45,6 +45,7 @@ class SupervisorDecisionType(StrEnum):
     FINAL_REVIEW_FINDING_ADJUDICATION = "final_review_finding_adjudication"
     RELEASE_FINALIZATION = "release_finalization"
     SCOPE_RISK_BUDGET_POLICY = "scope_risk_budget_policy"
+    COST_RUNTIME_GOVERNANCE = "cost_runtime_governance"
 
 
 _LEGACY_VALIDATORS_DECISION_TYPES = {
@@ -790,6 +791,71 @@ class ScopeRiskBudgetPolicyDecision(SupervisorDecisionBase):
         return self
 
 
+class CostRuntimeGovernanceAction(StrEnum):
+    ONE_SHOT = "one_shot"
+    DECOMPOSED = "decomposed"
+    REVIEW_CAPPED = "review_capped"
+    STOP = "stop"
+
+
+class CostRuntimeGovernanceOutcome(StrEnum):
+    PROCEED_ONE_SHOT = "proceed_one_shot"
+    PROCEED_DECOMPOSED = "proceed_decomposed"
+    PROCEED_REVIEW_CAPPED = "proceed_review_capped"
+    STOPPED = "stopped"
+
+
+class CostRuntimeGovernanceDecision(SupervisorDecisionBase):
+    decision_type: Literal[SupervisorDecisionType.COST_RUNTIME_GOVERNANCE] = (
+        SupervisorDecisionType.COST_RUNTIME_GOVERNANCE
+    )
+    risk_level: DecisionRiskLevel
+    selected_action: CostRuntimeGovernanceAction
+    outcome: CostRuntimeGovernanceOutcome
+    selected_model_role: str = Field(min_length=1)
+    budget_class: str = Field(min_length=1)
+    fallback_plan: str = Field(min_length=1)
+    validators_to_rerun: list[str]
+
+    @field_validator("selected_model_role")
+    @classmethod
+    def selected_model_role_must_be_identifier_like(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("selected_model_role must not be empty")
+        if not re.fullmatch(r"[a-z][a-z0-9_-]*", normalized):
+            raise ValueError("selected_model_role must be lower_snake_or_kebab_case")
+        return normalized
+
+    @field_validator("budget_class")
+    @classmethod
+    def budget_class_must_be_supported_token(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized not in {"XS", "S", "M", "L", "XL"}:
+            raise ValueError("budget_class must be one of XS, S, M, L, XL")
+        return normalized
+
+    @field_validator("validators_to_rerun")
+    @classmethod
+    def validators_to_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if not values or any(not value.strip() for value in values):
+            raise ValueError("validators to rerun must not be empty")
+        return values
+
+    @model_validator(mode="after")
+    def selected_action_must_match_outcome(self) -> "CostRuntimeGovernanceDecision":
+        outcome_by_action = {
+            CostRuntimeGovernanceAction.ONE_SHOT: CostRuntimeGovernanceOutcome.PROCEED_ONE_SHOT,
+            CostRuntimeGovernanceAction.DECOMPOSED: CostRuntimeGovernanceOutcome.PROCEED_DECOMPOSED,
+            CostRuntimeGovernanceAction.REVIEW_CAPPED: CostRuntimeGovernanceOutcome.PROCEED_REVIEW_CAPPED,
+            CostRuntimeGovernanceAction.STOP: CostRuntimeGovernanceOutcome.STOPPED,
+        }
+        expected_outcome = outcome_by_action[self.selected_action]
+        if self.outcome != expected_outcome:
+            raise ValueError("selected_action must match outcome")
+        return self
+
+
 SupervisorDecisionRecord = Annotated[
     (
         ReleaseSchedulingDecision
@@ -804,6 +870,7 @@ SupervisorDecisionRecord = Annotated[
         | FinalReviewFindingAdjudicationDecision
         | ReleaseFinalizationDecision
         | ScopeRiskBudgetPolicyDecision
+        | CostRuntimeGovernanceDecision
     ),
     Field(discriminator="decision_type"),
 ]
