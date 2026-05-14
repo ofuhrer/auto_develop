@@ -46,6 +46,8 @@ from agentic_devloop.release import (
     run_release,
 )
 from agentic_devloop.supervisor_decisions import (
+    EnvironmentRepairDecision,
+    EnvironmentRepairPolicyAction,
     FinalReviewFindingAdjudicationDecision,
     FeatureReviewFindingClassificationDecision,
     ReleaseSchedulingAction,
@@ -624,15 +626,21 @@ def test_release_dependency_map_ignores_overlap_edges_for_completed_tasks() -> N
 def test_completed_release_task_ids_reads_accepted_merged_summaries(tmp_path) -> None:
     summary_dir = tmp_path / "20260512T000000Z_demo_release"
     summary_dir.mkdir(parents=True)
+    bundle_1 = summary_dir / "demo-0001"
+    bundle_2 = summary_dir / "demo-0002"
+    bundle_3 = summary_dir / "demo-0003"
+    for bundle in (bundle_1, bundle_2, bundle_3):
+        bundle.mkdir(parents=True, exist_ok=True)
+        (bundle / "changed_files.txt").write_text("", encoding="utf-8")
     (summary_dir / "release_summary.json").write_text(
         json.dumps(
             {
                 "release_id": "demo",
                 "integration_branch": "feature/demo",
                 "tasks": [
-                    {"task_id": "demo-0001", "decision": "accepted", "merged": True},
-                    {"task_id": "demo-0002", "decision": "failed", "merged": True},
-                    {"task_id": "demo-0003", "decision": "accepted", "merged": False},
+                    {"task_id": "demo-0001", "decision": "accepted", "merged": True, "bundle_path": str(bundle_1)},
+                    {"task_id": "demo-0002", "decision": "failed", "merged": True, "bundle_path": str(bundle_2)},
+                    {"task_id": "demo-0003", "decision": "accepted", "merged": False, "bundle_path": str(bundle_3)},
                 ],
             }
         )
@@ -646,7 +654,7 @@ def test_completed_release_task_ids_reads_accepted_merged_summaries(tmp_path) ->
         integration_branch="feature/demo",
     )
 
-    assert completed == {"demo-0001"}
+    assert completed == {"demo-0001", "demo-0003"}
 
 
 def test_multiplexed_progress_filters_noisy_agent_lines_and_keeps_raw_log(tmp_path) -> None:
@@ -2338,6 +2346,58 @@ def test_runtime_supervisor_classifies_model_quota_as_missing_credentials_hard_s
     assert classification == "missing_credentials"
     assert str(event_kind) == "release_blocked"
     assert category == "model_quota"
+
+
+def test_runtime_supervisor_stops_when_environment_repair_decision_is_stop(tmp_path: Path) -> None:
+    bundle_path = tmp_path / "bundle"
+    decision_dir = bundle_path / "supervisor_decisions"
+    decision_dir.mkdir(parents=True)
+    (bundle_path / "failure_diagnosis.yaml").write_text("category: verification_failure\n", encoding="utf-8")
+    (bundle_path / "verification.log").write_text("verification failed\n", encoding="utf-8")
+    (bundle_path / "changed_files.txt").write_text("", encoding="utf-8")
+    write_supervisor_decision_artifact(
+        release_bundle_path=bundle_path,
+        decision=EnvironmentRepairDecision.model_validate(
+            {
+                "decision_id": "demo-0001__verification_environment_repair",
+                "release_id": "demo",
+                "decided_at": datetime(2026, 5, 13, 0, 0, tzinfo=UTC),
+                "decided_by": "deterministic_kernel",
+                "rationale": "missing policy",
+                "evidence_paths": ["verification.log", "changed_files.txt"],
+                "policy_basis": "deterministic_verification_environment_repair_policy_v1",
+                "selected_policy_action": EnvironmentRepairPolicyAction.STOP,
+                "outcome": "stop",
+                "fallback_plan": "Stop and request operator intervention.",
+                "source_evidence_paths": ["verification.log"],
+                "retry_budget_impact": "stop_release_retry_budget",
+                "validators_to_rerun": ["false"],
+                "refusal_reason": "missing policy configuration",
+                "capture_commands": [],
+            }
+        ),
+    )
+
+    result = TaskRunResult(
+        run_id="20260513T000000Z_demo_demo-0001",
+        worktree_path=tmp_path / "worktree",
+        bundle_path=bundle_path,
+        decision=ReviewDecision(
+            task_id="demo-0001",
+            decision=Decision.FAILED,
+            reviewer=Reviewer.DETERMINISTIC,
+            rationale="verification failed",
+        ),
+    )
+
+    classification, event_kind, category = _runtime_supervisor_classification_for_task_result(
+        result=result,
+        task=_task_contract("demo-0001"),
+    )
+
+    assert classification == "unsafe_policy_expansion"
+    assert str(event_kind) == "release_blocked"
+    assert category == "verification_failure"
 
 
 def test_state_review_snapshot_collector_writes_deterministic_artifact(tmp_path) -> None:

@@ -11,6 +11,10 @@ from agentic_devloop.models import (
 )
 
 
+_OFFLINE_PIP_GUARDS = ("--no-index", "PIP_NO_INDEX=1", "PIP_NO_INDEX=true")
+_NETWORK_PIP_FLAGS = ("--index-url", "--extra-index-url", " -i ", " -i=")
+
+
 def _normalized_evidence_text(repair_input: VerificationEnvironmentRepairInput) -> str:
     return "\n".join(
         [
@@ -106,6 +110,23 @@ def decide_verification_environment_repair(
             reason=VerificationEnvironmentRepairRefusalReason.MISSING_POLICY_CONFIGURATION,
             rationale="Policy requires editable_install_command for stale editable install repair.",
         )
+
+    if category == VerificationEnvironmentRepairCategory.STALE_EDITABLE_INSTALL:
+        editable_install_command = (policy.editable_install_command or "").strip()
+        lowered = editable_install_command.lower()
+        if "pip install" in lowered:
+            if any(flag in lowered for flag in _NETWORK_PIP_FLAGS) or not any(
+                guard.lower() in lowered for guard in _OFFLINE_PIP_GUARDS
+            ):
+                return VerificationEnvironmentRepairRefusal(
+                    category=category,
+                    reason=VerificationEnvironmentRepairRefusalReason.MISSING_POLICY_CONFIGURATION,
+                    rationale=(
+                        "Policy editable_install_command must include an offline guard (e.g. --no-index or "
+                        "PIP_NO_INDEX=1) and must not set index URLs; dependency installation may require "
+                        "unapproved network or credentials."
+                    ),
+                )
 
     return VerificationEnvironmentRepairAction(
         category=category,

@@ -23,7 +23,7 @@ def _policy(*, allowed_actions: list[VerificationEnvironmentRepairActionKind]) -
             "src/agentic_devloop/models.py",
             "tests/test_environment_repair.py",
         ),
-        editable_install_command="PYTHONPATH=src /runtime/python -m pip install -e .",
+        editable_install_command="PYTHONPATH=src PIP_NO_INDEX=1 /runtime/python -m pip install --no-index -e .",
         pythonpath_prefix="PYTHONPATH=src",
     )
 
@@ -158,3 +158,20 @@ def test_stale_editable_install_selects_repair_action() -> None:
 
     assert isinstance(decision, VerificationEnvironmentRepairAction)
     assert decision.action == VerificationEnvironmentRepairActionKind.REFRESH_EDITABLE_INSTALL
+
+
+def test_stale_editable_install_refuses_without_offline_guard() -> None:
+    decision = decide_verification_environment_repair(
+        repair_input=_input(
+            command="PYTHONPATH=src /runtime/python -m pytest tests/test_environment_repair.py",
+            stderr_excerpt="No module named agentic_devloop and editable install metadata is stale",
+        ),
+        policy=_policy(
+            allowed_actions=[
+                VerificationEnvironmentRepairActionKind.REFRESH_EDITABLE_INSTALL,
+            ]
+        ).model_copy(update={"editable_install_command": "PYTHONPATH=src /runtime/python -m pip install -e ."}),
+    )
+
+    assert isinstance(decision, VerificationEnvironmentRepairRefusal)
+    assert decision.reason == VerificationEnvironmentRepairRefusalReason.MISSING_POLICY_CONFIGURATION
