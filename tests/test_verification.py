@@ -62,6 +62,24 @@ def test_verification_runner_records_failure_excerpts(tmp_path) -> None:
     assert "stderr_excerpt:\nfailure-err" in log
 
 
+def test_verification_runner_without_shared_runtime_keeps_local_venv_command_and_fails(tmp_path) -> None:
+    runner = VerificationRunner(timeout_seconds=5)
+
+    results = runner.run(
+        commands=['.venv/bin/python -c "print(123)"'],
+        worktree_path=tmp_path,
+        output_dir=tmp_path / "verification",
+    )
+
+    assert len(results) == 1
+    assert results[0].exit_code != 0
+    assert results[0].command == '.venv/bin/python -c "print(123)"'
+    log = (tmp_path / "verification" / "verification.log").read_text(encoding="utf-8")
+    assert "original_command=.venv/bin/python -c \"print(123)\"" in log
+    assert "resolved_command=.venv/bin/python -c \"print(123)\"" in log
+    assert "failure_reason=nonzero_exit_" in log
+
+
 def test_verification_runner_uses_runtime_python_and_env(tmp_path) -> None:
     runner = VerificationRunner(timeout_seconds=5)
 

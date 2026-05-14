@@ -673,7 +673,7 @@ def test_run_task_uses_shared_verification_runtime_for_worktree_commands(tmp_pat
             "required_evidence": ["git diff", "test output"],
             "verification": {
                 "commands": [
-                    '.venv/bin/python -c "import os, pathlib; assert os.environ[\'SHARED_RT\']==\'1\'; assert pathlib.Path(\'docs/result.md\').exists()"'
+                    '.venv/bin/python -c "import os, pathlib; assert os.environ[\'SHARED_RT\']==\'1\'; assert pathlib.Path(\'docs/result.md\').exists(); assert not pathlib.Path(\'.venv/bin/python\').exists()"'
                 ]
             },
             "stop_conditions": ["Verification fails twice."],
@@ -697,6 +697,7 @@ def test_run_task_uses_shared_verification_runtime_for_worktree_commands(tmp_pat
     assert "exit_code=0" in verification_log
     assert "failure_reason=<none>" in verification_log
     assert "env_additions=SHARED_RT=1" in verification_log
+    assert "original_command=.venv/bin/python -c " in verification_log
 
 
 def test_run_task_can_commit_merge_and_push_accepted_changes(tmp_path) -> None:
