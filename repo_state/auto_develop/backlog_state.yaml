@@ -129,7 +129,7 @@ completed_epic_records:
   repair_count: 14
   outcome_references:
   - release_id: review-convergence-adjudicator
-    outcome: accepted-manual-after-full-suite
+    outcome: accepted
     run_summary_path: runs/review-convergence-adjudicator-cycle/20260514T005002Z_review-convergence-adjudicator_release/release_summary.json
     recorded_at: '2026-05-14T01:33:13Z'
   finalization_outcome_references: []
