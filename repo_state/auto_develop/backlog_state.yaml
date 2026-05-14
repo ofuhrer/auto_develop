@@ -5,8 +5,8 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   subsystem failures, normalizes useful model output before strict validation, and
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
-current_focus: cost-runtime-governor
-active_epic: cost-runtime-governor
+current_focus: context-slimming-and-retrieval
+active_epic: null
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -36,15 +36,9 @@ completed_epics:
 - shared-verification-runtime
 - review-stop-policy-hardening
 - environment-repair-actions
+- cost-runtime-governor
 blocked_epics: []
 candidate_epics:
-- id: cost-runtime-governor
-  title: Turn release metrics into runtime and model-routing decisions.
-  rationale: Retained metrics show high repeated context volume, expensive review
-    churn, and no actual billed-cost accounting; the governor should use those signals
-    to choose one-shot versus decomposed execution, cap review waves, and route models.
-  priority: 3
-  next_release_id: cost-runtime-governor
 - id: context-slimming-and-retrieval
   title: Build phase-specific context bundles for workers, reviewers, and repairs.
   rationale: Repair and review tasks often received large roadmap/design context bundles
@@ -79,21 +73,60 @@ candidate_epics:
   priority: 8
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
-active_epics:
-- epic_id: cost-runtime-governor
-  next_recommendations: []
-  retry_count: 0
-  repair_count: 0
-  outcome_references: []
-  finalization_outcome_references: []
-  unresolved_finding_references: []
-  final_review_follow_up_memories: []
-  state_review_snapshot_references: []
-  metrics_snapshot_references: []
-  tuning_report_references: []
-  updated_at: '2026-05-14T09:37:00.428128Z'
+active_epics: []
 reviewed_epics: []
 completed_epic_records:
+- epic_id: cost-runtime-governor
+  status_reason: completed via feature/cost-runtime-governor and merged into main
+    after five accepted tasks, manual repair of feature-review findings, and green
+    full-suite verification; compact governance metrics, typed cost-runtime decisions,
+    deterministic routing selection, review-cap consumption, docs, and regression
+    coverage are implemented.
+  next_recommendations:
+  - One-shot recommendations are intentionally non-blocking hints until an executable
+    one-shot runner exists; keep governor execution decomposed by default.
+  - Cost-runtime fallback decisions now use concrete fallback evidence artifacts;
+    future decision types should avoid empty or missing evidence paths.
+  - The feature review repair generator failed when findings referenced docs outside
+    source contract scope; allow supervisor-owned review repairs to include reviewed
+    documentation paths safely.
+  retry_count: 0
+  repair_count: 2
+  outcome_references:
+  - release_id: cost-runtime-governor
+    outcome: accepted
+    run_summary_path: runs/20260514T072327Z_five_cycle_sprint/20260514T093942Z_cost-runtime-governor_release/release_summary.json
+    recorded_at: '2026-05-14T10:20:00Z'
+  finalization_outcome_references:
+  - release_id: cost-runtime-governor
+    outcome: accepted
+    branch: feature/cost-runtime-governor
+    commit: fa2cfcc3a4a046412da9a6d10e38ab5ecc176c50
+    unresolved_finding_ids:
+    - crg-001-one-shot-recommendation-can-block-execution
+    - crg-002-decision-evidence-pathing-and-strict-loading-consistency
+    recommended_backlog_state: completed
+    recorded_at: '2026-05-14T10:20:00Z'
+  unresolved_finding_references:
+  - finding_id: feature-review-repair-scope
+    summary: Automatic repair-contract generation stopped because a valid review
+      finding referenced docs outside source contract scope; the branch was repaired
+      manually and verified.
+    severity: moderate
+    source_path: runs/20260514T072327Z_five_cycle_sprint/20260514T093942Z_cost-runtime-governor_release/feature_review.json
+  final_review_follow_up_memories: []
+  state_review_snapshot_references:
+  - snapshot_path: runs/20260514T072327Z_five_cycle_sprint/20260514T093758Z_governor_state_refresh/state_review_snapshot.json
+    captured_at: '2026-05-14T09:37:58Z'
+  metrics_snapshot_references:
+  - metrics_path: runs/20260514T072327Z_five_cycle_sprint/20260514T093942Z_cost-runtime-governor_release/release_metrics.json
+    recorded_at: '2026-05-14T10:20:00Z'
+    release_id: cost-runtime-governor
+  tuning_report_references:
+  - tuning_report_path: runs/20260514T072327Z_five_cycle_sprint/20260514T093942Z_cost-runtime-governor_release/release_tuning.md
+    recorded_at: '2026-05-14T10:20:00Z'
+    release_id: cost-runtime-governor
+  updated_at: '2026-05-14T10:20:00Z'
 - epic_id: environment-repair-actions
   status_reason: completed via feature/environment-repair-actions and merged into
     main after six accepted tasks, green focused verification, and a green full suite;
