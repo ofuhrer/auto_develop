@@ -5,8 +5,8 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   subsystem failures, normalizes useful model output before strict validation, and
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
-current_focus: context-slimming-and-retrieval
-active_epic: context-slimming-and-retrieval
+current_focus: executor-liveness-supervision
+active_epic: null
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -37,14 +37,9 @@ completed_epics:
 - review-stop-policy-hardening
 - environment-repair-actions
 - cost-runtime-governor
+- context-slimming-and-retrieval
 blocked_epics: []
 candidate_epics:
-- id: context-slimming-and-retrieval
-  title: Build phase-specific context bundles for workers, reviewers, and repairs.
-  rationale: Repair and review tasks often received large roadmap/design context bundles
-    even when they only needed a finding, touched files, tests, and prior evidence.
-  priority: 4
-  next_release_id: context-slimming-and-retrieval
 - id: executor-liveness-supervision
   title: Classify active, stalled, hung, and environment-blocked executors.
   rationale: Long-running workers need process/output/file heartbeat evidence so the
@@ -73,22 +68,61 @@ candidate_epics:
   priority: 8
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
-active_epics:
-- epic_id: context-slimming-and-retrieval
-  next_recommendations:
-  - Keep the phase-aware bundle manifests compact: they already record included and omitted inputs, size totals, and deterministic truncation or omission records for worker/reviewer/repair phases, but semantic retrieval/search, embeddings, and broader cross-run retrieval remain future work.
-  retry_count: 0
-  repair_count: 0
-  outcome_references: []
-  finalization_outcome_references: []
-  unresolved_finding_references: []
-  final_review_follow_up_memories: []
-  state_review_snapshot_references: []
-  metrics_snapshot_references: []
-  tuning_report_references: []
-  updated_at: '2026-05-14T10:22:58.568105Z'
+active_epics: []
 reviewed_epics: []
 completed_epic_records:
+- epic_id: context-slimming-and-retrieval
+  status_reason: completed via feature/context-slimming-and-retrieval and merged into
+    main after phase-aware context bundle implementation, manual recovery from a dirty
+    self-development finalization failure, manual acceptance of a verified scope-risk
+    overage, and green full-suite verification.
+  next_recommendations:
+  - "Keep the phase-aware bundle manifests compact: they record included and omitted
+    inputs, size totals, and deterministic truncation or omission records, while semantic
+    retrieval/search, embeddings, and broader cross-run retrieval remain future work."
+  - Address feature-review findings around common manifest envelope consistency,
+    budget-accounting semantics, and compatibility documentation in a follow-up.
+  - Fix repair-contract generation so reviewed contract/docs paths can be repaired
+    safely when findings legitimately reference them.
+  retry_count: 2
+  repair_count: 0
+  outcome_references:
+  - release_id: context-slimming-and-retrieval
+    outcome: accepted
+    run_summary_path: runs/20260514T072327Z_five_cycle_sprint/20260514T110348Z_context-slimming-and-retrieval_release/release_summary.json
+    recorded_at: '2026-05-14T11:15:00Z'
+  finalization_outcome_references:
+  - release_id: context-slimming-and-retrieval
+    outcome: accepted
+    branch: feature/context-slimming-and-retrieval
+    commit: 70a835c2625f8972f529f82a2e268da1fdcd5085
+    unresolved_finding_ids:
+    - csr-compat-001
+    - csr-manifest-structure-002
+    - csr-budget-accounting-003
+    - csr-contract-deps-004
+    recommended_backlog_state: completed
+    recorded_at: '2026-05-14T11:15:00Z'
+  unresolved_finding_references:
+  - finding_id: context-slimming-review-follow-up
+    summary: Feature review identified compatibility, manifest-envelope, budget-accounting,
+      and contract-dependency follow-ups; full verification passed and the branch was
+      merged with these follow-ups recorded.
+    severity: moderate
+    source_path: runs/20260514T072327Z_five_cycle_sprint/20260514T110348Z_context-slimming-and-retrieval_release/feature_review.json
+  final_review_follow_up_memories: []
+  state_review_snapshot_references:
+  - snapshot_path: runs/20260514T072327Z_five_cycle_sprint/20260514T102441Z_governor_state_refresh/state_review_snapshot.json
+    captured_at: '2026-05-14T10:24:41Z'
+  metrics_snapshot_references:
+  - metrics_path: runs/20260514T072327Z_five_cycle_sprint/20260514T110348Z_context-slimming-and-retrieval_release/release_metrics.json
+    recorded_at: '2026-05-14T11:15:00Z'
+    release_id: context-slimming-and-retrieval
+  tuning_report_references:
+  - tuning_report_path: runs/20260514T072327Z_five_cycle_sprint/20260514T110348Z_context-slimming-and-retrieval_release/release_tuning.md
+    recorded_at: '2026-05-14T11:15:00Z'
+    release_id: context-slimming-and-retrieval
+  updated_at: '2026-05-14T11:15:00Z'
 - epic_id: cost-runtime-governor
   status_reason: completed via feature/cost-runtime-governor and merged into main
     after five accepted tasks, manual repair of feature-review findings, and green
@@ -533,7 +567,7 @@ notes:
   release-local feature review, review-loop convergence, state-review snapshots, and
   the repeated `run-governor --epic-count N` shell. Reviewer- and supervisor-output
   normalization remain planned extensions on the same seam.'
-- Active context-slimming epic: phase-aware context bundles are already manifest-backed and compact for worker/reviewer/repair phases, but semantic retrieval/search, embeddings, and broader cross-run retrieval remain future work.
+- "Completed context-slimming epic: phase-aware context bundles are already manifest-backed and compact for worker/reviewer/repair phases, but semantic retrieval/search, embeddings, and broader cross-run retrieval remain future work."
 - 'Architecture pivot: deterministic code owns Git/worktrees, verification, evidence,
   metrics, typed persistence, configured finalization mechanics, and hard gates. High-level
   supervisor agents should own judgment-heavy execution strategy, reviewer normalization,
