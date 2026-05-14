@@ -53,6 +53,331 @@ from agentic_devloop.yaml_io import load_yaml_model, write_yaml_model
 
 
 @dataclass(frozen=True)
+class ContextBundleTruncationRecord:
+    category: str
+    source_path: str | None
+    original_chars: int
+    included_chars: int
+    omitted_chars: int
+
+
+@dataclass(frozen=True)
+class ContextBundleManifest:
+    schema_version: str
+    phase: str
+    created_at: datetime
+    created_by: str
+    release_id: str
+    max_chars: int
+    included_categories: list[str]
+    omitted_categories: list[str]
+    total_chars_included: int
+    total_chars_omitted: int
+    truncation_records: list[ContextBundleTruncationRecord]
+    artifact_paths: dict[str, list[str]]
+    bundle_path: str
+
+
+def _render_context_bundle_section(*, title: str, body: str) -> str:
+    return "\n".join([f"## {title}", "", body.rstrip(), ""]).rstrip() + "\n"
+
+
+def _read_text_or_none(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _append_with_budget(
+    *,
+    sink: list[str],
+    content: str,
+    category: str,
+    source_path: Path | None,
+    remaining: int,
+    truncation_records: list[ContextBundleTruncationRecord],
+) -> int:
+    if remaining <= 0:
+        truncation_records.append(
+            ContextBundleTruncationRecord(
+                category=category,
+                source_path=str(source_path) if source_path is not None else None,
+                original_chars=len(content),
+                included_chars=0,
+                omitted_chars=len(content),
+            )
+        )
+        return 0
+    if len(content) <= remaining:
+        sink.append(content)
+        return remaining - len(content)
+    included = content[:remaining]
+    sink.append(included)
+    truncation_records.append(
+        ContextBundleTruncationRecord(
+            category=category,
+            source_path=str(source_path) if source_path is not None else None,
+            original_chars=len(content),
+            included_chars=len(included),
+            omitted_chars=len(content) - len(included),
+        )
+    )
+    return 0
+
+
+def write_planning_context_bundle(
+    *,
+    output_dir: Path,
+    objective: ReleaseObjective,
+    objective_path: Path,
+    state_review_snapshot_path: Path | None,
+    runs_dir: Path,
+    max_chars: int = 50_000,
+    created_by: str = "plan_release_contracts",
+    now: datetime | None = None,
+) -> tuple[Path, Path]:
+    """Write a planning-phase context bundle + manifest next to planning artifacts."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = output_dir / "planning_context_bundle.md"
+    manifest_path = output_dir / "planning_context_manifest.json"
+
+    included_categories: list[str] = []
+    omitted_categories: list[str] = []
+    truncation_records: list[ContextBundleTruncationRecord] = []
+    artifact_paths: dict[str, list[str]] = {}
+    sections: list[str] = []
+    remaining = max(0, int(max_chars))
+
+    def include_category(
+        *,
+        name: str,
+        rendered: str,
+        sources: list[Path] | None = None,
+        source_for_truncation: Path | None = None,
+    ) -> None:
+        nonlocal remaining
+        if remaining <= 0:
+            omitted_categories.append(name)
+            return
+        before = remaining
+        remaining = _append_with_budget(
+            sink=sections,
+            content=rendered,
+            category=name,
+            source_path=source_for_truncation,
+            remaining=remaining,
+            truncation_records=truncation_records,
+        )
+        if remaining == before and rendered:
+            omitted_categories.append(name)
+            return
+        included_categories.append(name)
+        artifact_paths[name] = [str(path.resolve()) for path in (sources or [])]
+
+    objective_payload = json.dumps(objective.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"
+    include_category(
+        name="objective",
+        rendered=_render_context_bundle_section(
+            title="Release Objective",
+            body=f"objective_path={objective_path.resolve()}\n\n```json\n{objective_payload}```",
+        ),
+        sources=[objective_path],
+        source_for_truncation=objective_path,
+    )
+
+    snapshot_payload: dict[str, object] | None = None
+    if state_review_snapshot_path is not None and state_review_snapshot_path.exists():
+        try:
+            snapshot_payload = json.loads(state_review_snapshot_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            snapshot_payload = None
+    if snapshot_payload is not None:
+        snapshot_text = json.dumps(snapshot_payload, indent=2, sort_keys=True) + "\n"
+        include_category(
+            name="state_review_snapshot",
+            rendered=_render_context_bundle_section(
+                title="State Review Snapshot",
+                body=f"snapshot_path={state_review_snapshot_path.resolve()}\n\n```json\n{snapshot_text}```",
+            ),
+            sources=[state_review_snapshot_path],
+            source_for_truncation=state_review_snapshot_path,
+        )
+    else:
+        omitted_categories.append("state_review_snapshot")
+
+    repo_state_files: list[Path] = []
+    if isinstance(snapshot_payload, dict):
+        raw_files = snapshot_payload.get("repo_state_files")
+        if isinstance(raw_files, dict):
+            for key in (
+                "architecture_summary",
+                "active_constraints",
+                "backlog_state",
+                "release_plan",
+                "benchmark_status",
+            ):
+                raw_path = raw_files.get(key)
+                if isinstance(raw_path, str) and raw_path.strip():
+                    repo_state_files.append(Path(raw_path))
+
+    if repo_state_files:
+        pieces: list[str] = []
+        per_file_cap = 12_000
+        for path in repo_state_files:
+            content = _read_text_or_none(path)
+            if content is None:
+                continue
+            snippet = content
+            if len(snippet) > per_file_cap:
+                snippet = snippet[:per_file_cap]
+                truncation_records.append(
+                    ContextBundleTruncationRecord(
+                        category="repo_state_memory",
+                        source_path=str(path),
+                        original_chars=len(content),
+                        included_chars=len(snippet),
+                        omitted_chars=len(content) - len(snippet),
+                    )
+                )
+            pieces.append(f"### {path.name}\n\n```\n{snippet.rstrip()}\n```\n")
+        if pieces:
+            include_category(
+                name="repo_state_memory",
+                rendered=_render_context_bundle_section(
+                    title="Repo-State Memory",
+                    body="\n".join(pieces).rstrip(),
+                ),
+                sources=repo_state_files,
+                source_for_truncation=repo_state_files[0],
+            )
+        else:
+            omitted_categories.append("repo_state_memory")
+    else:
+        omitted_categories.append("repo_state_memory")
+
+    recent_metrics_paths: list[Path] = []
+    prior_finding_paths: list[Path] = []
+    recent_runs: list[str] = []
+    if isinstance(snapshot_payload, dict):
+        raw_runs = snapshot_payload.get("recent_release_runs")
+        if isinstance(raw_runs, list):
+            recent_runs = [str(item) for item in raw_runs if isinstance(item, str) and item.strip()]
+    for run_name in recent_runs[:3]:
+        run_dir = runs_dir / run_name
+        if not run_dir.is_dir():
+            continue
+        metrics = run_dir / "release_metrics.json"
+        if metrics.exists():
+            recent_metrics_paths.append(metrics)
+        review = run_dir / "release_review.md"
+        if review.exists():
+            prior_finding_paths.append(review)
+        feature_review = run_dir / "feature_review.json"
+        if feature_review.exists():
+            prior_finding_paths.append(feature_review)
+        feature_review_recheck = run_dir / "feature_review_recheck.json"
+        if feature_review_recheck.exists():
+            prior_finding_paths.append(feature_review_recheck)
+
+    if recent_metrics_paths:
+        pieces = []
+        for path in recent_metrics_paths:
+            content = _read_text_or_none(path)
+            if not content:
+                continue
+            pieces.append(f"### {path.parent.name}/{path.name}\n\n```json\n{content.rstrip()}\n```\n")
+        if pieces:
+            include_category(
+                name="recent_metrics",
+                rendered=_render_context_bundle_section(
+                    title="Recent Metrics",
+                    body="\n".join(pieces).rstrip(),
+                ),
+                sources=recent_metrics_paths,
+                source_for_truncation=recent_metrics_paths[0],
+            )
+        else:
+            omitted_categories.append("recent_metrics")
+    else:
+        omitted_categories.append("recent_metrics")
+
+    if prior_finding_paths:
+        pieces = []
+        per_file_cap = 10_000
+        for path in prior_finding_paths:
+            content = _read_text_or_none(path)
+            if content is None:
+                continue
+            snippet = content
+            if len(snippet) > per_file_cap:
+                snippet = snippet[:per_file_cap]
+                truncation_records.append(
+                    ContextBundleTruncationRecord(
+                        category="prior_findings",
+                        source_path=str(path),
+                        original_chars=len(content),
+                        included_chars=len(snippet),
+                        omitted_chars=len(content) - len(snippet),
+                    )
+                )
+            fence = "json" if path.suffix == ".json" else ""
+            pieces.append(
+                f"### {path.parent.name}/{path.name}\n\n```{fence}\n{snippet.rstrip()}\n```\n"
+            )
+        if pieces:
+            include_category(
+                name="prior_findings",
+                rendered=_render_context_bundle_section(
+                    title="Prior Findings",
+                    body="\n".join(pieces).rstrip(),
+                ),
+                sources=prior_finding_paths,
+                source_for_truncation=prior_finding_paths[0],
+            )
+        else:
+            omitted_categories.append("prior_findings")
+    else:
+        omitted_categories.append("prior_findings")
+
+    bundle_text = "\n".join(["# Planning Context Bundle", "", *sections]).rstrip() + "\n"
+    bundle_path.write_text(bundle_text, encoding="utf-8")
+
+    total_chars_included = len(bundle_text)
+    total_chars_omitted = sum(record.omitted_chars for record in truncation_records)
+    manifest = ContextBundleManifest(
+        schema_version="1.0",
+        phase="planning",
+        created_at=now or datetime.now(UTC),
+        created_by=created_by,
+        release_id=objective.release_id,
+        max_chars=int(max_chars),
+        included_categories=included_categories,
+        omitted_categories=sorted(set(omitted_categories)),
+        total_chars_included=total_chars_included,
+        total_chars_omitted=total_chars_omitted,
+        truncation_records=truncation_records,
+        artifact_paths=artifact_paths,
+        bundle_path=str(bundle_path.resolve()),
+    )
+    manifest_path.write_text(
+        json.dumps(
+            {
+                **manifest.__dict__,
+                "created_at": manifest.created_at.isoformat().replace("+00:00", "Z"),
+                "truncation_records": [record.__dict__ for record in truncation_records],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return bundle_path, manifest_path
+
+
+@dataclass(frozen=True)
 class ContractPlanResult:
     release_id: str
     plan_path: Path
@@ -169,6 +494,18 @@ def plan_release_contracts(
 
     plan_dir = runs_dir / make_plan_id(objective.release_id, now)
     plan_dir.mkdir(parents=True, exist_ok=True)
+
+    planning_bundle_path, planning_manifest_path = write_planning_context_bundle(
+        output_dir=plan_dir,
+        objective=objective,
+        objective_path=objective_path,
+        state_review_snapshot_path=state_review_snapshot_path,
+        runs_dir=runs_dir,
+        created_by="plan_release_contracts",
+        now=now,
+    )
+    warnings.append(f"planning_context_manifest_path={planning_manifest_path.resolve()}")
+
     execution_strategy_selection: ExecutionStrategySelection | None = None
     execution_strategy_selection_path: Path | None = None
     supervisor_decision_path: Path | None = None
@@ -253,7 +590,7 @@ def plan_release_contracts(
         if config is None:
             raise ValueError("strong-model planning requires --project")
         planner = config.model_roles.get("planner", config.executor)
-        planner_prompt = _planner_prompt(objective, existing_contracts)
+        planner_prompt = _planner_prompt(objective, existing_contracts, planning_bundle_path=planning_bundle_path)
         budget_ledger_path = reserve_strong_model_call(
             runs_dir=runs_dir,
             release_id=objective.release_id,
@@ -406,6 +743,9 @@ def _build_execution_strategy_decision(
         selection_path = plan_dir / "execution_strategy_selection.json"
         if selection_path.exists():
             evidence_paths.append(selection_path.resolve())
+        manifest_path = plan_dir / "planning_context_manifest.json"
+        if manifest_path.exists():
+            evidence_paths.append(manifest_path.resolve())
 
     risk_level = DecisionRiskLevel.MODERATE
     if selection.selected_action == SelectorExecutionStrategyAction.REPLAN:
@@ -1313,13 +1653,32 @@ def write_generated_contracts(
     return written_paths
 
 
-def _planner_prompt(objective: ReleaseObjective, contracts: list[TaskContract]) -> str:
+def _planner_prompt(
+    objective: ReleaseObjective,
+    contracts: list[TaskContract],
+    *,
+    planning_bundle_path: Path | None,
+) -> str:
     contract_summaries = "\n".join(
         f"- {contract.task_id}: {contract.title}; allowed_files={contract.allowed_files}"
         for contract in contracts
     )
     if not contract_summaries:
         contract_summaries = "- No existing contracts."
+
+    bundle_text = ""
+    if planning_bundle_path is not None and planning_bundle_path.exists():
+        bundle_payload = planning_bundle_path.read_text(encoding="utf-8")
+        bundle_text = "\n".join(
+            [
+                "## Planning Context Bundle",
+                "",
+                f"bundle_path={planning_bundle_path.resolve()}",
+                "",
+                bundle_payload.rstrip(),
+                "",
+            ]
+        )
     return "\n".join(
         [
             "# Strong Release Planning Prompt",
@@ -1343,6 +1702,7 @@ def _planner_prompt(objective: ReleaseObjective, contracts: list[TaskContract]) 
             "",
             contract_summaries,
             "",
+            bundle_text,
         ]
     )
 

@@ -2748,11 +2748,24 @@ def test_state_review_snapshot_collector_writes_deterministic_artifact(tmp_path)
     artifacts_dir = tmp_path / "planning_artifacts"
     artifacts_dir.mkdir(parents=True)
 
+    objective_path = tmp_path / "objective.yaml"
+    _write_yaml(
+        objective_path,
+        {
+            "release_id": "demo",
+            "title": "Demo release",
+            "objective": "Ship one bounded increment.",
+            "acceptance_criteria": ["Contract evidence exists."],
+        },
+    )
+
     artifact_path = collect_release_planning_state_review_snapshot(
         config_repo_path=repo,
         repo_state_path=Path("repo_state/demo"),
         runs_dir=runs_dir,
         planning_artifacts_dir=artifacts_dir,
+        objective_path=objective_path,
+        context_bundle_max_chars=10_000,
         now=datetime(2026, 5, 13, 0, 0, tzinfo=UTC),
     )
 
@@ -2774,6 +2787,15 @@ def test_state_review_snapshot_collector_writes_deterministic_artifact(tmp_path)
         "release_plan": str((repo_state / "release_plan.yaml").resolve()),
         "benchmark_status": str((repo_state / "benchmark_status.json").resolve()),
     }
+
+    manifest_path = artifacts_dir / "state_review_context_manifest.json"
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["phase"] == "state_review"
+    assert manifest["release_id"] == "demo"
+    assert manifest["included_categories"][0] == "objective"
+    assert "repo_state_memory" in manifest["included_categories"]
+    assert manifest["state_review_snapshot_path"] == str((artifacts_dir / "state_review_snapshot.json").resolve())
 
 
 def test_state_review_snapshot_collector_handles_missing_repo_state_path(tmp_path) -> None:
@@ -2799,6 +2821,12 @@ def test_state_review_snapshot_collector_handles_missing_repo_state_path(tmp_pat
         "benchmark_status": None,
     }
 
+    manifest_path = artifacts_dir / "state_review_context_manifest.json"
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["phase"] == "state_review"
+    assert "objective" in manifest["omitted_categories"]
+
 
 def test_state_review_snapshot_collector_requires_existing_planning_artifacts_dir(tmp_path) -> None:
     repo = _repo_with_initial_commit(tmp_path / "repo")
@@ -2816,6 +2844,37 @@ def test_state_review_snapshot_collector_requires_existing_planning_artifacts_di
         assert "release planning artifacts directory does not exist" in str(error)
     else:
         raise AssertionError("expected missing planning artifacts directory to fail")
+
+
+def test_state_review_context_bundle_manifest_records_truncation_when_budget_hit(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    artifacts_dir = tmp_path / "planning_artifacts"
+    artifacts_dir.mkdir(parents=True)
+    objective_path = tmp_path / "objective.yaml"
+    _write_yaml(
+        objective_path,
+        {
+            "release_id": "demo",
+            "title": "Huge objective",
+            "objective": "X" * 50_000,
+            "acceptance_criteria": ["Contract evidence exists."],
+        },
+    )
+
+    collect_release_planning_state_review_snapshot(
+        config_repo_path=repo,
+        repo_state_path=None,
+        runs_dir=tmp_path / "runs",
+        planning_artifacts_dir=artifacts_dir,
+        objective_path=objective_path,
+        context_bundle_max_chars=1_000,
+        now=datetime(2026, 5, 13, 0, 0, tzinfo=UTC),
+    )
+
+    manifest = json.loads((artifacts_dir / "state_review_context_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["max_chars"] == 1_000
+    assert manifest["truncation_records"]
+    assert "repo_state_memory" in manifest["omitted_categories"]
 
 
 def test_run_release_feature_review_repair_loop_records_artifacts(tmp_path: Path) -> None:
@@ -2923,6 +2982,15 @@ def test_run_release_feature_review_repair_loop_records_artifacts(tmp_path: Path
     assert result.decision == Decision.ACCEPTED
     assert summary["feature_review_path"] is not None
     assert summary["feature_review_recheck_path"] is not None
+    assert summary["feature_review_bundle_manifest_paths"]
+    manifest_path = Path(summary["feature_review_bundle_manifest_paths"][0])
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "included_categories" in manifest
+    assert "omitted_categories" in manifest
+    assert "size_metrics" in manifest
+    assert "truncation_records" in manifest
+    assert "artifact_paths" in manifest
     recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
     assert recheck["stop_reason"] == "resolved"
 

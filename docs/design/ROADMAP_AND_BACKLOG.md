@@ -250,7 +250,7 @@ Completed: `governor-state-review` added deterministic pre-epic state-review sna
 2. `review-stop-policy-hardening`: strengthen governor-owned review-stop/adjudication so repeated reviewer waves end in accept, defer, block, or follow-up decisions after final integration verification instead of unbounded repair churn.
 3. `environment-repair-actions`: add environment repair for missing `.venv`, command-not-found, missing `PYTHONPATH`, and dependency-runtime drift when project policy declares a safe repair.
 4. `cost-runtime-governor`: make model/runtime/cost metrics operational inputs for execution-strategy choice, model routing, review-wave caps, and context budgets.
-5. `context-slimming-and-retrieval`: make phase-specific context bundles so repair/review tasks receive only the finding, touched files, relevant tests, prior evidence, and repo invariants they need.
+5. `context-slimming-and-retrieval`: phase-specific context bundles are implemented so repair/review tasks receive only the finding, touched files, relevant tests, prior evidence, and repo invariants they need; the remaining follow-up is semantic retrieval/search, embeddings, and broader cross-run retrieval.
 6. `executor-liveness-supervision`: improve executor liveness detection with process, output, heartbeat, and file/diff activity signals before declaring a worker stuck.
 7. `multi-epic-cockpit-log`: provide one parent cockpit log for the whole N-epic run with child release summaries, repair decisions, cost counters, elapsed time, and intervention cues.
 8. `target-artifact-ownership`: add target-artifact ownership support with project-configured artifact directories, target-repo `.auto_develop/` layout, and compact release/epic outcome summaries in tracked repo-state so deleting the controller checkout does not lose target development memory or next-epic context.
@@ -261,7 +261,7 @@ Current priority rationale:
 1. Shared runtime is the highest operational gap because recent cycles repeatedly needed worktree-safe runtime commands and worker-side `.venv` assumptions still created false failures.
 2. Review-stop hardening comes next because the five-cycle effort spent substantial time and money on repeated reviewer waves after deterministic verification was already green.
 3. Environment repair remains critical because setup drift should be a bounded supervisor repair action, not a human intervention.
-4. Cost governance and context slimming should follow immediately because the retained metrics show large repeated context bundles and review/repair loops as the dominant avoidable cost drivers.
+4. Cost governance and context slimming should follow immediately because the retained metrics show large repeated context bundles and review/repair loops as the dominant avoidable cost drivers, while the shipped bundles already expose the current size/omission limits that should guide later retrieval work.
 5. Executor liveness, cockpit logging, artifact ownership, and onboarding then harden repeated unattended runs.
 
 Important dependency order:

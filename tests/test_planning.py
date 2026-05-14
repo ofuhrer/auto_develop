@@ -87,6 +87,116 @@ def test_plan_release_contracts_records_state_review_snapshot_path(tmp_path) -> 
     assert plan["state_review_snapshot_path"] == str(state_review_snapshot_path)
 
 
+def test_plan_release_contracts_persists_planning_context_bundle_manifest(tmp_path: Path) -> None:
+    objective_path = tmp_path / "objective.yaml"
+    _write_yaml(
+        objective_path,
+        {
+            "release_id": "v0.9.0",
+            "title": "Bundle release",
+            "objective": "Ship one bounded increment.",
+            "acceptance_criteria": ["Contract evidence exists."],
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    runs_dir = tmp_path / "runs"
+
+    repo_state_dir = tmp_path / "repo_state"
+    repo_state_dir.mkdir()
+    (repo_state_dir / "architecture_summary.md").write_text("summary\n", encoding="utf-8")
+    (repo_state_dir / "active_constraints.yaml").write_text("constraints: []\n", encoding="utf-8")
+    (repo_state_dir / "backlog_state.yaml").write_text("active_goal: demo\n", encoding="utf-8")
+    (repo_state_dir / "release_plan.yaml").write_text("release_id: demo\nactive_objective: test\n", encoding="utf-8")
+    (repo_state_dir / "benchmark_status.json").write_text("{\"status\":\"none\"}\n", encoding="utf-8")
+
+    release_run_dir = runs_dir / "20260512T000000Z_demo_release"
+    release_run_dir.mkdir(parents=True)
+    (release_run_dir / "release_metrics.json").write_text("{\"release_id\":\"demo\"}\n", encoding="utf-8")
+    (release_run_dir / "feature_review.json").write_text("{\"findings\": []}\n", encoding="utf-8")
+
+    snapshot_path = tmp_path / "planning_artifacts" / "state_review_snapshot.json"
+    snapshot_path.parent.mkdir(parents=True)
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "captured_at": "2026-05-13T00:00:00Z",
+                "repo_path": str(tmp_path),
+                "repo_state_path": str(repo_state_dir),
+                "branch": "main",
+                "head_commit": "deadbeef",
+                "status_lines": [],
+                "local_branches": [],
+                "worktrees": [],
+                "repo_state_files": {
+                    "architecture_summary": str((repo_state_dir / "architecture_summary.md").resolve()),
+                    "active_constraints": str((repo_state_dir / "active_constraints.yaml").resolve()),
+                    "backlog_state": str((repo_state_dir / "backlog_state.yaml").resolve()),
+                    "release_plan": str((repo_state_dir / "release_plan.yaml").resolve()),
+                    "benchmark_status": str((repo_state_dir / "benchmark_status.json").resolve()),
+                },
+                "recent_release_runs": ["20260512T000000Z_demo_release"],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = plan_release_contracts(
+        objective_path=objective_path,
+        contracts_dir=contracts_dir,
+        runs_dir=runs_dir,
+        state_review_snapshot_path=snapshot_path,
+    )
+
+    plan_dir = result.plan_path.parent
+    manifest_path = plan_dir / "planning_context_manifest.json"
+    bundle_path = plan_dir / "planning_context_bundle.md"
+    assert manifest_path.exists()
+    assert bundle_path.exists()
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["phase"] == "planning"
+    assert manifest["release_id"] == "v0.9.0"
+    assert manifest["included_categories"][0] == "objective"
+    assert "repo_state_memory" in manifest["included_categories"]
+    assert "recent_metrics" in manifest["included_categories"]
+    assert "prior_findings" in manifest["included_categories"]
+    assert str(objective_path.resolve()) in manifest["artifact_paths"]["objective"][0]
+
+
+def test_planning_context_bundle_manifest_records_truncation_boundaries(tmp_path: Path) -> None:
+    objective_path = tmp_path / "objective.yaml"
+    _write_yaml(
+        objective_path,
+        {
+            "release_id": "v0.9.1",
+            "title": "Huge objective",
+            "objective": "X" * 70_000,
+            "acceptance_criteria": ["Contract evidence exists."],
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+
+    result = plan_release_contracts(
+        objective_path=objective_path,
+        contracts_dir=contracts_dir,
+        runs_dir=tmp_path / "runs",
+    )
+
+    manifest_path = result.plan_path.parent / "planning_context_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["max_chars"] == 50_000
+    truncations = manifest["truncation_records"]
+    assert truncations
+    assert truncations[0]["category"] == "objective"
+    assert truncations[0]["included_chars"] <= truncations[0]["original_chars"]
+    assert "repo_state_memory" in manifest["omitted_categories"]
+
+
 def test_plan_release_contracts_writes_validated_proposed_contracts(tmp_path) -> None:
     objective_path = tmp_path / "objective.yaml"
     _write_yaml(
@@ -369,6 +479,7 @@ def test_execution_strategy_decision_uses_absolute_evidence_paths(tmp_path) -> N
     assert decision.evidence_paths == [
         snapshot_path.resolve(),
         result.execution_strategy_selection_path.resolve(),
+        (result.plan_path.parent / "planning_context_manifest.json").resolve(),
     ]
 
 

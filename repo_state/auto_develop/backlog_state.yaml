@@ -75,7 +75,8 @@ candidate_epics:
 recent_run_summaries: []
 active_epics:
 - epic_id: context-slimming-and-retrieval
-  next_recommendations: []
+  next_recommendations:
+  - Keep the phase-aware bundle manifests compact: they already record included and omitted inputs, size totals, and deterministic truncation or omission records for worker/reviewer/repair phases, but semantic retrieval/search, embeddings, and broader cross-run retrieval remain future work.
   retry_count: 0
   repair_count: 0
   outcome_references: []
@@ -532,6 +533,7 @@ notes:
   release-local feature review, review-loop convergence, state-review snapshots, and
   the repeated `run-governor --epic-count N` shell. Reviewer- and supervisor-output
   normalization remain planned extensions on the same seam.'
+- Active context-slimming epic: phase-aware context bundles are already manifest-backed and compact for worker/reviewer/repair phases, but semantic retrieval/search, embeddings, and broader cross-run retrieval remain future work.
 - 'Architecture pivot: deterministic code owns Git/worktrees, verification, evidence,
   metrics, typed persistence, configured finalization mechanics, and hard gates. High-level
   supervisor agents should own judgment-heavy execution strategy, reviewer normalization,

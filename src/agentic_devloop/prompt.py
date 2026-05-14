@@ -64,4 +64,28 @@ def _context_text(context: ContextBundle | None) -> str:
         sections.append("```text\n")
         sections.append(section.content.rstrip())
         sections.append("\n```\n")
+    sections.append(_context_manifest_summary_text(context))
     return "\n".join(sections)
+
+
+def _context_manifest_summary_text(context: ContextBundle) -> str:
+    truncation_count = len(context.truncation_records)
+    lines = [
+        "## Worker Context Bundle Summary",
+        "",
+        "- Phase: `worker`",
+        f"- Included categories: {', '.join(context.included_categories) if context.included_categories else '<none>'}",
+        f"- Omitted categories: {', '.join(context.omitted_categories) if context.omitted_categories else '<none>'}",
+        f"- Total chars included: {context.total_chars}",
+        f"- Truncation records: {truncation_count}",
+        "- Manifest artifact: persisted as `worker_context_manifest.json` in task evidence.",
+    ]
+    if truncation_count:
+        lines.append("")
+        lines.append("### Truncation Boundaries")
+        for record in context.truncation_records:
+            lines.append(
+                f"- {record.category}: included={record.included_chars} omitted={record.omitted_chars} reason={record.reason}"
+            )
+    lines.append("")
+    return "\n".join(lines)

@@ -18,6 +18,7 @@ from agentic_devloop.feature_review import (
     invoke_feature_reviewer,
     load_feature_review_branches,
     render_feature_review_prompt,
+    render_feature_review_prompt_bundle,
 )
 from agentic_devloop.models import (
     ExecutorConfig,
@@ -201,6 +202,49 @@ def test_assemble_feature_review_context_selects_latest_release_run_and_diff(tmp
     assert "final_integration_verification_log_path" in prompt
     assert "Accepted repair history" in prompt
     assert "Relevant changed-file excerpts" in prompt
+    assert prompt.index("Changed files (base..integration):") < prompt.index("Git diff (base..integration):")
+    assert prompt.index("Git diff (base..integration):") < prompt.index("Latest release artifacts (if present):")
+    assert prompt.index("Latest release artifacts (if present):") < prompt.index(
+        "Prior review/recheck artifacts (latest matching release run):"
+    )
+    assert prompt.index("Prior review/recheck artifacts (latest matching release run):") < prompt.index(
+        "docs/design"
+    )
+
+
+def test_render_feature_review_prompt_bundle_records_manifest_and_truncations(tmp_path: Path) -> None:
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    run_dir = repo_path / "runs" / "20260101T000000Z_rel-3_release"
+    run_dir.mkdir(parents=True)
+    summary_path = run_dir / "release_summary.json"
+    summary_path.write_text("S" * (MAX_FEATURE_REVIEW_ARTIFACT_CHARS + 100), encoding="utf-8")
+
+    context = FeatureReviewContext(
+        release_id="rel-3",
+        base_branch="main",
+        integration_branch="feature/rel-3",
+        base_commit="a" * 40,
+        integration_commit="b" * 40,
+        changed_files=["src/agentic_devloop/feature_review.py"],
+        diff_text="D" * (MAX_FEATURE_REVIEW_DIFF_CHARS + 100),
+        docs_design_paths=[],
+        latest_release_run_dir=run_dir,
+        release_summary_path=summary_path,
+        release_review_path=None,
+        release_metrics_path=None,
+        release_budget_path=None,
+        release_tuning_path=None,
+    )
+
+    prompt, manifest = render_feature_review_prompt_bundle(context=context, repo_path=repo_path)
+
+    assert manifest["bundle_type"] == "feature_review_prompt"
+    assert manifest["release_id"] == "rel-3"
+    assert "diff_patch" in manifest["artifact_paths"]
+    assert any(record["label"] == "git diff" for record in manifest["truncation_records"])
+    assert any(record["label"] == "release_summary.json" for record in manifest["truncation_records"])
+    assert "feature review context truncated: git diff exceeded" in prompt
 
 
 def test_render_feature_review_prompt_truncates_large_diff_and_artifacts(tmp_path: Path) -> None:

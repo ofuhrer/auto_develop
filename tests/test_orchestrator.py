@@ -232,6 +232,13 @@ def test_run_task_wires_executor_verification_evidence_and_review(tmp_path) -> N
     (repo / "README.md").write_text("# test\n", encoding="utf-8")
     _git(repo, "add", "README.md")
     _git(repo, "commit", "-m", "initial")
+    repo_state = repo / "repo_state" / "demo"
+    repo_state.mkdir(parents=True)
+    (repo_state / "architecture_summary.md").write_text("A" * 32, encoding="utf-8")
+    (repo_state / "active_constraints.yaml").write_text("B" * 32, encoding="utf-8")
+    (repo_state / "backlog_state.yaml").write_text("C" * 32, encoding="utf-8")
+    _git(repo, "add", "repo_state/demo/architecture_summary.md", "repo_state/demo/active_constraints.yaml", "repo_state/demo/backlog_state.yaml")
+    _git(repo, "commit", "-m", "add repo state fixtures")
 
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
@@ -253,7 +260,9 @@ def test_run_task_wires_executor_verification_evidence_and_review(tmp_path) -> N
                 "max_strong_model_calls_per_release": 10,
                 "max_changed_files_per_task": 8,
                 "max_diff_lines_per_task": 600,
+                "max_context_chars_per_task": 40,
             },
+            "repo_state_path": "repo_state/demo",
         },
     )
 
@@ -285,8 +294,17 @@ def test_run_task_wires_executor_verification_evidence_and_review(tmp_path) -> N
 
     assert result.decision.decision == "accepted"
     assert (result.bundle_path / "executor_prompt.md").exists()
+    prompt_text = (result.bundle_path / "executor_prompt.md").read_text(encoding="utf-8")
+    assert "## Worker Context Bundle Summary" in prompt_text
+    assert "worker_context_manifest.json" in prompt_text
     assert (result.bundle_path / "decision.yaml").exists()
     assert (result.bundle_path / "review.md").exists()
+    manifest_payload = json.loads((result.bundle_path / "worker_context_manifest.json").read_text(encoding="utf-8"))
+    assert manifest_payload["included_categories"]
+    assert manifest_payload["omitted_categories"]
+    assert manifest_payload["total_chars"] <= 40
+    assert manifest_payload["truncation_records"]
+    assert manifest_payload["artifact_path"] == str(result.bundle_path / "worker_context_manifest.json")
     assert (result.bundle_path / "changed_files.txt").read_text(encoding="utf-8") == "docs/result.md\n"
     assert "+Implemented by fake executor." in (result.bundle_path / "git_diff.patch").read_text(
         encoding="utf-8"

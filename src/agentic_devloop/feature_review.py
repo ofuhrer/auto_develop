@@ -6,7 +6,7 @@ import shutil
 from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from agentic_devloop.config import load_project_config
 from agentic_devloop.git_state import git_text
@@ -124,6 +124,37 @@ MAX_FEATURE_REVIEW_ARTIFACT_CHARS = 40_000
 MAX_FEATURE_REVIEW_DIFF_SUMMARY_CHARS = 12_000
 MAX_FEATURE_REVIEW_CHANGED_FILE_EXCERPTS = 8
 MAX_FEATURE_REVIEW_CHANGED_FILE_EXCERPT_CHARS = 3_000
+
+
+class FeatureReviewBundleTruncationRecord(TypedDict):
+    category: str
+    label: str
+    evidence_path: str
+    max_chars: int
+    original_chars: int
+    omitted_chars: int
+
+
+class FeatureReviewBundleCategoryMetric(TypedDict, total=False):
+    chars: int
+    max_chars: int | None
+    truncated: bool
+    omitted_chars: int
+
+
+class FeatureReviewPromptBundleManifest(TypedDict):
+    bundle_type: str
+    release_id: str
+    base_branch: str
+    integration_branch: str
+    base_commit: str
+    integration_commit: str
+    included_categories: list[str]
+    omitted_categories: list[str]
+    missing_artifacts: list[str]
+    size_metrics: dict[str, object]
+    truncation_records: list[FeatureReviewBundleTruncationRecord]
+    artifact_paths: dict[str, str]
 
 
 def determine_feature_review_branches(
@@ -257,45 +288,163 @@ def render_feature_review_prompt(
     runs_dir: Path = Path("runs"),
     docs_design_dir: Path = Path("docs/design"),
 ) -> str:
+    prompt, _manifest = render_feature_review_prompt_bundle(
+        context=context,
+        repo_path=repo_path,
+        runs_dir=runs_dir,
+        docs_design_dir=docs_design_dir,
+    )
+    return prompt
+
+
+def render_feature_review_prompt_bundle(
+    *,
+    context: FeatureReviewContext,
+    repo_path: Path,
+    runs_dir: Path = Path("runs"),
+    docs_design_dir: Path = Path("docs/design"),
+) -> tuple[str, FeatureReviewPromptBundleManifest]:
     repo_root = repo_path.resolve()
     runs_root = (repo_root / runs_dir).resolve()
     docs_design_root = (repo_root / docs_design_dir).resolve()
 
-    def read(path: Path | None) -> str:
+    included_categories: list[str] = []
+    omitted_categories: list[str] = []
+    missing_artifacts: list[str] = []
+    category_metrics: dict[str, FeatureReviewBundleCategoryMetric] = {}
+    truncations: list[FeatureReviewBundleTruncationRecord] = []
+
+    def record_metric(
+        category: str,
+        *,
+        rendered_text: str,
+        max_chars: int | None,
+        truncated: bool,
+        omitted_chars: int,
+    ) -> str:
+        category_metrics[category] = {
+            "chars": len(rendered_text),
+            "max_chars": max_chars,
+            "truncated": truncated,
+            "omitted_chars": omitted_chars,
+        }
+        return rendered_text
+
+    def bounded(
+        category: str,
+        text: str,
+        *,
+        max_chars: int,
+        evidence_path: str,
+        label: str,
+    ) -> str:
+        rendered, record = _bounded_review_text_with_record(
+            text,
+            max_chars=max_chars,
+            evidence_path=evidence_path,
+            label=label,
+        )
+        if record is not None:
+            truncations.append(
+                {
+                    "category": category,
+                    "label": label,
+                    "evidence_path": evidence_path,
+                    "max_chars": max_chars,
+                    "original_chars": record["original_chars"],
+                    "omitted_chars": record["omitted_chars"],
+                }
+            )
+            record_metric(
+                category,
+                rendered_text=rendered,
+                max_chars=max_chars,
+                truncated=True,
+                omitted_chars=record["omitted_chars"],
+            )
+        else:
+            record_metric(
+                category,
+                rendered_text=rendered,
+                max_chars=max_chars,
+                truncated=False,
+                omitted_chars=0,
+            )
+        return rendered
+
+    def read(category: str, artifact_label: str, path: Path | None) -> str:
         if path is None:
+            missing_artifacts.append(artifact_label)
             return ""
         text = _safe_read_text(path, allowed_roots=[repo_root, runs_root, docs_design_root])
-        return _bounded_review_text(
+        return bounded(
+            category,
             text,
             max_chars=MAX_FEATURE_REVIEW_ARTIFACT_CHARS,
             evidence_path=_repo_relative(path, repo_root),
             label=path.name,
         )
 
-    docs_section = _render_docs_design_section(
+    included_categories.extend(
+        [
+            "schema",
+            "release_metadata",
+            "changed_files",
+            "diff_summaries",
+            "diff_patch",
+            "verification_artifacts",
+            "prior_review_artifacts",
+            "repair_history",
+            "changed_file_excerpts",
+            "docs_design",
+            "instructions",
+        ]
+    )
+
+    docs_section = _render_docs_design_section_with_manifest(
         context=context,
         repo_root=repo_root,
         runs_root=runs_root,
         docs_design_root=docs_design_root,
+        category="docs_design",
+        bounded=bounded,
+        record_metric=record_metric,
+        missing_artifacts=missing_artifacts,
     )
-    diff_text = _bounded_review_text(
+    diff_text = bounded(
+        "diff_patch",
         context.diff_text,
         max_chars=MAX_FEATURE_REVIEW_DIFF_CHARS,
         evidence_path=f"git diff --patch {context.base_branch}..{context.integration_branch}",
         label="git diff",
     )
-    release_summary = read(context.release_summary_path)
-    release_review = read(context.release_review_path)
-    release_metrics = read(context.release_metrics_path)
-    release_budget = read(context.release_budget_path)
-    release_tuning = read(context.release_tuning_path)
-    diff_stat = _bounded_review_text(
+    release_summary = read("verification_artifacts", "release_summary.json", context.release_summary_path)
+    release_review = read("verification_artifacts", "release_review.md", context.release_review_path)
+    release_metrics = read("verification_artifacts", "release_metrics.json", context.release_metrics_path)
+    release_budget = read("verification_artifacts", "release_budget.json", context.release_budget_path)
+    release_tuning = read("verification_artifacts", "release_tuning.md", context.release_tuning_path)
+    prior_feature_review = read("prior_review_artifacts", "feature_review.json", context.prior_feature_review_path)
+    prior_feature_review_recheck = read(
+        "prior_review_artifacts", "feature_review_recheck.json", context.prior_feature_review_recheck_path
+    )
+    final_integration_verification = read(
+        "verification_artifacts", "final_integration_verification.json", context.final_integration_verification_path
+    )
+    final_integration_verification_log = read(
+        "verification_artifacts", "final_integration_verification_verification.log", context.final_integration_verification_log_path
+    )
+    final_integration_worktree_log = read(
+        "verification_artifacts", "final_integration_verification_worktree.log", context.final_integration_worktree_log_path
+    )
+    diff_stat = bounded(
+        "diff_summaries",
         context.diff_stat_text,
         max_chars=MAX_FEATURE_REVIEW_DIFF_SUMMARY_CHARS,
         evidence_path=f"git diff --stat {context.base_branch}..{context.integration_branch}",
         label="git diff --stat",
     )
-    diff_numstat = _bounded_review_text(
+    diff_numstat = bounded(
+        "diff_summaries",
         context.diff_numstat_text,
         max_chars=MAX_FEATURE_REVIEW_DIFF_SUMMARY_CHARS,
         evidence_path=f"git diff --numstat {context.base_branch}..{context.integration_branch}",
@@ -322,8 +471,7 @@ def render_feature_review_prompt(
         ],
     }
 
-    return "\n".join(
-        [
+    blocks: list[str] = [
             "You are an independent reviewer agent for a Git feature branch integration.",
             "Return ONLY a single JSON object matching the schema below (no markdown fences, no prose).",
             "",
@@ -364,6 +512,18 @@ def render_feature_review_prompt(
             f"- final_integration_verification_log_path: {context.final_integration_verification_log_path or '(missing)'}",
             f"- final_integration_worktree_log_path: {context.final_integration_worktree_log_path or '(missing)'}",
             "",
+            "Prior feature review (bounded, if present):",
+            f"feature_review.json:\n{prior_feature_review}".rstrip(),
+            "",
+            f"feature_review_recheck.json:\n{prior_feature_review_recheck}".rstrip(),
+            "",
+            "Final integration verification (bounded, if present):",
+            f"final_integration_verification.json:\n{final_integration_verification}".rstrip(),
+            "",
+            f"final_integration_verification/verification.log:\n{final_integration_verification_log}".rstrip(),
+            "",
+            f"final_integration_verification/worktree.log:\n{final_integration_worktree_log}".rstrip(),
+            "",
             "Accepted repair history (latest matching release run):",
             *([f"- {line}" for line in context.accepted_repair_history] or ["- (none)"]),
             "",
@@ -377,7 +537,8 @@ def render_feature_review_prompt(
                     for block in (
                         (
                             f"{path}:\n"
-                            + _bounded_review_text(
+                            + bounded(
+                                "changed_file_excerpts",
                                 excerpt,
                                 max_chars=MAX_FEATURE_REVIEW_CHANGED_FILE_EXCERPT_CHARS,
                                 evidence_path=f"git show {context.integration_branch}:{path}",
@@ -396,8 +557,59 @@ def render_feature_review_prompt(
             "- Use recommendation escalate when review is blocked (missing context, backend/tooling issues, unclear base/integration, etc.).",
             "- Findings should be actionable and refer to evidence paths when relevant (e.g., runs artifacts or changed files).",
             "- Keep summary concise and ensure all list items are non-empty strings.",
-        ]
-    ).strip() + "\n"
+    ]
+    prompt = "\n".join(blocks).strip() + "\n"
+
+    category_metrics.setdefault("total", {"chars": len(prompt)})
+    manifest: FeatureReviewPromptBundleManifest = {
+        "bundle_type": "feature_review_prompt",
+        "release_id": context.release_id,
+        "base_branch": context.base_branch,
+        "integration_branch": context.integration_branch,
+        "base_commit": context.base_commit,
+        "integration_commit": context.integration_commit,
+        "included_categories": included_categories,
+        "omitted_categories": omitted_categories,
+        "missing_artifacts": sorted(set(missing_artifacts)),
+        "size_metrics": {
+            "total_chars": len(prompt),
+            "category_metrics": category_metrics,
+        },
+        "truncation_records": truncations,
+        "artifact_paths": {
+            "repo_root": str(repo_root),
+            "runs_root": str(runs_root),
+            "docs_design_root": str(docs_design_root),
+            "diff_patch": f"git diff --patch {context.base_branch}..{context.integration_branch}",
+            "diff_stat": f"git diff --stat {context.base_branch}..{context.integration_branch}",
+            "diff_numstat": f"git diff --numstat {context.base_branch}..{context.integration_branch}",
+            "release_summary_path": _repo_relative(context.release_summary_path, repo_root)
+            if context.release_summary_path
+            else "",
+            "release_review_path": _repo_relative(context.release_review_path, repo_root) if context.release_review_path else "",
+            "release_metrics_path": _repo_relative(context.release_metrics_path, repo_root) if context.release_metrics_path else "",
+            "release_budget_path": _repo_relative(context.release_budget_path, repo_root) if context.release_budget_path else "",
+            "release_tuning_path": _repo_relative(context.release_tuning_path, repo_root) if context.release_tuning_path else "",
+            "prior_feature_review_path": _repo_relative(context.prior_feature_review_path, repo_root)
+            if context.prior_feature_review_path
+            else "",
+            "prior_feature_review_recheck_path": _repo_relative(context.prior_feature_review_recheck_path, repo_root)
+            if context.prior_feature_review_recheck_path
+            else "",
+            "final_integration_verification_path": _repo_relative(context.final_integration_verification_path, repo_root)
+            if context.final_integration_verification_path
+            else "",
+            "final_integration_verification_log_path": _repo_relative(
+                context.final_integration_verification_log_path, repo_root
+            )
+            if context.final_integration_verification_log_path
+            else "",
+            "final_integration_worktree_log_path": _repo_relative(context.final_integration_worktree_log_path, repo_root)
+            if context.final_integration_worktree_log_path
+            else "",
+        },
+    }
+    return prompt, manifest
 
 
 def invoke_feature_reviewer(
@@ -861,6 +1073,68 @@ def _render_docs_design_section(
     ).rstrip()
 
 
+def _render_docs_design_section_with_manifest(
+    *,
+    context: FeatureReviewContext,
+    repo_root: Path,
+    runs_root: Path,
+    docs_design_root: Path,
+    category: str,
+    bounded,
+    record_metric,
+    missing_artifacts: list[str],
+) -> str:
+    if not context.docs_design_paths:
+        rendered = "docs/design:\n- (missing)\n"
+        missing_artifacts.append("docs/design")
+        return record_metric(category, rendered_text=rendered, max_chars=None, truncated=False, omitted_chars=0)
+
+    relative_paths: list[str] = []
+    for path in context.docs_design_paths:
+        try:
+            relative_paths.append(str(path.resolve().relative_to(docs_design_root.resolve())))
+        except Exception:
+            relative_paths.append(path.name)
+
+    selected = [
+        ("ARCHITECTURE.md", "docs/design/ARCHITECTURE.md"),
+        ("TECHNICAL_SPECIFICATION.md", "docs/design/TECHNICAL_SPECIFICATION.md"),
+        ("ROADMAP_AND_BACKLOG.md", "docs/design/ROADMAP_AND_BACKLOG.md"),
+    ]
+    excerpts: list[str] = []
+    for filename, evidence_path in selected:
+        path = docs_design_root / filename
+        if not path.exists():
+            missing_artifacts.append(evidence_path)
+            continue
+        text = _safe_read_text(path, allowed_roots=[repo_root, runs_root, docs_design_root])
+        excerpts.append(
+            f"{evidence_path}:\n"
+            + bounded(
+                category,
+                text,
+                max_chars=MAX_FEATURE_REVIEW_ARTIFACT_CHARS,
+                evidence_path=evidence_path,
+                label=filename,
+            ).rstrip()
+        )
+
+    rendered = "\n".join(
+        [
+            "docs/design files:",
+            *[f"- {path}" for path in relative_paths],
+            "",
+            "docs/design excerpts (bounded):",
+            *(
+                ["- (no excerptable design docs found)"]
+                if not excerpts
+                else [block for excerpt in excerpts for block in (excerpt, "")]
+            ),
+        ]
+    ).rstrip()
+    return record_metric(category, rendered_text=rendered, max_chars=None, truncated=False, omitted_chars=0)
+
+
 def _collect_changed_file_excerpts(
     *,
     repo_path: Path,
@@ -1056,6 +1330,20 @@ def _bounded_review_text(
         f"{omitted} chars omitted. Inspect full evidence at {evidence_path}.]\n\n"
     )
     return text[:head].rstrip() + marker + text[-tail:].lstrip()
+
+
+def _bounded_review_text_with_record(
+    text: str,
+    *,
+    max_chars: int,
+    evidence_path: str,
+    label: str,
+) -> tuple[str, dict[str, int] | None]:
+    if len(text) <= max_chars:
+        return text, None
+    rendered = _bounded_review_text(text, max_chars=max_chars, evidence_path=evidence_path, label=label)
+    omitted = len(text) - max_chars
+    return rendered, {"original_chars": len(text), "omitted_chars": omitted}
 
 
 def _blocked_feature_review_decision(
