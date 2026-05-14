@@ -97,6 +97,11 @@ release_finalization_policy:
   policy: pr_preparation
   required_credential_env_vars: []
 
+verification_runtime:
+  python_path: /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python
+  env:
+    PYTHONPATH: src
+
 verification_profiles:
   default:
     commands:

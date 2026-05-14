@@ -68,6 +68,28 @@ class VerificationProfile(StrictModel):
         return commands
 
 
+class VerificationRuntimeConfig(StrictModel):
+    python_path: Path
+    env: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("python_path")
+    @classmethod
+    def python_path_must_be_absolute(cls, value: Path) -> Path:
+        if not value.is_absolute():
+            raise ValueError("verification runtime python path must be absolute")
+        return value
+
+    @field_validator("env")
+    @classmethod
+    def env_must_not_contain_empty_entries(cls, values: dict[str, str]) -> dict[str, str]:
+        for key, value in values.items():
+            if not key.strip():
+                raise ValueError("verification runtime env keys must not be empty")
+            if not value.strip():
+                raise ValueError("verification runtime env values must not be empty")
+        return values
+
+
 class Budget(StrictModel):
     max_executor_attempts_per_task: int = Field(gt=0)
     max_strong_model_calls_per_release: int = Field(ge=0)
@@ -127,6 +149,7 @@ class ProjectConfig(StrictModel):
     model_catalog: dict[str, ModelCatalogEntry] = Field(default_factory=dict)
     model_roles: dict[str, ExecutorConfig] = Field(default_factory=dict)
     model_routing: ModelRouting = Field(default_factory=ModelRouting)
+    verification_runtime: VerificationRuntimeConfig | None = None
     verification_profiles: dict[str, VerificationProfile] = Field(min_length=1)
     unsafe_overlap_paths: list[str] = Field(default_factory=list)
     release_finalization_policy: ReleaseFinalizationPolicy | None = None

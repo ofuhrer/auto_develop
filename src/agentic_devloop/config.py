@@ -54,6 +54,8 @@ def _resolve_controller_paths(config: ProjectConfig, config_path: Path) -> Proje
 def discover_safe_verification_runtime(config: ProjectConfig | None) -> str | None:
     if config is None:
         return None
+    if config.verification_runtime is not None:
+        return str(config.verification_runtime.python_path)
     for profile in config.verification_profiles.values():
         for command in profile.commands:
             for token in shlex.split(command):

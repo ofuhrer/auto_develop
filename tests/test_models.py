@@ -18,6 +18,7 @@ from agentic_devloop.models import (
     FailureEvidenceExcerpt,
     ModelAvailability,
     ModelCatalogEntry,
+    VerificationRuntimeConfig,
     ReleaseFinalizationPolicy,
     ReleaseFinalizationPolicyName,
     ProjectConfig,
@@ -111,7 +112,64 @@ def test_project_config_accepts_model_catalog_and_legacy_configs() -> None:
     )
 
     assert legacy.model_catalog == {}
+    assert legacy.verification_runtime is None
     assert modern.model_catalog["worker"].capabilities == ["implementation"]
+
+
+def test_project_config_accepts_verification_runtime_config() -> None:
+    config = ProjectConfig.model_validate(
+        {
+            "project_id": "demo",
+            "repo_path": "/tmp/demo",
+            "default_base_branch": "main",
+            "worktree_root": "/tmp/worktrees",
+            "verification_runtime": {
+                "python_path": "/opt/shared/.venv/bin/python",
+                "env": {"PYTHONPATH": "src"},
+            },
+            "executor": {
+                "type": "codex_cli",
+                "model": "worker",
+                "max_walltime_minutes": 5,
+            },
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        }
+    )
+
+    assert isinstance(config.verification_runtime, VerificationRuntimeConfig)
+    assert str(config.verification_runtime.python_path) == "/opt/shared/.venv/bin/python"
+    assert config.verification_runtime.env == {"PYTHONPATH": "src"}
+
+
+def test_project_config_rejects_relative_verification_runtime_path() -> None:
+    with pytest.raises(ValidationError, match="verification runtime python path must be absolute"):
+        ProjectConfig.model_validate(
+            {
+                "project_id": "demo",
+                "repo_path": "/tmp/demo",
+                "default_base_branch": "main",
+                "worktree_root": "/tmp/worktrees",
+                "verification_runtime": {"python_path": ".venv/bin/python"},
+                "executor": {
+                    "type": "codex_cli",
+                    "model": "worker",
+                    "max_walltime_minutes": 5,
+                },
+                "verification_profiles": {"default": {"commands": ["true"]}},
+                "budget": {
+                    "max_executor_attempts_per_task": 2,
+                    "max_strong_model_calls_per_release": 10,
+                    "max_changed_files_per_task": 8,
+                    "max_diff_lines_per_task": 600,
+                },
+            }
+        )
 
 
 def test_project_config_accepts_release_finalization_policy() -> None:
