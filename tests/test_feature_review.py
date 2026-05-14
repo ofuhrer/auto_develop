@@ -709,6 +709,65 @@ def test_classify_feature_review_findings_for_convergence_marks_adjacent_similar
     assert finding.adjacent_similarity > 0.35
 
 
+def test_classify_feature_review_findings_for_convergence_soft_observability_and_adjacent_repeat() -> None:
+    first_wave = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-10a",
+            "reviewer": "strong_model",
+            "summary": "Observability follow-up.",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "obs-1",
+                    "severity": "low",
+                    "summary": "Add telemetry metric for governor stop reason.",
+                    "affected_files": ["src/release.py"],
+                    "optional_follow_ups": ["Add tracing fields for stop-policy observability."],
+                }
+            ],
+        }
+    )
+    first_result = classify_feature_review_findings_for_convergence(
+        decision=first_wave,
+        previous_decisions=[],
+        verification_passed=True,
+    )
+    first_finding = first_result.findings[0]
+    assert first_finding.classification == "soft_observability"
+    assert first_finding.selected_action == "accept"
+
+    repeat_wave = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-10a",
+            "reviewer": "strong_model",
+            "summary": "Observability follow-up repeat.",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "obs-2",
+                    "severity": "low",
+                    "summary": "Add logging metric for governor stop reason decisions.",
+                    "affected_files": ["src/release.py"],
+                    "optional_follow_ups": ["Add telemetry fields for stop-policy traces."],
+                }
+            ],
+        }
+    )
+    repeat_result = classify_feature_review_findings_for_convergence(
+        decision=repeat_wave,
+        previous_decisions=[first_wave],
+        verification_passed=True,
+    )
+    repeat_finding = repeat_result.findings[0]
+    assert repeat_finding.classification == "duplicate"
+    assert repeat_finding.selected_action == "defer"
+    assert repeat_finding.adjacent_similarity > 0.35
+
+
 def test_classify_feature_review_findings_for_convergence_marks_backlog_follow_up_for_new_optional_overlap() -> None:
     previous = FeatureReviewDecision.model_validate(
         {

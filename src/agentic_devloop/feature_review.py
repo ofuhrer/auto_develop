@@ -78,6 +78,7 @@ class FeatureReviewBackendResult:
 FeatureReviewFindingClassification = Literal[
     "blocker",
     "soft_finding",
+    "soft_observability",
     "duplicate",
     "false_positive",
     "scope_expansion",
@@ -653,10 +654,13 @@ def classify_feature_review_findings_for_convergence(
                     )
                 )
                 continue
+            classification: FeatureReviewFindingClassification = "soft_finding"
+            if _is_soft_observability_finding(finding):
+                classification = "soft_observability"
             classified.append(
                 FeatureReviewFindingConvergenceResult(
                     finding_id=finding.finding_id,
-                    classification="soft_finding",
+                    classification=classification,
                     selected_action="accept",
                     matched_previous_finding_id=None,
                     repeated_by_finding_id=False,
@@ -1288,6 +1292,24 @@ def _is_verification_only_finding(finding: FeatureReviewFinding) -> bool:
         return False
     verification_markers = ("verification", "pytest", "test", "junit")
     return all(any(marker in str(path).lower() for marker in verification_markers) for path in finding.evidence_paths)
+
+
+def _is_soft_observability_finding(finding: FeatureReviewFinding) -> bool:
+    observability_markers = (
+        "observability",
+        "log",
+        "logging",
+        "metric",
+        "telemetry",
+        "trace",
+        "tracing",
+        "monitor",
+        "alert",
+        "dashboard",
+    )
+    candidate_fields = [finding.summary, *finding.optional_follow_ups, *finding.affected_files]
+    normalized = " ".join(value.lower() for value in candidate_fields if value)
+    return any(marker in normalized for marker in observability_markers)
 
 
 def _ensure_convergence_gate_consistency(

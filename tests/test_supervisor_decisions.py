@@ -455,6 +455,32 @@ def test_parse_feature_review_finding_classification_decision() -> None:
     assert decision.selected_action == FeatureReviewFindingAction.ACCEPT
 
 
+def test_parse_feature_review_soft_observability_classification_decision_serialization() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+        "finding_id": "fr-obs-001",
+        "classification": FeatureReviewFindingClassification.SOFT_OBSERVABILITY,
+        "selected_action": FeatureReviewFindingAction.ACCEPT,
+        "outcome": FeatureReviewFindingOutcome.CONTINUE,
+        "rationale": "Observability follow-up only; verification passed and no behavior regression evidence.",
+        "fallback_plan": "Promote to required repair if verification or incident telemetry regresses.",
+        "validators_to_rerun": ["review_findings_schema", "release_review_gate", "verification"],
+        "evidence_paths": ["runs/release/feature_review_recheck.json", "runs/release/release_review.md"],
+    }
+
+    decision = parse_supervisor_decision(payload)
+    serialized = decision.model_dump(mode="json")
+
+    assert isinstance(decision, FeatureReviewFindingClassificationDecision)
+    assert decision.classification == FeatureReviewFindingClassification.SOFT_OBSERVABILITY
+    assert serialized["classification"] == "soft_observability"
+    assert serialized["evidence_paths"]
+    assert serialized["rationale"]
+    assert serialized["fallback_plan"]
+    assert serialized["validators_to_rerun"]
+
+
 def test_parse_legacy_feature_review_finding_classification_decision_adds_validators_migration_default() -> None:
     payload = {
         **BASE,
@@ -518,7 +544,7 @@ def test_feature_review_finding_classification_non_blocking_accept_requires_evid
             }
         )
 
-    with pytest.raises(ValidationError, match="duplicate classification must not use accept action"):
+    with pytest.raises(ValidationError, match="duplicate classification requires defer action"):
         FeatureReviewFindingClassificationDecision.model_validate(
             {
                 **BASE,
@@ -533,7 +559,7 @@ def test_feature_review_finding_classification_non_blocking_accept_requires_evid
             }
         )
 
-    with pytest.raises(ValidationError, match="must not use accept action"):
+    with pytest.raises(ValidationError, match="blocker classification requires repair action"):
         FeatureReviewFindingClassificationDecision.model_validate(
             {
                 **BASE,
@@ -545,6 +571,20 @@ def test_feature_review_finding_classification_non_blocking_accept_requires_evid
                 "fallback_plan": "Escalate to stop if blocker cannot be repaired safely.",
                 "validators_to_rerun": ["verification"],
                 "evidence_paths": ["runs/release/release_review.md"],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="backlog_follow_up and scope_expansion classifications require defer action"):
+        FeatureReviewFindingClassificationDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.FEATURE_REVIEW_FINDING_CLASSIFICATION,
+                "finding_id": "fr-322",
+                "classification": FeatureReviewFindingClassification.BACKLOG_FOLLOW_UP,
+                "selected_action": FeatureReviewFindingAction.REPAIR,
+                "outcome": FeatureReviewFindingOutcome.CONTINUE,
+                "fallback_plan": "Defer this follow-up to backlog in next cycle.",
+                "validators_to_rerun": ["review_findings_schema"],
             }
         )
 

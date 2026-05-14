@@ -259,6 +259,7 @@ class ReviewFindingAdjudicationDecision(SupervisorDecisionBase):
 class FeatureReviewFindingClassification(StrEnum):
     BLOCKER = "blocker"
     SOFT_FINDING = "soft_finding"
+    SOFT_OBSERVABILITY = "soft_observability"
     DUPLICATE = "duplicate"
     FALSE_POSITIVE = "false_positive"
     SCOPE_EXPANSION = "scope_expansion"
@@ -302,18 +303,24 @@ class FeatureReviewFindingClassificationDecision(SupervisorDecisionBase):
                 raise ValueError("repair or accept requires continue outcome")
         if self.selected_action == FeatureReviewFindingAction.DEFER and self.outcome != FeatureReviewFindingOutcome.STOP_FINDING:
             raise ValueError("defer requires stop outcome")
+        if self.classification == FeatureReviewFindingClassification.BLOCKER:
+            if self.selected_action != FeatureReviewFindingAction.REPAIR:
+                raise ValueError("blocker classification requires repair action")
+        if self.classification == FeatureReviewFindingClassification.DUPLICATE:
+            if self.selected_action != FeatureReviewFindingAction.DEFER:
+                raise ValueError("duplicate classification requires defer action")
+        if self.classification in {
+            FeatureReviewFindingClassification.BACKLOG_FOLLOW_UP,
+            FeatureReviewFindingClassification.SCOPE_EXPANSION,
+        } and self.selected_action != FeatureReviewFindingAction.DEFER:
+            raise ValueError("backlog_follow_up and scope_expansion classifications require defer action")
         if (
-            self.classification == FeatureReviewFindingClassification.BLOCKER
-            and self.selected_action == FeatureReviewFindingAction.ACCEPT
-        ):
-            raise ValueError("blocker classification must not use accept action")
-        if (
-            self.classification == FeatureReviewFindingClassification.DUPLICATE
-            and self.selected_action == FeatureReviewFindingAction.ACCEPT
-        ):
-            raise ValueError("duplicate classification must not use accept action")
-        if (
-            self.classification != FeatureReviewFindingClassification.BLOCKER
+            self.classification
+            in {
+                FeatureReviewFindingClassification.SOFT_FINDING,
+                FeatureReviewFindingClassification.SOFT_OBSERVABILITY,
+                FeatureReviewFindingClassification.FALSE_POSITIVE,
+            }
             and self.selected_action == FeatureReviewFindingAction.ACCEPT
             and not self.evidence_paths
         ):
