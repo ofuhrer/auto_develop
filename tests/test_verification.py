@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import sys
 
-from agentic_devloop.verification import MAX_LOG_EXCERPT_CHARS, VerificationRunner, bounded_verification_excerpt
+from agentic_devloop.verification import (
+    MAX_LOG_EXCERPT_CHARS,
+    VerificationRunner,
+    apply_pythonpath_prefix_repair,
+    bounded_verification_excerpt,
+    verification_environment_capture_commands,
+)
 
 
 def test_verification_runner_records_output(tmp_path) -> None:
@@ -107,3 +113,18 @@ def test_bounded_verification_excerpt_truncates_to_log_limit() -> None:
 
     assert excerpt.startswith("a" * MAX_LOG_EXCERPT_CHARS)
     assert "... <truncated 37 chars>" in excerpt
+
+
+def test_apply_pythonpath_prefix_repair_updates_runtime_env() -> None:
+    env = apply_pythonpath_prefix_repair(runtime_env={"SHARED_RT": "enabled"}, pythonpath_prefix="PYTHONPATH=src")
+
+    assert env["PYTHONPATH"] == "src"
+    assert env["SHARED_RT"] == "enabled"
+
+
+def test_verification_environment_capture_commands_are_bounded() -> None:
+    commands = verification_environment_capture_commands(safe_runtime=sys.executable, failed_command="pytest -q")
+
+    assert commands
+    assert all("|" not in command for command in commands)
+    assert all("&&" not in command for command in commands)

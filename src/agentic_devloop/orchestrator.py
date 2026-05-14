@@ -79,7 +79,24 @@ from agentic_devloop.runtime_supervisor import (
 from agentic_devloop.prompt import write_executor_prompt
 from agentic_devloop.review import deterministic_review
 from agentic_devloop.scientific import analyze_scientific_changes
-from agentic_devloop.verification import VerificationRunner, bounded_verification_excerpt
+from agentic_devloop.environment_repair import decide_verification_environment_repair
+from agentic_devloop.models import (
+    VerificationEnvironmentRepairAction,
+    VerificationEnvironmentRepairActionKind,
+    VerificationEnvironmentRepairPolicy,
+    VerificationEnvironmentRepairRefusal,
+)
+from agentic_devloop.supervisor_decisions import (
+    EnvironmentRepairDecision,
+    EnvironmentRepairOutcome,
+    EnvironmentRepairPolicyAction,
+)
+from agentic_devloop.verification import (
+    VerificationRunner,
+    apply_pythonpath_prefix_repair,
+    bounded_verification_excerpt,
+    verification_environment_capture_commands,
+)
 from agentic_devloop.worktree import create_worktree
 from agentic_devloop.yaml_io import load_yaml_model
 
@@ -104,6 +121,20 @@ class TaskRunResult:
     bundle_path: Path
     decision: ReviewDecision
     finalize: FinalizeResult | None = None
+
+
+@dataclass(frozen=True)
+class _VerificationEnvironmentRepairAttempt:
+    failed_command: str
+    failed_exit_code: int
+    failed_stdout_excerpt: str
+    failed_stderr_excerpt: str
+    action: VerificationEnvironmentRepairActionKind | None
+    outcome: str
+    rationale: str
+    validators_rerun: tuple[str, ...]
+    initial_exit_codes: tuple[int, ...]
+    final_exit_codes: tuple[int, ...]
 
 
 def make_run_id(release_id: str, task_id: str, now: datetime | None = None) -> str:
@@ -274,6 +305,19 @@ def run_task(
         ),
         runtime_env=(config.verification_runtime.env if config.verification_runtime is not None else None),
     )
+    repair_attempt: _VerificationEnvironmentRepairAttempt | None = None
+    if any(result.exit_code != 0 for result in verification_results):
+        repaired_results, attempt = _maybe_apply_verification_environment_repair(
+            config=config,
+            task=task,
+            worktree_path=worktree_path,
+            scratch_dir=scratch_dir,
+            verification_commands=verification_commands,
+            verification_results=verification_results,
+        )
+        if attempt is not None:
+            repair_attempt = attempt
+            verification_results = repaired_results
     _report(
         progress,
         f"event=verification_finished task={task.task_id} exit_codes="
@@ -324,7 +368,7 @@ def run_task(
     )
     bundle = write_scientific_outputs(bundle, task, scientific_review)
     verification_environment_repair_input_path: Path | None = None
-    if any(result.exit_code != 0 for result in verification_results):
+    if repair_attempt is not None or any(result.exit_code != 0 for result in verification_results):
         verification_environment_repair_input_path = _capture_verification_environment_repair_input(
             bundle=bundle,
             config=config,
@@ -332,7 +376,15 @@ def run_task(
             worktree_path=worktree_path,
             verification_results=verification_results,
             verification_log_path=bundle.verification_log_path,
+            prior_repair_attempts=[repair_attempt] if repair_attempt is not None else [],
         )
+        if repair_attempt is not None:
+            _write_verification_environment_repair_supervisor_decision(
+                bundle=bundle,
+                task=task,
+                attempt=repair_attempt,
+                verification_environment_repair_input_path=verification_environment_repair_input_path,
+            )
         bundle = _diagnose_failure(
             bundle=bundle,
             config=config,
@@ -770,22 +822,28 @@ def _capture_verification_environment_repair_input(
     worktree_path: Path,
     verification_results: list[CommandResult],
     verification_log_path: Path,
+    prior_repair_attempts: list[_VerificationEnvironmentRepairAttempt],
 ) -> Path | None:
     failed = next((result for result in verification_results if result.exit_code != 0), None)
-    if failed is None:
-        return None
-    stdout_excerpt = _read_command_output_excerpt(failed.stdout_path)
-    stderr_excerpt = _read_command_output_excerpt(failed.stderr_path)
+    stdout_excerpt = _read_command_output_excerpt(failed.stdout_path) if failed is not None else "<empty>"
+    stderr_excerpt = _read_command_output_excerpt(failed.stderr_path) if failed is not None else "<empty>"
+    failed_command = failed.command if failed is not None else (prior_repair_attempts[0].failed_command if prior_repair_attempts else "<unknown>")
+    failed_exit_code = failed.exit_code if failed is not None else (prior_repair_attempts[0].failed_exit_code if prior_repair_attempts else None)
+    if prior_repair_attempts:
+        failed_command = prior_repair_attempts[0].failed_command
+        failed_exit_code = prior_repair_attempts[0].failed_exit_code
+        stdout_excerpt = prior_repair_attempts[0].failed_stdout_excerpt
+        stderr_excerpt = prior_repair_attempts[0].failed_stderr_excerpt
     repair_input = VerificationEnvironmentRepairInput(
-        command=failed.command,
-        exit_code=failed.exit_code,
+        command=failed_command,
+        exit_code=failed_exit_code,
         stdout_excerpt=stdout_excerpt,
         stderr_excerpt=stderr_excerpt,
         allowed_files_snapshot=task.allowed_files,
     )
     payload = {
         "repair_input": repair_input.model_dump(mode="json"),
-        "resolved_command": failed.command,
+        "resolved_command": failed_command,
         "verification_runtime_python_path": (
             str(config.verification_runtime.python_path) if config.verification_runtime is not None else None
         ),
@@ -795,9 +853,19 @@ def _capture_verification_environment_repair_input(
         "worktree_path": str(worktree_path),
         "project_id": config.project_id,
         "verification_log_path": str(verification_log_path),
-        "stdout_path": str(failed.stdout_path) if failed.stdout_path is not None else None,
-        "stderr_path": str(failed.stderr_path) if failed.stderr_path is not None else None,
-        "prior_repair_attempts": [],
+        "stdout_path": str(failed.stdout_path) if failed is not None and failed.stdout_path is not None else None,
+        "stderr_path": str(failed.stderr_path) if failed is not None and failed.stderr_path is not None else None,
+        "prior_repair_attempts": [
+            {
+                "action": str(attempt.action) if attempt.action is not None else None,
+                "outcome": attempt.outcome,
+                "rationale": attempt.rationale,
+                "validators_rerun": list(attempt.validators_rerun),
+                "initial_exit_codes": list(attempt.initial_exit_codes),
+                "final_exit_codes": list(attempt.final_exit_codes),
+            }
+            for attempt in prior_repair_attempts
+        ],
     }
     return write_verification_environment_repair_input(bundle, payload)
 
@@ -806,6 +874,158 @@ def _read_command_output_excerpt(path: Path | None) -> str:
     if path is None or not path.exists():
         return "<empty>"
     return bounded_verification_excerpt(path.read_text(encoding="utf-8"))
+
+
+def _maybe_apply_verification_environment_repair(
+    *,
+    config: ProjectConfig,
+    task: TaskContract,
+    worktree_path: Path,
+    scratch_dir: Path,
+    verification_commands: list[str],
+    verification_results: list[CommandResult],
+) -> tuple[list[CommandResult], _VerificationEnvironmentRepairAttempt | None]:
+    failed = next((result for result in verification_results if result.exit_code != 0), None)
+    if failed is None:
+        return verification_results, None
+
+    stdout_excerpt = _read_command_output_excerpt(failed.stdout_path)
+    stderr_excerpt = _read_command_output_excerpt(failed.stderr_path)
+    repair_input = VerificationEnvironmentRepairInput(
+        command=failed.command,
+        exit_code=failed.exit_code,
+        stdout_excerpt=stdout_excerpt,
+        stderr_excerpt=stderr_excerpt,
+        allowed_files_snapshot=task.allowed_files,
+    )
+    pythonpath_prefix = None
+    if (config.repo_path / "src").exists():
+        pythonpath_prefix = "PYTHONPATH=src"
+    policy = VerificationEnvironmentRepairPolicy(
+        allowed_actions=[
+            VerificationEnvironmentRepairActionKind.SET_PYTHONPATH_PREFIX,
+            VerificationEnvironmentRepairActionKind.CAPTURE_ENVIRONMENT,
+        ],
+        allowed_files_snapshot=tuple(task.allowed_files),
+        pythonpath_prefix=pythonpath_prefix,
+    )
+    decision = decide_verification_environment_repair(repair_input=repair_input, policy=policy)
+    if isinstance(decision, VerificationEnvironmentRepairRefusal):
+        return verification_results, None
+
+    runtime_python_path = str(config.verification_runtime.python_path) if config.verification_runtime is not None else None
+    runtime_env = dict(config.verification_runtime.env) if config.verification_runtime is not None else {}
+    capture_commands: list[str] = []
+    if decision.action == VerificationEnvironmentRepairActionKind.SET_PYTHONPATH_PREFIX and policy.pythonpath_prefix:
+        runtime_env = apply_pythonpath_prefix_repair(runtime_env=runtime_env, pythonpath_prefix=policy.pythonpath_prefix)
+    elif decision.action == VerificationEnvironmentRepairActionKind.CAPTURE_ENVIRONMENT:
+        capture_commands = verification_environment_capture_commands(
+            safe_runtime=runtime_python_path,
+            failed_command=failed.command,
+        )
+        capture_dir = scratch_dir / "verification_environment_capture"
+        VerificationRunner(timeout_seconds=120).run(
+            commands=capture_commands,
+            worktree_path=worktree_path,
+            output_dir=capture_dir,
+            runtime_python_path=runtime_python_path,
+            runtime_env=runtime_env,
+            stop_on_failure=False,
+        )
+
+    prior_log_path = scratch_dir / "verification.log"
+    prior_log = prior_log_path.read_text(encoding="utf-8") if prior_log_path.exists() else ""
+    rerun_dir = scratch_dir / "verification_repair_rerun"
+    rerun_results = VerificationRunner(timeout_seconds=600).run(
+        commands=verification_commands,
+        worktree_path=worktree_path,
+        output_dir=rerun_dir,
+        runtime_python_path=runtime_python_path,
+        runtime_env=runtime_env,
+    )
+    rerun_log_path = rerun_dir / "verification.log"
+    rerun_log = rerun_log_path.read_text(encoding="utf-8") if rerun_log_path.exists() else ""
+    combined_log = "\n".join(
+        [
+            "# verification_attempt=1",
+            prior_log.rstrip("\n"),
+            "",
+            "# verification_attempt=2",
+            rerun_log.rstrip("\n"),
+            "",
+        ]
+    )
+    prior_log_path.write_text(combined_log, encoding="utf-8")
+
+    attempt = _VerificationEnvironmentRepairAttempt(
+        failed_command=failed.command,
+        failed_exit_code=failed.exit_code,
+        failed_stdout_excerpt=stdout_excerpt,
+        failed_stderr_excerpt=stderr_excerpt,
+        action=decision.action,
+        outcome="applied_and_rerun",
+        rationale=decision.rationale,
+        validators_rerun=tuple(verification_commands),
+        initial_exit_codes=tuple(result.exit_code for result in verification_results),
+        final_exit_codes=tuple(result.exit_code for result in rerun_results),
+    )
+    return rerun_results, attempt
+
+
+def _write_verification_environment_repair_supervisor_decision(
+    *,
+    bundle: EvidenceBundle,
+    task: TaskContract,
+    attempt: _VerificationEnvironmentRepairAttempt,
+    verification_environment_repair_input_path: Path | None,
+) -> None:
+    evidence_paths: list[Path] = [
+        Path("contract.yaml"),
+        Path("run_state.json"),
+        Path("verification.log"),
+        Path("git_diff.patch"),
+        Path("changed_files.txt"),
+    ]
+    if verification_environment_repair_input_path is not None:
+        evidence_paths.append(Path(verification_environment_repair_input_path.name))
+
+    selected_policy_action = (
+        EnvironmentRepairPolicyAction.APPLY_REPAIR_AND_RETRY
+        if attempt.action == VerificationEnvironmentRepairActionKind.SET_PYTHONPATH_PREFIX
+        else EnvironmentRepairPolicyAction.CAPTURE_EVIDENCE_ONLY
+        if attempt.action == VerificationEnvironmentRepairActionKind.CAPTURE_ENVIRONMENT
+        else EnvironmentRepairPolicyAction.ESCALATE
+    )
+    refusal_reason = None
+    if selected_policy_action == EnvironmentRepairPolicyAction.ESCALATE:
+        refusal_reason = "Verification environment repair refused by deterministic policy."
+
+    decision = EnvironmentRepairDecision.model_validate(
+        {
+            "decision_id": f"{task.task_id}__verification_environment_repair",
+            "release_id": task.release_id,
+            "decided_at": datetime.now(UTC),
+            "decided_by": "deterministic_kernel",
+            "rationale": attempt.rationale,
+            "evidence_paths": evidence_paths,
+            "policy_basis": "deterministic_verification_environment_repair_policy_v1",
+            "selected_policy_action": selected_policy_action,
+            "outcome": (
+                EnvironmentRepairOutcome.APPLY_AND_RETRY
+                if selected_policy_action == EnvironmentRepairPolicyAction.APPLY_REPAIR_AND_RETRY
+                else EnvironmentRepairOutcome.CAPTURE_ONLY
+                if selected_policy_action == EnvironmentRepairPolicyAction.CAPTURE_EVIDENCE_ONLY
+                else EnvironmentRepairOutcome.ESCALATE
+            ),
+            "fallback_plan": "Escalate to operator if verification remains failing after bounded environment repair attempt.",
+            "source_evidence_paths": [Path("verification.log")],
+            "retry_budget_impact": "decrement_retry_budget_by_1",
+            "validators_to_rerun": list(attempt.validators_rerun),
+            "refusal_reason": refusal_reason,
+            "capture_commands": [],
+        }
+    )
+    write_supervisor_decision_artifact(release_bundle_path=bundle.bundle_path, decision=decision)
 
 
 def _runtime_supervisor_payload(

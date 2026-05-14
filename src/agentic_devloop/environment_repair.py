@@ -33,10 +33,24 @@ def classify_verification_environment_repair_category(
     if any(token in evidence for token in ("command not found", "not recognized as an internal or external command")):
         return VerificationEnvironmentRepairCategory.COMMAND_NOT_FOUND
 
-    if "no module named" in evidence and "pythonpath" in evidence:
-        return VerificationEnvironmentRepairCategory.MISSING_PYTHONPATH
+    missing_module = "no module named" in evidence or "modulenotfounderror" in evidence
+    if missing_module:
+        if "pythonpath" in evidence:
+            return VerificationEnvironmentRepairCategory.MISSING_PYTHONPATH
+        # Deterministic fallback for local-package import context failures.
+        if any(
+            token in evidence
+            for token in (
+                "no module named agentic_devloop",
+                "no module named 'agentic_devloop'",
+                "no module named \"agentic_devloop\"",
+            )
+        ):
+            return VerificationEnvironmentRepairCategory.MISSING_PYTHONPATH
+        if "python" in command and "-c" in command and "pythonpath" not in command:
+            return VerificationEnvironmentRepairCategory.MISSING_PYTHONPATH
 
-    if "module not found" in evidence or "no module named" in evidence:
+    if missing_module or "module not found" in evidence:
         if "pytest" in command or "python -m pytest" in command:
             return VerificationEnvironmentRepairCategory.RUNTIME_DEPENDENCY_DRIFT
 

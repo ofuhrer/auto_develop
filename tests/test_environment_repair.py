@@ -75,6 +75,17 @@ def test_classify_missing_pythonpath() -> None:
     assert category == VerificationEnvironmentRepairCategory.MISSING_PYTHONPATH
 
 
+def test_classify_missing_pythonpath_without_hint_when_agentic_devloop_missing() -> None:
+    category = classify_verification_environment_repair_category(
+        _input(
+            command="python -c \"import agentic_devloop\"",
+            stderr_excerpt="ModuleNotFoundError: No module named 'agentic_devloop'",
+        )
+    )
+
+    assert category == VerificationEnvironmentRepairCategory.MISSING_PYTHONPATH
+
+
 def test_classify_runtime_dependency_drift() -> None:
     category = classify_verification_environment_repair_category(
         _input(
