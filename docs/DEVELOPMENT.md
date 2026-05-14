@@ -17,6 +17,18 @@ If the editable console script cannot import `agentic_devloop`, use:
 PYTHONPATH=src .venv/bin/python -m agentic_devloop --help
 ```
 
+## Shared Verification Runtime
+
+Worktree verification should use one configured runtime from the main checkout or a shared control location, not a `.venv` inside each task worktree.
+
+For self-development in this repository, a typical command looks like:
+
+```bash
+PYTHONPATH=/path/to/auto_develop/worktrees/<task-worktree>/src /path/to/auto_develop/main/.venv/bin/python -m pytest
+```
+
+For external target repositories, put the same pattern in that project's `verification_profiles` and point the Python executable at the shared runtime for the target or control repository. Keep the worktree-specific part in `PYTHONPATH` or an equivalent wrapper, not in a per-worktree virtual environment.
+
 ## Common Commands
 
 Run the full test suite:
