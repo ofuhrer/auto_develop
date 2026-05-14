@@ -33,8 +33,8 @@ from agentic_devloop.release import (
     _ensure_no_existing_task_branches,
     _ensure_no_existing_worktrees,
     _command_with_env_prefixes,
+    _is_verification_only_or_conditional_finding,
     _runtime_supervisor_classification_for_task_result,
-    _verification_adjudicated_required_finding_ids,
     _multiplexed_progress,
     _persist_compact_final_review_follow_up_memory,
     _release_dependency_map,
@@ -3359,7 +3359,11 @@ def test_feature_review_required_finding_adjudication_is_limited_to_verification
         }
     )
 
-    accepted = _verification_adjudicated_required_finding_ids(syntax_finding.findings)
+    accepted = [
+        finding.finding_id
+        for finding in syntax_finding.findings
+        if _is_verification_only_or_conditional_finding(finding)
+    ]
 
     assert accepted == ["syntax-risk"]
 
@@ -4558,6 +4562,172 @@ def test_run_release_feature_review_accepts_verification_only_required_finding_a
     assert loaded.classification.value == "false_positive"
     assert loaded.selected_action.value == "accept"
     assert any("verification.log" in str(path) for path in loaded.evidence_paths)
+
+
+def test_run_release_feature_review_final_adjudication_only_accepts_verification_only_required_findings(
+    tmp_path: Path,
+) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            "model_roles": {
+                "worker": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+                "reviewer": {"type": "codex_cli", "model": "gpt-5.3-codex-spark", "max_walltime_minutes": 5},
+            },
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    decisions = [
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Two required findings remain.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "verification-only",
+                        "severity": "high",
+                        "summary": "Verify syntax and rerun pytest to confirm.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Rerun pytest if needed."],
+                        "optional_follow_ups": [],
+                    },
+                    {
+                        "finding_id": "real-change",
+                        "severity": "high",
+                        "summary": "Behavior is missing.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Implement the missing finalization behavior."],
+                        "optional_follow_ups": [],
+                    },
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Two required findings still remain.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "verification-only",
+                        "severity": "high",
+                        "summary": "Verify syntax and rerun pytest to confirm.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Rerun pytest if needed."],
+                        "optional_follow_ups": [],
+                    },
+                    {
+                        "finding_id": "real-change",
+                        "severity": "high",
+                        "summary": "Behavior is missing.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Implement the missing finalization behavior."],
+                        "optional_follow_ups": [],
+                    },
+                ],
+            }
+        ),
+        FeatureReviewDecision.model_validate(
+            {
+                "release_id": "v0.1.0",
+                "reviewer": "strong_model",
+                "summary": "Retry budget reached.",
+                "recommendation": "require_repairs",
+                "accepted_risks": [],
+                "rerun_verification_commands": [],
+                "findings": [
+                    {
+                        "finding_id": "verification-only",
+                        "severity": "high",
+                        "summary": "Verify syntax and rerun pytest to confirm.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Rerun pytest if needed."],
+                        "optional_follow_ups": [],
+                    },
+                    {
+                        "finding_id": "real-change",
+                        "severity": "high",
+                        "summary": "Behavior is missing.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Implement the missing finalization behavior."],
+                        "optional_follow_ups": [],
+                    },
+                ],
+            }
+        ),
+    ]
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    def fake_invoke_feature_reviewer(*_args, **_kwargs):
+        if not decisions:
+            raise AssertionError("unexpected reviewer invocation")
+        return FakeBackendResult(decisions.pop(0))
+
+    with patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
+    assert Path(summary["final_integration_verification_path"]).exists()
+    assert result.decision == Decision.NEEDS_REVISION
+    assert recheck["accepted_finding_ids"] == ["verification-only"]
+    assert recheck["unresolved_finding_ids"] == ["real-change"]
+
+    verification_only_path = supervisor_decision_artifact_path(
+        release_bundle_path=result.summary_path.parent,
+        decision_type=SupervisorDecisionType.FINAL_REVIEW_FINDING_ADJUDICATION,
+        decision_id="v0.1.0__final_review_finding__verification-only",
+    )
+    real_change_path = supervisor_decision_artifact_path(
+        release_bundle_path=result.summary_path.parent,
+        decision_type=SupervisorDecisionType.FINAL_REVIEW_FINDING_ADJUDICATION,
+        decision_id="v0.1.0__final_review_finding__real-change",
+    )
+    verification_only = load_supervisor_decision_artifact(verification_only_path)
+    real_change = load_supervisor_decision_artifact(real_change_path)
+    assert isinstance(verification_only, FinalReviewFindingAdjudicationDecision)
+    assert isinstance(real_change, FinalReviewFindingAdjudicationDecision)
+    assert verification_only.classification.value == "verification_only"
+    assert real_change.classification.value == "blocker"
 
 
 def test_run_release_feature_review_convergence_limit_final_adjudication_allows_non_blocking_finalization(

@@ -2373,7 +2373,15 @@ def _run_feature_review_and_repair_loop(
                 last_verification_log_path = Path(log_path)
 
             accepted_optional_ids, deferred_optional_ids = optional_recheck_ids()
-            accepted_required_ids = set(_verification_adjudicated_required_finding_ids(required_findings)) if last_verification_ok else set()
+            accepted_required_ids = (
+                {
+                    finding.finding_id
+                    for finding in required_findings
+                    if _is_verification_only_or_conditional_finding(finding)
+                }
+                if last_verification_ok
+                else set()
+            )
             write_required_finding_classifications(
                 attempt=loop_index + 1,
                 accepted_required_finding_ids=accepted_required_ids,
@@ -2589,7 +2597,11 @@ def _run_feature_review_and_repair_loop(
         if loop_index >= _FEATURE_REVIEW_MAX_REPAIR_LOOPS:
             verification_ok = last_verification_ok
             adjudicated_finding_ids = (
-                _verification_adjudicated_required_finding_ids(required_findings)
+                [
+                    finding.finding_id
+                    for finding in required_findings
+                    if _is_verification_only_or_conditional_finding(finding)
+                ]
                 if verification_ok
                 else []
             )
@@ -2750,14 +2762,6 @@ def _run_feature_review_and_repair_loop(
     )
     feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
     return build_result()
-
-
-def _verification_adjudicated_required_finding_ids(findings: list[object]) -> list[str]:
-    accepted: list[str] = []
-    for finding in findings:
-        if _is_verification_only_or_conditional_finding(finding):
-            accepted.append(str(getattr(finding, "finding_id")))
-    return accepted
 
 
 def _normalize_feature_review_model_output_if_needed(
