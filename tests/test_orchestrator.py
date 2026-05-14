@@ -692,6 +692,11 @@ def test_run_task_uses_shared_verification_runtime_for_worktree_commands(tmp_pat
     assert result.decision.decision == "accepted"
     verification_log = (result.bundle_path / "verification.log").read_text(encoding="utf-8")
     assert sys.executable in verification_log
+    assert "cwd=" in verification_log
+    assert "resolved_command=" in verification_log
+    assert "exit_code=0" in verification_log
+    assert "failure_reason=<none>" in verification_log
+    assert "env_additions=SHARED_RT=1" in verification_log
 
 
 def test_run_task_can_commit_merge_and_push_accepted_changes(tmp_path) -> None:

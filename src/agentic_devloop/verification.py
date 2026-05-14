@@ -33,17 +33,19 @@ class VerificationRunner:
                 command,
                 safe_runtime=runtime_python_path,
             )
+            env_additions = runtime_env or {}
             result = run_process(
                 resolved_command,
                 cwd=worktree_path,
                 timeout_seconds=self.timeout_seconds,
                 shell=True,
-                env_additions=runtime_env,
+                env_additions=env_additions,
             )
             stdout_path = output_dir / f"verification_{index}_stdout.log"
             stderr_path = output_dir / f"verification_{index}_stderr.log"
             stdout_path.write_text(result.stdout, encoding="utf-8")
             stderr_path.write_text(result.stderr, encoding="utf-8")
+            failure_reason = _failure_reason(result.exit_code, result.timed_out)
 
             command_result = CommandResult(
                 command=resolved_command,
@@ -56,8 +58,14 @@ class VerificationRunner:
             results.append(command_result)
             log_lines.append(
                 f"[{index}] {resolved_command}\n"
+                f"original_command={command}\n"
+                f"resolved_command={resolved_command}\n"
+                f"cwd={worktree_path}\n"
+                f"timeout_seconds={self.timeout_seconds}\n"
+                f"env_additions={_render_env_additions(env_additions)}\n"
                 f"exit_code={result.exit_code}\n"
                 f"timed_out={result.timed_out}\n"
+                f"failure_reason={failure_reason}\n"
                 f"duration_seconds={result.duration_seconds:.3f}\n"
                 f"stdout_path={stdout_path}\n"
                 f"stderr_path={stderr_path}\n"
@@ -98,3 +106,18 @@ def rewrite_worktree_local_verification_command(command: str, *, safe_runtime: s
     if not rewritten:
         return command
     return shlex.join(updated_tokens)
+
+
+def _render_env_additions(env_additions: dict[str, str]) -> str:
+    if not env_additions:
+        return "<none>"
+    items = [f"{key}={value}" for key, value in sorted(env_additions.items())]
+    return ", ".join(items)
+
+
+def _failure_reason(exit_code: int, timed_out: bool) -> str:
+    if timed_out:
+        return "timeout"
+    if exit_code != 0:
+        return f"nonzero_exit_{exit_code}"
+    return "<none>"
