@@ -661,6 +661,8 @@ Final adjudication rules:
 
 Raw reviewer artifacts stay in `runs/`. The compact repo-state trail should preserve the outcome references, accepted-risks rationale, and deferred follow-up summaries needed for the next release or planning cycle.
 
+Repo-state compaction requires each stored `FinalReviewFollowUpMemoryReference` to carry non-empty `evidence_paths`. If an adjudication payload omits or clears `evidence_paths`, the compaction step backfills them from release-scoped evidence (continuation decision, feature-review artifacts, final verification evidence, and validator rerun evidence paths) so compact memory remains auditable even for `false_positive` and `verification_only` classifications.
+
 ### Review-Loop Convergence Policy
 
 The release-local reviewer loop needs explicit convergence behavior so repeated findings do not churn the retry budget without adding signal.

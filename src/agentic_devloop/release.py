@@ -4565,7 +4565,33 @@ def _persist_compact_final_review_follow_up_memory(
             for value in payload.get("evidence_paths", [])
             if isinstance(value, str) and value.strip()
         ]
-        if classification not in {"false_positive", "verification_only"} and not evidence_paths:
+        if not evidence_paths:
+            derived_paths: list[Path] = []
+
+            def resolve_from_continuation(path: Path | None) -> None:
+                if path is None:
+                    return
+                candidate = path if path.is_absolute() else (continuation_dir / path)
+                derived_paths.append(candidate)
+
+            resolve_from_continuation(continuation.feature_review_path)
+            resolve_from_continuation(continuation.feature_review_recheck_path)
+            resolve_from_continuation(continuation.final_integration_verification_path)
+            for path in continuation.rerun_validator_evidence_paths:
+                resolve_from_continuation(path)
+            derived_paths.append(resolved_adjudication_path)
+            derived_paths.append(continuation_decision_path)
+
+            seen: set[Path] = set()
+            evidence_paths = []
+            for path in derived_paths:
+                resolved = path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                evidence_paths.append(resolved)
+
+        if not evidence_paths:
             continue
         validators_rerun = [
             value.strip()
