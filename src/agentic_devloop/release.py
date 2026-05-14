@@ -127,7 +127,7 @@ def _load_supervisor_decision_artifact_silencing_legacy_warning(path: Path) -> S
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
-            message=r"loaded legacy supervisor decision artifact without validators_to_rerun: .*",
+            message=r"^loaded legacy supervisor decision artifact without validators_to_rerun: .*$",
             category=UserWarning,
         )
         return load_supervisor_decision_artifact(path)
