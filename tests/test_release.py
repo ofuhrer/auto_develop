@@ -4789,7 +4789,7 @@ def test_run_release_feature_review_convergence_limit_final_adjudication_allows_
     assert sample["continuation_decision_path"]
 
 
-def test_run_release_feature_review_convergence_limit_malformed_reviewer_evidence_hard_stops(
+def test_run_release_feature_review_convergence_limit_uses_release_evidence_when_reviewer_evidence_paths_are_omitted(
     tmp_path: Path,
 ) -> None:
     repo = _repo_with_initial_commit(tmp_path / "repo")
@@ -4996,16 +4996,20 @@ def test_run_release_feature_review_convergence_limit_malformed_reviewer_evidenc
             merge_on_accept=True,
         )
 
-    assert result.decision == Decision.ESCALATED
+    assert result.decision == Decision.ACCEPTED
     summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
     continuation = json.loads(Path(summary["final_review_continuation_decision_path"]).read_text(encoding="utf-8"))
-    assert continuation["outcome"] == "hard_stop"
+    assert continuation["outcome"] in {"accepted_risk", "backlog_follow_up"}
+    adjudication_paths = continuation.get("finding_adjudication_paths")
+    assert isinstance(adjudication_paths, list)
+    assert adjudication_paths
     backlog_state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
-    if backlog_state_path.exists():
-        backlog_state = yaml.safe_load(backlog_state_path.read_text(encoding="utf-8"))
-        active_epics = backlog_state.get("active_epics", [])
-        memories = active_epics[0].get("final_review_follow_up_memories", []) if active_epics else []
-        assert memories == []
+    assert backlog_state_path.exists()
+    backlog_state = yaml.safe_load(backlog_state_path.read_text(encoding="utf-8"))
+    active_epics = backlog_state.get("active_epics", [])
+    memories = active_epics[0].get("final_review_follow_up_memories", []) if active_epics else []
+    assert memories
+    assert any(item["classification"] == "backlog_follow_up" for item in memories)
 
 def test_release_finalization_gate_only_counts_required_findings() -> None:
     decision = FeatureReviewDecision.model_validate(

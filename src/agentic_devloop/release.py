@@ -2436,8 +2436,10 @@ def _run_feature_review_and_repair_loop(
                         FinalReviewFindingAdjudicationClassification.BACKLOG_FOLLOW_UP,
                         FinalReviewFindingAdjudicationClassification.SCOPE_EXPANSION,
                         FinalReviewFindingAdjudicationClassification.DUPLICATE,
+                        FinalReviewFindingAdjudicationClassification.FALSE_POSITIVE,
+                        FinalReviewFindingAdjudicationClassification.VERIFICATION_ONLY,
                     }
-                    and not list(getattr(finding, "evidence_paths", []) or [])
+                    and not evidence_paths
                 ):
                     malformed_ids.append(finding_id)
                     classification = FinalReviewFindingAdjudicationClassification.BLOCKER
