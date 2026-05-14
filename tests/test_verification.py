@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 from agentic_devloop.verification import VerificationRunner
 
 
@@ -49,3 +51,20 @@ def test_verification_runner_records_failure_excerpts(tmp_path) -> None:
     assert results[0].exit_code == 3
     assert "stdout_excerpt:\nfailure-out" in log
     assert "stderr_excerpt:\nfailure-err" in log
+
+
+def test_verification_runner_uses_runtime_python_and_env(tmp_path) -> None:
+    runner = VerificationRunner(timeout_seconds=5)
+
+    results = runner.run(
+        commands=['.venv/bin/python -c "import os; print(os.environ[\'SHARED_RT\'])"'],
+        worktree_path=tmp_path,
+        output_dir=tmp_path / "verification",
+        runtime_python_path=sys.executable,
+        runtime_env={"SHARED_RT": "enabled"},
+    )
+
+    assert len(results) == 1
+    assert results[0].exit_code == 0
+    assert results[0].command.startswith(sys.executable)
+    assert results[0].stdout_path.read_text(encoding="utf-8").strip() == "enabled"

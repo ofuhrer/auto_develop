@@ -266,6 +266,10 @@ def run_task(
         commands=verification_commands,
         worktree_path=worktree_path,
         output_dir=scratch_dir,
+        runtime_python_path=(
+            str(config.verification_runtime.python_path) if config.verification_runtime is not None else None
+        ),
+        runtime_env=(config.verification_runtime.env if config.verification_runtime is not None else None),
     )
     _report(
         progress,
@@ -915,6 +919,10 @@ def _attempt_conflict_repair(
         commands=verification_commands,
         worktree_path=worktree_path,
         output_dir=scratch_dir / "conflict_repair_verification",
+        runtime_python_path=(
+            str(config.verification_runtime.python_path) if config.verification_runtime is not None else None
+        ),
+        runtime_env=(config.verification_runtime.env if config.verification_runtime is not None else None),
     )
     verification_exit_codes = [result.exit_code for result in verification_results]
     resolved = all(exit_code == 0 for exit_code in verification_exit_codes)

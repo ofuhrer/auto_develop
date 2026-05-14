@@ -20,6 +20,8 @@ class VerificationRunner:
         commands: list[str],
         worktree_path: Path,
         output_dir: Path,
+        runtime_python_path: str | None = None,
+        runtime_env: dict[str, str] | None = None,
         stop_on_failure: bool = True,
     ) -> list[CommandResult]:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -27,11 +29,16 @@ class VerificationRunner:
         log_lines: list[str] = []
 
         for index, command in enumerate(commands, start=1):
-            result = run_process(
+            resolved_command = rewrite_worktree_local_verification_command(
                 command,
+                safe_runtime=runtime_python_path,
+            )
+            result = run_process(
+                resolved_command,
                 cwd=worktree_path,
                 timeout_seconds=self.timeout_seconds,
                 shell=True,
+                env_additions=runtime_env,
             )
             stdout_path = output_dir / f"verification_{index}_stdout.log"
             stderr_path = output_dir / f"verification_{index}_stderr.log"
@@ -39,7 +46,7 @@ class VerificationRunner:
             stderr_path.write_text(result.stderr, encoding="utf-8")
 
             command_result = CommandResult(
-                command=command,
+                command=resolved_command,
                 exit_code=result.exit_code,
                 stdout_path=stdout_path,
                 stderr_path=stderr_path,
@@ -48,7 +55,7 @@ class VerificationRunner:
             )
             results.append(command_result)
             log_lines.append(
-                f"[{index}] {command}\n"
+                f"[{index}] {resolved_command}\n"
                 f"exit_code={result.exit_code}\n"
                 f"timed_out={result.timed_out}\n"
                 f"duration_seconds={result.duration_seconds:.3f}\n"
