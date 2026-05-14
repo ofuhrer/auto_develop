@@ -307,7 +307,7 @@ def test_cost_runtime_governance_falls_back_without_prior_metrics(tmp_path: Path
     assert isinstance(decision, CostRuntimeGovernanceDecision)
     assert decision.selected_action == CostRuntimeGovernanceAction.DECOMPOSED
     fallback_evidence_path = release_root / "cost_runtime_governance_fallback_evidence.json"
-    assert decision.evidence_paths == [fallback_evidence_path]
+    assert decision.evidence_paths == [fallback_evidence_path.resolve()]
     assert fallback_evidence_path.exists()
     assert isinstance(
         load_supervisor_decision_artifact(_cost_runtime_governance_decision_path(release_root, "v0.1.0")),

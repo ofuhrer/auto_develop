@@ -61,7 +61,7 @@ def test_build_cost_runtime_governance_decision_uses_conservative_fallback_when_
     assert decision.selected_action == CostRuntimeGovernanceAction.DECOMPOSED
     assert decision.outcome == CostRuntimeGovernanceOutcome.PROCEED_DECOMPOSED
     assert decision.selected_model_role == "balanced_worker"
-    assert decision.evidence_paths == [tuning_path]
+    assert decision.evidence_paths == [tuning_path.resolve()]
     assert decision.validators_to_rerun == ["release_metrics", "verification", "budget_policy"]
 
 
@@ -93,6 +93,6 @@ def test_build_cost_runtime_governance_decision_routes_one_shot_from_prior_evide
     assert decision.selected_action == CostRuntimeGovernanceAction.ONE_SHOT
     assert decision.outcome == CostRuntimeGovernanceOutcome.PROCEED_ONE_SHOT
     assert decision.selected_model_role == "high_capability_worker"
-    assert decision.evidence_paths == [metrics_path]
+    assert decision.evidence_paths == [metrics_path.resolve()]
     assert "release_metrics" in decision.validators_to_rerun
     assert "verification" in decision.validators_to_rerun

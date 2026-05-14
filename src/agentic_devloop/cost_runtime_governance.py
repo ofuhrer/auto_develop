@@ -118,7 +118,7 @@ def build_cost_runtime_governance_decision(
             )
 
     evidence_paths: list[Path] = [
-        path
+        path.resolve()
         for path in [release_metrics_path, release_tuning_path, fallback_evidence_path]
         if path is not None and path.exists()
     ]
