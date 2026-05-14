@@ -1259,3 +1259,65 @@ class BudgetTuningReport(StrictModel):
         if self.recommendations:
             lines.extend(["## Guidance", *[f"- {item}" for item in self.recommendations], ""])
         return "\n".join(lines).rstrip() + "\n"
+
+
+class VerificationEnvironmentRepairCategory(StrEnum):
+    STALE_EDITABLE_INSTALL = "stale_editable_install"
+    COMMAND_NOT_FOUND = "command_not_found"
+    MISSING_PYTHONPATH = "missing_pythonpath"
+    RUNTIME_DEPENDENCY_DRIFT = "runtime_dependency_drift"
+    UNKNOWN = "unknown"
+
+
+class VerificationEnvironmentRepairActionKind(StrEnum):
+    REFRESH_EDITABLE_INSTALL = "refresh_editable_install"
+    SET_PYTHONPATH_PREFIX = "set_pythonpath_prefix"
+    CAPTURE_ENVIRONMENT = "capture_environment"
+
+
+class VerificationEnvironmentRepairRefusalReason(StrEnum):
+    UNCLASSIFIED_FAILURE = "unclassified_failure"
+    ACTION_NOT_ALLOWED_BY_POLICY = "action_not_allowed_by_policy"
+    MISSING_POLICY_CONFIGURATION = "missing_policy_configuration"
+    ALLOWED_FILES_MISMATCH = "allowed_files_mismatch"
+
+
+class VerificationEnvironmentRepairInput(StrictModel):
+    command: str = Field(min_length=1)
+    exit_code: int | None = None
+    stderr_excerpt: str = ""
+    stdout_excerpt: str = ""
+    allowed_files_snapshot: list[str] = Field(min_length=1)
+
+    @field_validator("allowed_files_snapshot")
+    @classmethod
+    def allowed_files_snapshot_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() for value in values):
+            raise ValueError("verification environment repair allowed_files snapshot entries must not be empty")
+        return values
+
+
+class VerificationEnvironmentRepairPolicy(StrictModel):
+    allowed_actions: list[VerificationEnvironmentRepairActionKind] = Field(min_length=1)
+    allowed_files_snapshot: tuple[str, ...] = Field(min_length=1)
+    editable_install_command: str | None = None
+    pythonpath_prefix: str | None = None
+
+    @field_validator("allowed_files_snapshot")
+    @classmethod
+    def allowed_files_snapshot_must_not_be_empty(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not value.strip() for value in values):
+            raise ValueError("verification environment repair policy allowed_files snapshot entries must not be empty")
+        return values
+
+
+class VerificationEnvironmentRepairAction(StrictModel):
+    category: VerificationEnvironmentRepairCategory
+    action: VerificationEnvironmentRepairActionKind
+    rationale: str = Field(min_length=1)
+
+
+class VerificationEnvironmentRepairRefusal(StrictModel):
+    category: VerificationEnvironmentRepairCategory
+    reason: VerificationEnvironmentRepairRefusalReason
+    rationale: str = Field(min_length=1)

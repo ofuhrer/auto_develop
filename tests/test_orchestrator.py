@@ -359,20 +359,184 @@ def test_run_task_writes_typed_soft_budget_acceptance_decision(tmp_path) -> None
     artifacts = sorted(decision_dir.glob("soft_budget_acceptance__*.json"))
     assert len(artifacts) == 1
 
+
+def test_run_task_applies_bounded_verification_environment_repair_and_records_supervisor_decision(tmp_path) -> None:
+    class NoOpExecutor:
+        def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            stdout_path = output_dir / "executor_stdout.log"
+            stderr_path = output_dir / "executor_stderr.log"
+            stdout_path.write_text("noop\n", encoding="utf-8")
+            stderr_path.write_text("", encoding="utf-8")
+            return ExecutorResult(
+                command=["noop-executor"],
+                exit_code=0,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                duration_seconds=0.01,
+                backend="fake",
+                model=None,
+            )
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "src" / "demo_pkg_xyz").mkdir(parents=True)
+    (repo / "src" / "demo_pkg_xyz" / "__init__.py").write_text("value = 123\n", encoding="utf-8")
+    _git(repo, "add", "src/demo_pkg_xyz/__init__.py")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "verification_runtime": {"python_path": sys.executable, "env": {"PYTHONPATH": "."}},
+            "verification_profiles": {
+                    "default": {"commands": ['.venv/bin/python -c "import demo_pkg_xyz; print(demo_pkg_xyz.value)"']}
+                },
+            "budget": {
+                "max_executor_attempts_per_task": 1,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 10,
+                "max_diff_lines_per_task": 10_000,
+            },
+        },
+    )
+
+    contract_path = tmp_path / "contract.yaml"
+    _write_yaml(
+        contract_path,
+        {
+            "task_id": "demo-9999",
+            "release_id": "v0.1.0",
+            "title": "No-op",
+            "budget_class": "S",
+            "objective": "No changes.",
+            "allowed_files": ["src/**"],
+            "forbidden_changes": [],
+            "required_evidence": ["git diff"],
+            "verification": {"profile": "default"},
+            "stop_conditions": ["Verification fails twice."],
+        },
+    )
+
+    result = run_task(
+        project_id="demo",
+        contract_path=contract_path,
+        config_dir=config_dir,
+        runs_dir=tmp_path / "runs",
+        executor=NoOpExecutor(),
+        now=datetime(2026, 5, 12, 12, 0, tzinfo=UTC),
+    )
+
+    assert result.decision.decision == "accepted"
+    decision_dir = result.bundle_path / "supervisor_decisions"
+    artifacts = sorted(decision_dir.glob("environment_repair__*.json"))
+    assert len(artifacts) == 1
     loaded = load_supervisor_decision_artifact(artifacts[0])
-    assert isinstance(loaded, SoftBudgetAcceptanceDecision)
-    payload = json.loads(artifacts[0].read_text(encoding="utf-8"))
-    assert payload["evidence_paths"] == [
-        "changed_files.txt",
-        "git_diff.patch",
-        "run_state.json",
-        "verification.log",
-        "soft_gate_decision.json",
-    ]
-    assert loaded.outcome == BudgetAcceptanceOutcome.ACCEPT_OVERAGE
-    assert loaded.budget_name == "max_changed_files_per_task"
-    assert loaded.configured_limit == 10.0
-    assert loaded.actual == 11.0
+    assert loaded.decision_type.value == "environment_repair"
+
+
+def test_run_task_records_stop_decision_when_verification_environment_repair_is_refused(tmp_path) -> None:
+    class NoOpExecutor:
+        def run(self, *, prompt_path: Path, worktree_path: Path, output_dir: Path) -> ExecutorResult:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            stdout_path = output_dir / "executor_stdout.log"
+            stderr_path = output_dir / "executor_stderr.log"
+            stdout_path.write_text("noop\n", encoding="utf-8")
+            stderr_path.write_text("", encoding="utf-8")
+            return ExecutorResult(
+                command=["noop-executor"],
+                exit_code=0,
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+                duration_seconds=0.01,
+                backend="fake",
+                model=None,
+            )
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "verification_runtime": {"python_path": sys.executable, "env": {}},
+            "verification_profiles": {
+                "default": {"commands": ['.venv/bin/python -c "import demo_pkg_xyz"']}
+            },
+            "budget": {
+                "max_executor_attempts_per_task": 1,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 10,
+                "max_diff_lines_per_task": 10_000,
+            },
+        },
+    )
+
+    contract_path = tmp_path / "contract.yaml"
+    _write_yaml(
+        contract_path,
+        {
+            "task_id": "demo-9998",
+            "release_id": "v0.1.0",
+            "title": "No-op",
+            "budget_class": "S",
+            "objective": "No changes.",
+            "allowed_files": ["docs/**"],
+            "forbidden_changes": [],
+            "required_evidence": ["git diff"],
+            "verification": {"profile": "default"},
+            "stop_conditions": ["Verification fails."],
+        },
+    )
+
+    result = run_task(
+        project_id="demo",
+        contract_path=contract_path,
+        config_dir=config_dir,
+        runs_dir=tmp_path / "runs",
+        executor=NoOpExecutor(),
+        now=datetime(2026, 5, 12, 12, 2, tzinfo=UTC),
+    )
+
+    assert result.decision.decision == "failed"
+    artifacts = sorted((result.bundle_path / "supervisor_decisions").glob("environment_repair__*.json"))
+    assert len(artifacts) == 1
+    loaded = load_supervisor_decision_artifact(artifacts[0])
+    assert loaded.decision_type.value == "environment_repair"
+    assert loaded.outcome.value == "stop"
+    assert loaded.selected_policy_action.value == "stop"
+    assert loaded.refusal_reason is not None
 
 
 def test_run_task_keeps_verification_failure_authoritative_over_soft_budget(tmp_path) -> None:
@@ -1090,6 +1254,19 @@ def test_run_task_writes_injected_diagnosis_for_verification_failure(tmp_path) -
     )
     assert failure_diagnosis["category"] == "injected_verification_failure"
     assert failure_diagnosis["source_metadata"]["backend"] == "recording-test-backend"
+    assert failure_diagnosis["verification_environment_repair_input_path"] == str(
+        result.bundle_path / "verification_environment_repair_input.json"
+    )
+    repair_input_payload = json.loads(
+        (result.bundle_path / "verification_environment_repair_input.json").read_text(encoding="utf-8")
+    )
+    assert repair_input_payload["repair_input"]["command"] == "false"
+    assert repair_input_payload["repair_input"]["exit_code"] == 1
+    assert repair_input_payload["repair_input"]["allowed_files_snapshot"] == ["docs/**"]
+    assert repair_input_payload["verification_log_path"] == str(result.bundle_path / "verification.log")
+    assert repair_input_payload["worktree_path"] == str(result.worktree_path)
+    assert repair_input_payload["project_id"] == "demo"
+    assert repair_input_payload["prior_repair_attempts"] == []
 
 
 def test_run_task_keeps_failure_diagnosis_yaml_artifact_compatible(tmp_path) -> None:

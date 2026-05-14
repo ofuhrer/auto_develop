@@ -9,7 +9,6 @@ from typing import Any
 
 from pydantic import Field, ValidationError, field_validator, model_validator
 
-from agentic_devloop.contracts import normalize_planner_contract_plan_payload
 from agentic_devloop.models import (
     ContractPlan,
     ModelOutputNormalizationActionPayload,
@@ -431,6 +430,8 @@ class RuntimeSupervisor:
         candidate_plan: ContractPlan | dict[str, Any],
     ) -> RuntimeSupervisorApplierResult:
         try:
+            from agentic_devloop.contracts import normalize_planner_contract_plan_payload
+
             normalized_candidate: ContractPlan | dict[str, Any] = candidate_plan
             if isinstance(candidate_plan, dict):
                 normalized_candidate = normalize_planner_contract_plan_payload(

@@ -10,6 +10,9 @@ from pydantic import ValidationError
 from agentic_devloop.evidence import supervisor_decisions_artifacts_dir
 from agentic_devloop.supervisor_decisions import (
     DecisionRiskLevel,
+    EnvironmentRepairDecision,
+    EnvironmentRepairOutcome,
+    EnvironmentRepairPolicyAction,
     ExecutionStrategyAction,
     ExecutionStrategyDecision,
     ExecutionStrategyOutcome,
@@ -136,6 +139,29 @@ def _feature_review_finding_classification_decision(
             "outcome": FeatureReviewFindingOutcome.CONTINUE,
             "fallback_plan": "Re-open as repair if related verification regresses.",
             "validators_to_rerun": ["review_findings_schema", "release_review_gate"],
+        }
+    )
+
+
+def _environment_repair_decision(*, evidence_paths: list[Path]) -> EnvironmentRepairDecision:
+    return EnvironmentRepairDecision.model_validate(
+        {
+            "schema_version": SCHEMA_VERSION_V1,
+            "decision_id": "environment-repair-001",
+            "release_id": "environment-repair-actions",
+            "decided_at": datetime(2026, 5, 13, 8, 0, 0),
+            "decided_by": "runtime-supervisor-agent",
+            "rationale": "Verification environment drift is repairable within bounded policy.",
+            "evidence_paths": evidence_paths,
+            "decision_type": SupervisorDecisionType.ENVIRONMENT_REPAIR,
+            "policy_basis": "verification_environment_repair_policy_v1",
+            "selected_policy_action": EnvironmentRepairPolicyAction.APPLY_REPAIR_AND_RETRY,
+            "outcome": EnvironmentRepairOutcome.APPLY_AND_RETRY,
+            "fallback_plan": "Escalate and stop if deterministic repair attempt fails.",
+            "source_evidence_paths": [Path("runs/release/verification.log")],
+            "retry_budget_impact": "Consumes one retry attempt.",
+            "validators_to_rerun": ["verification"],
+            "capture_commands": ["python -V", "pip list"],
         }
     )
 
@@ -520,6 +546,63 @@ def test_write_and_load_feature_review_finding_classification_artifact_round_tri
 
     assert artifact_path.exists()
     assert loaded == decision
+
+
+def test_write_and_load_environment_repair_artifact_round_trip(tmp_path: Path) -> None:
+    evidence_file = tmp_path / "environment-repair-evidence.log"
+    evidence_file.write_text("environment repair selected\n", encoding="utf-8")
+    source_evidence = tmp_path / "runs" / "release" / "verification.log"
+    source_evidence.parent.mkdir(parents=True, exist_ok=True)
+    source_evidence.write_text("pytest failed\n", encoding="utf-8")
+    decision = _environment_repair_decision(evidence_paths=[evidence_file])
+
+    artifact_path = write_supervisor_decision_artifact(
+        release_bundle_path=tmp_path,
+        decision=decision,
+    )
+    loaded = load_supervisor_decision_artifact(artifact_path)
+
+    assert artifact_path.exists()
+    assert loaded == decision
+
+
+def test_load_environment_repair_artifact_requires_explicit_validators_to_rerun(
+    tmp_path: Path,
+) -> None:
+    evidence_file = tmp_path / "environment-repair-evidence.log"
+    evidence_file.write_text("legacy payload\n", encoding="utf-8")
+    source_evidence = tmp_path / "runs" / "release" / "verification.log"
+    source_evidence.parent.mkdir(parents=True, exist_ok=True)
+    source_evidence.write_text("pytest failed\n", encoding="utf-8")
+    artifact_path = tmp_path / "supervisor_decisions" / "legacy-environment-repair.json"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "schema_version": SCHEMA_VERSION_V1,
+                "decision_id": "legacy-environment-repair-001",
+                "release_id": "environment-repair-actions",
+                "decided_at": "2026-05-13T08:00:00",
+                "decided_by": "runtime-supervisor-agent",
+                "rationale": "Legacy payload missing explicit validators should fail for strict decision types.",
+                "evidence_paths": ["environment-repair-evidence.log"],
+                "decision_type": SupervisorDecisionType.ENVIRONMENT_REPAIR,
+                "policy_basis": "verification_environment_repair_policy_v1",
+                "selected_policy_action": EnvironmentRepairPolicyAction.APPLY_REPAIR_AND_RETRY,
+                "outcome": EnvironmentRepairOutcome.APPLY_AND_RETRY,
+                "fallback_plan": "Escalate and stop if deterministic repair attempt fails.",
+                "source_evidence_paths": ["runs/release/verification.log"],
+                "retry_budget_impact": "Consumes one retry attempt.",
+                "capture_commands": ["python -V", "pip list"],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError, match="validators_to_rerun"):
+        load_supervisor_decision_artifact(artifact_path)
 
 
 def test_scope_risk_budget_policy_artifact_serialization_and_round_trip(tmp_path: Path) -> None:

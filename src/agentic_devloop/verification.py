@@ -93,6 +93,10 @@ def _excerpt(text: str) -> str:
     return text[:MAX_LOG_EXCERPT_CHARS].rstrip("\n") + f"\n... <truncated {omitted} chars>"
 
 
+def bounded_verification_excerpt(text: str) -> str:
+    return _excerpt(text)
+
+
 def rewrite_worktree_local_verification_command(command: str, *, safe_runtime: str | None) -> str:
     if not safe_runtime:
         return command
@@ -162,3 +166,38 @@ def _failure_reason(exit_code: int, timed_out: bool) -> str:
     if exit_code != 0:
         return f"nonzero_exit_{exit_code}"
     return "<none>"
+
+
+def apply_pythonpath_prefix_repair(
+    *,
+    runtime_env: dict[str, str] | None,
+    pythonpath_prefix: str,
+) -> dict[str, str]:
+    """Apply a bounded PYTHONPATH repair from a policy-declared env-assignment token."""
+    if not _is_allowed_env_assignment_token(pythonpath_prefix):
+        raise ValueError("pythonpath_prefix must be a safe KEY=value token for an allowed env prefix")
+    key, value = pythonpath_prefix.split("=", 1)
+    updated = dict(runtime_env or {})
+    updated[key] = value
+    return updated
+
+
+def verification_environment_capture_commands(*, safe_runtime: str | None, failed_command: str) -> list[str]:
+    """Return bounded diagnostics commands safe to run under shell=True."""
+    python = shlex.quote(safe_runtime) if safe_runtime else "python3"
+    commands: list[str] = [
+        f"{python} -V",
+        f"{python} -c {shlex.quote('import sys; print(sys.executable); print(\"\\\\n\".join(sys.path))')}",
+        f"{python} -m pip --version",
+    ]
+    failed = failed_command.strip()
+    if failed:
+        try:
+            tokens = shlex.split(failed)
+        except ValueError:
+            tokens = []
+        if tokens:
+            candidate = tokens[0]
+            if candidate and all(op not in candidate for op in _UNSAFE_SHELL_OPERATORS):
+                commands.append(f"command -v {shlex.quote(candidate)}")
+    return commands
