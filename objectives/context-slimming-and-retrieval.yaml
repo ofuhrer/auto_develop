@@ -1,0 +1,22 @@
+release_id: context-slimming-and-retrieval
+title: Build phase-specific context bundles for workers, reviewers, repairs, and governor
+  decisions
+objective: Reduce unnecessary prompt/context load by introducing phase-specific context
+  bundle construction for implementation workers, reviewers, repair agents, and governor
+  state review, using compact evidence, touched-file summaries, task objectives, relevant
+  repo-state memory, metrics, and prior findings instead of broad roadmap/design dumps.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- Context bundle generation is phase-aware for at least worker execution, feature
+  review, repair/recheck, and governor planning/state-review inputs.
+- Each bundle records included source categories, omitted categories, size metrics,
+  and artifact paths so evidence remains auditable.
+- Existing max_context_chars_per_task behavior is preserved or tightened, with deterministic
+  truncation/summarization boundaries instead of silent over-injection.
+- Review and repair prompts receive direct finding, diff, verification, and touched-file
+  context before broad roadmap excerpts.
+- Backlog planning and release execution continue to pass the existing test suite,
+  with focused tests covering context selection, size accounting, and evidence persistence.
+- Documentation and repo-state notes distinguish implemented context bundling from
+  future retrieval/search improvements.

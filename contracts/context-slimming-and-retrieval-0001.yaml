@@ -1,0 +1,55 @@
+task_id: context-slimming-and-retrieval-0001
+release_id: context-slimming-and-retrieval
+title: Core phase-aware context bundle model
+task_type: code_only
+budget_class: M
+objective: Update `src/agentic_devloop/context.py` and related models/tests to support
+  phase-specific context bundle construction with explicit source categories, omitted
+  categories, per-category and total size metrics, deterministic truncation records,
+  and JSON-serializable manifests. Preserve existing `load_context_bundle(config,
+  task)` behavior for current callers until integration tasks adopt the richer API.
+allowed_files:
+- src/agentic_devloop/context.py
+- src/agentic_devloop/models.py
+- tests/test_context.py
+forbidden_changes:
+- Do not change CLI flags, release execution flow, feature review flow, or governor
+  flow in this task.
+- Do not remove or weaken existing `max_context_chars_per_task` enforcement.
+- Do not read arbitrary repository files outside existing repo-state inputs and explicit
+  bundle sources.
+- Do not introduce non-deterministic summarization or model calls.
+- Do not write runtime evidence under `runs/` or durable repo state under `repo_state/`.
+required_evidence:
+- Focused pytest output for `tests/test_context.py`.
+- Assertions proving each supported phase records included categories, omitted categories,
+  total chars, per-source chars, and truncation metadata.
+- Assertions proving deterministic truncation boundaries are stable for identical
+  inputs.
+- Assertions proving existing `load_context_bundle(config, task)` compatibility is
+  preserved.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_context.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if the bundle model requires changing public task contract schema in this task.
+- Stop if deterministic size accounting cannot be implemented without reading broad
+  design or roadmap files by default.
+- Stop if compatibility with existing `ContextBundle` or `ContextSection` tests cannot
+  be preserved without a migration task.
+- Stop if truncation would silently drop content without a manifest record.
+non_goals:
+- Do not integrate the new bundle API into worker prompts, reviewer prompts, repair
+  prompts, planning prompts, or governor prompts in this task.
+- Do not implement semantic search, embeddings, vector retrieval, or LLM summarization.
+- Do not update documentation in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

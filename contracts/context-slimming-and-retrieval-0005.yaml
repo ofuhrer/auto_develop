@@ -1,0 +1,67 @@
+task_id: context-slimming-and-retrieval-0005
+release_id: context-slimming-and-retrieval
+title: Context bundling documentation and repo-state notes
+task_type: documentation
+budget_class: S
+objective: Update user, maintainer, design, and repo-state notes to describe implemented
+  phase-aware context bundles, bundle manifests, size metrics, deterministic truncation/omission
+  records, and current limits. Clearly mark semantic retrieval/search, embeddings,
+  and broader cross-run retrieval as future work unless code and tests in this release
+  implement them.
+allowed_files:
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/README.md
+- docs/design/ARCHITECTURE.md
+- docs/design/ROADMAP_AND_BACKLOG.md
+- repo_state/auto_develop/architecture_summary.md
+- repo_state/auto_develop/backlog_state.yaml
+forbidden_changes:
+- Do not describe planned semantic search, embeddings, or broad retrieval as implemented
+  behavior.
+- Do not edit source code or tests in this task.
+- Do not add generated runtime evidence under `runs/`.
+- Do not remove historical repo-state records unrelated to this release.
+- Do not change objective, config, or contract examples unless a prior code task requires
+  it and the file is added through a follow-up contract.
+required_evidence:
+- Documentation diff showing implemented context bundling is distinguished from future
+  retrieval/search improvements.
+- Repo-state diff showing the active epic notes mention compact phase-aware bundles
+  and current limitations.
+- Full pytest output after all prior code tasks land.
+- CLI help smoke output for `agentic_devloop --help` and `agentic_devloop run-release
+  --help`.
+- git diff --check output.
+- git status --short --branch output.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop
+    --help
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m agentic_devloop
+    run-release --help
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if documentation would need to claim semantic retrieval/search is implemented
+  when only phase-aware bundling exists.
+- Stop if full pytest fails due to code changes from earlier tasks; return to the
+  responsible code task rather than documenting around the failure.
+- Stop if repo-state edits would require deleting unrelated completed-epic history.
+- Stop if CLI help smoke tests fail after prior code tasks.
+non_goals:
+- Do not implement additional context bundle behavior in this task.
+- Do not create new contracts or objectives.
+- Do not finalize or commit changes.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- context-slimming-and-retrieval-0002
+- context-slimming-and-retrieval-0003
+- context-slimming-and-retrieval-0004

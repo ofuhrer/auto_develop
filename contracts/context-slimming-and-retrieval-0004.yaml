@@ -1,0 +1,62 @@
+task_id: context-slimming-and-retrieval-0004
+release_id: context-slimming-and-retrieval
+title: Governor planning and state-review context bundles
+task_type: code_only
+budget_class: L
+objective: Update release planning and governor state-review input construction so
+  backlog planning and state-review use planning/state-review phase context bundles
+  built from the release objective, compact repo-state memory, active constraints,
+  recent metrics, prior findings, and state-review snapshots. Persist bundle manifests
+  next to planning/state-review artifacts and record included categories, omitted
+  categories, size metrics, truncation records, and artifact paths.
+allowed_files:
+- src/agentic_devloop/planning.py
+- src/agentic_devloop/state_review.py
+- src/agentic_devloop/release.py
+- tests/test_planning.py
+- tests/test_release.py
+forbidden_changes:
+- Do not change `ContractPlan` JSON shape required from planners.
+- Do not loosen planner admission, normalization, execution-strategy, stale worktree,
+  or stale branch gates.
+- Do not change release merge/finalization policy.
+- Do not remove state-review snapshot artifacts; add bundle evidence alongside them.
+- Do not read all docs/design files by default for planning/state-review bundles.
+required_evidence:
+- Focused pytest output for planning and state-review/release tests in `tests/test_planning.py`
+  and `tests/test_release.py`.
+- Assertions proving planner/state-review bundle manifests are persisted and referenced
+  by planning or release evidence artifacts.
+- Assertions proving objective, active repo-state memory, recent metrics, and prior
+  findings are included before broad docs/design material.
+- Assertions proving omitted categories and deterministic truncation boundaries are
+  recorded when budget limits are hit.
+- Assertions proving backlog planning still returns valid `ContractPlan` objects.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_planning.py
+    tests/test_release.py -k 'planning or state_review or governor or context or bundle'
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if planner prompt changes require changing generated contract schema or admission
+  policy.
+- Stop if state-review bundle persistence would make existing state-review snapshots
+  non-loadable.
+- Stop if governor planning would need hidden global state or non-deterministic retrieval.
+- Stop if broad docs/design dumps remain required for normal planning tests to pass.
+- Stop if scope or verification cannot remain within the generated contract.
+non_goals:
+- Do not change worker execution, feature review, or repair prompt behavior in this
+  task.
+- Do not implement multi-epic governor retrieval/search beyond compact bundle selection.
+- Do not add new CLI options in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- context-slimming-and-retrieval-0001

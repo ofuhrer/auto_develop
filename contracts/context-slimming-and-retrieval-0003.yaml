@@ -1,0 +1,64 @@
+task_id: context-slimming-and-retrieval-0003
+release_id: context-slimming-and-retrieval
+title: Feature review and repair context bundles
+task_type: code_only
+budget_class: L
+objective: Update feature review prompt rendering and feature-review repair/recheck
+  handoff so review-phase bundles place changed files, diff summaries, direct diff,
+  verification artifacts, prior findings, repair history, and touched-file excerpts
+  ahead of docs/design excerpts. Persist bundle manifests for feature review attempts
+  and repair/recheck inputs with included categories, omitted categories, size metrics,
+  truncation records, and artifact paths.
+allowed_files:
+- src/agentic_devloop/feature_review.py
+- src/agentic_devloop/release.py
+- tests/test_feature_review.py
+- tests/test_release.py
+forbidden_changes:
+- Do not change reviewer JSON schema, finding severity semantics, repair-loop budgets,
+  or final adjudication policy.
+- Do not weaken final integration verification reruns or feature review convergence
+  gates.
+- Do not expand repair contract allowed files beyond files justified by reviewer findings
+  and existing scope rules.
+- Do not remove docs/design context entirely; make it lower priority and bounded with
+  omissions recorded.
+- Do not commit generated `runs/` artifacts.
+required_evidence:
+- Focused pytest output for `tests/test_feature_review.py` and relevant feature-review
+  repair tests in `tests/test_release.py`.
+- Assertions proving review prompts order direct changed-file, diff, verification,
+  prior finding, and repair context before docs/design excerpts.
+- Assertions proving feature review attempt metadata or adjacent artifacts record
+  bundle included categories, omitted categories, size metrics, truncation records,
+  and prompt artifact paths.
+- Assertions proving repair/recheck prompt inputs include direct finding context and
+  relevant verification/diff evidence before broad docs/design context.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_feature_review.py
+    tests/test_release.py -k 'feature_review or repair or recheck or context or bundle'
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if reviewer output compatibility would require changing `FeatureReviewDecision`
+  schema.
+- Stop if repair-loop behavior would need more repair attempts or weaker blocker handling
+  to pass tests.
+- Stop if docs/design excerpts cannot be bounded without losing direct diff or verification
+  context.
+- Stop if prompt artifact persistence cannot remain under the release run evidence
+  tree.
+non_goals:
+- Do not change worker execution context in this task.
+- Do not change governor planning/state-review prompts in this task.
+- Do not implement semantic search, embeddings, or LLM summarization.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- context-slimming-and-retrieval-0001

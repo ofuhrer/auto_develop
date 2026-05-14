@@ -6,7 +6,7 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
 current_focus: context-slimming-and-retrieval
-active_epic: null
+active_epic: context-slimming-and-retrieval
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -73,7 +73,19 @@ candidate_epics:
   priority: 8
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
-active_epics: []
+active_epics:
+- epic_id: context-slimming-and-retrieval
+  next_recommendations: []
+  retry_count: 0
+  repair_count: 0
+  outcome_references: []
+  finalization_outcome_references: []
+  unresolved_finding_references: []
+  final_review_follow_up_memories: []
+  state_review_snapshot_references: []
+  metrics_snapshot_references: []
+  tuning_report_references: []
+  updated_at: '2026-05-14T10:22:58.568105Z'
 reviewed_epics: []
 completed_epic_records:
 - epic_id: cost-runtime-governor
@@ -109,9 +121,9 @@ completed_epic_records:
     recorded_at: '2026-05-14T10:20:00Z'
   unresolved_finding_references:
   - finding_id: feature-review-repair-scope
-    summary: Automatic repair-contract generation stopped because a valid review
-      finding referenced docs outside source contract scope; the branch was repaired
-      manually and verified.
+    summary: Automatic repair-contract generation stopped because a valid review finding
+      referenced docs outside source contract scope; the branch was repaired manually
+      and verified.
     severity: moderate
     source_path: runs/20260514T072327Z_five_cycle_sprint/20260514T093942Z_cost-runtime-governor_release/feature_review.json
   final_review_follow_up_memories: []
