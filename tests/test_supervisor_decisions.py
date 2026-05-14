@@ -13,6 +13,7 @@ from agentic_devloop.supervisor_decisions import (
     DecisionRiskLevel,
     EnvironmentRepairDecision,
     EnvironmentRepairOutcome,
+    EnvironmentRepairPolicyAction,
     FinalReviewFindingAdjudicationAction,
     FinalReviewFindingAdjudicationClassification,
     FinalReviewFindingAdjudicationDecision,
@@ -424,7 +425,13 @@ def test_parse_environment_repair_decision() -> None:
     payload = {
         **BASE,
         "decision_type": SupervisorDecisionType.ENVIRONMENT_REPAIR,
+        "policy_basis": "verification_environment_repair_policy_v1",
+        "selected_policy_action": EnvironmentRepairPolicyAction.APPLY_REPAIR_AND_RETRY,
         "outcome": EnvironmentRepairOutcome.APPLY_AND_RETRY,
+        "fallback_plan": "Escalate and stop if deterministic repair fails.",
+        "source_evidence_paths": ["runs/release/verification.log"],
+        "retry_budget_impact": "Consumes one retry attempt.",
+        "validators_to_rerun": ["verification"],
         "capture_commands": ["python -V", "pip list"],
     }
 
@@ -432,6 +439,102 @@ def test_parse_environment_repair_decision() -> None:
 
     assert isinstance(decision, EnvironmentRepairDecision)
     assert decision.outcome == EnvironmentRepairOutcome.APPLY_AND_RETRY
+
+
+@pytest.mark.parametrize(
+    ("selected_policy_action", "outcome", "refusal_reason"),
+    [
+        (
+            EnvironmentRepairPolicyAction.CAPTURE_EVIDENCE_ONLY,
+            EnvironmentRepairOutcome.CAPTURE_ONLY,
+            None,
+        ),
+        (
+            EnvironmentRepairPolicyAction.ESCALATE,
+            EnvironmentRepairOutcome.ESCALATE,
+            "Required policy action is disallowed by configured boundaries.",
+        ),
+        (
+            EnvironmentRepairPolicyAction.STOP,
+            EnvironmentRepairOutcome.STOP,
+            "No safe bounded repair action is available under policy.",
+        ),
+    ],
+)
+def test_parse_environment_repair_decision_other_outcomes(
+    selected_policy_action: EnvironmentRepairPolicyAction,
+    outcome: EnvironmentRepairOutcome,
+    refusal_reason: str | None,
+) -> None:
+    payload = {
+        **BASE,
+        "decision_id": f"env-repair-{outcome.value}",
+        "decision_type": SupervisorDecisionType.ENVIRONMENT_REPAIR,
+        "policy_basis": "verification_environment_repair_policy_v1",
+        "selected_policy_action": selected_policy_action,
+        "outcome": outcome,
+        "fallback_plan": "Escalate to stop if safety checks fail.",
+        "source_evidence_paths": ["runs/release/verification.log"],
+        "retry_budget_impact": "No retry budget consumed.",
+        "validators_to_rerun": ["verification_environment_policy"],
+        "capture_commands": ["env"],
+        "refusal_reason": refusal_reason,
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, EnvironmentRepairDecision)
+    assert decision.selected_policy_action == selected_policy_action
+    assert decision.outcome == outcome
+    assert decision.refusal_reason == refusal_reason
+
+
+def test_environment_repair_decision_requires_validators_to_rerun_field() -> None:
+    with pytest.raises(ValidationError, match="Field required"):
+        EnvironmentRepairDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.ENVIRONMENT_REPAIR,
+                "policy_basis": "verification_environment_repair_policy_v1",
+                "selected_policy_action": EnvironmentRepairPolicyAction.APPLY_REPAIR_AND_RETRY,
+                "outcome": EnvironmentRepairOutcome.APPLY_AND_RETRY,
+                "fallback_plan": "Escalate to stop if safety checks fail.",
+                "source_evidence_paths": ["runs/release/verification.log"],
+                "retry_budget_impact": "Consumes one retry attempt.",
+            }
+        )
+
+
+def test_environment_repair_decision_enforces_action_outcome_and_refusal_consistency() -> None:
+    with pytest.raises(ValidationError, match="selected_policy_action must match outcome"):
+        EnvironmentRepairDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.ENVIRONMENT_REPAIR,
+                "policy_basis": "verification_environment_repair_policy_v1",
+                "selected_policy_action": EnvironmentRepairPolicyAction.CAPTURE_EVIDENCE_ONLY,
+                "outcome": EnvironmentRepairOutcome.APPLY_AND_RETRY,
+                "fallback_plan": "Escalate to stop if safety checks fail.",
+                "source_evidence_paths": ["runs/release/verification.log"],
+                "retry_budget_impact": "Consumes one retry attempt.",
+                "validators_to_rerun": ["verification"],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="require refusal_reason"):
+        EnvironmentRepairDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.ENVIRONMENT_REPAIR,
+                "policy_basis": "verification_environment_repair_policy_v1",
+                "selected_policy_action": EnvironmentRepairPolicyAction.ESCALATE,
+                "outcome": EnvironmentRepairOutcome.ESCALATE,
+                "fallback_plan": "Escalate to stop if safety checks fail.",
+                "source_evidence_paths": ["runs/release/verification.log"],
+                "retry_budget_impact": "No retry budget consumed.",
+                "validators_to_rerun": ["verification"],
+            }
+        )
 
 
 def test_parse_feature_review_finding_classification_decision() -> None:

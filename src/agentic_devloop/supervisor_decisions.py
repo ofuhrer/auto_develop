@@ -558,9 +558,23 @@ class EnvironmentRepairOutcome(StrEnum):
     STOP = "stop"
 
 
+class EnvironmentRepairPolicyAction(StrEnum):
+    APPLY_REPAIR_AND_RETRY = "apply_repair_and_retry"
+    CAPTURE_EVIDENCE_ONLY = "capture_evidence_only"
+    ESCALATE = "escalate"
+    STOP = "stop"
+
+
 class EnvironmentRepairDecision(SupervisorDecisionBase):
     decision_type: Literal[SupervisorDecisionType.ENVIRONMENT_REPAIR] = SupervisorDecisionType.ENVIRONMENT_REPAIR
+    policy_basis: str = Field(min_length=1)
+    selected_policy_action: EnvironmentRepairPolicyAction
     outcome: EnvironmentRepairOutcome
+    fallback_plan: str = Field(min_length=1)
+    source_evidence_paths: list[Path]
+    retry_budget_impact: str = Field(min_length=1)
+    validators_to_rerun: list[str]
+    refusal_reason: str | None = None
     capture_commands: list[str] = Field(default_factory=list)
 
     @field_validator("capture_commands")
@@ -569,6 +583,37 @@ class EnvironmentRepairDecision(SupervisorDecisionBase):
         if any(not value.strip() for value in values):
             raise ValueError("capture commands must not be empty")
         return values
+
+    @field_validator("source_evidence_paths")
+    @classmethod
+    def source_evidence_paths_must_not_be_empty(cls, values: list[Path]) -> list[Path]:
+        if not values:
+            raise ValueError("source_evidence_paths must not be empty")
+        return values
+
+    @field_validator("validators_to_rerun")
+    @classmethod
+    def validators_to_rerun_must_not_be_empty(cls, values: list[str]) -> list[str]:
+        if not values or any(not value.strip() for value in values):
+            raise ValueError("validators to rerun must not be empty")
+        return values
+
+    @model_validator(mode="after")
+    def action_outcome_and_refusal_fields_must_be_consistent(self) -> "EnvironmentRepairDecision":
+        outcome_by_action = {
+            EnvironmentRepairPolicyAction.APPLY_REPAIR_AND_RETRY: EnvironmentRepairOutcome.APPLY_AND_RETRY,
+            EnvironmentRepairPolicyAction.CAPTURE_EVIDENCE_ONLY: EnvironmentRepairOutcome.CAPTURE_ONLY,
+            EnvironmentRepairPolicyAction.ESCALATE: EnvironmentRepairOutcome.ESCALATE,
+            EnvironmentRepairPolicyAction.STOP: EnvironmentRepairOutcome.STOP,
+        }
+        if self.outcome != outcome_by_action[self.selected_policy_action]:
+            raise ValueError("selected_policy_action must match outcome")
+        if self.outcome in {EnvironmentRepairOutcome.ESCALATE, EnvironmentRepairOutcome.STOP}:
+            if not self.refusal_reason:
+                raise ValueError("escalate and stop outcomes require refusal_reason")
+        elif self.refusal_reason is not None:
+            raise ValueError("non-refusal outcomes must not set refusal_reason")
+        return self
 
 
 class ReleaseFinalizationOutcome(StrEnum):
