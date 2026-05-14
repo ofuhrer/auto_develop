@@ -1980,6 +1980,11 @@ def _run_feature_review_and_repair_loop(
             ordered.append(normalized)
         return ordered
 
+    def integration_verification_commands() -> list[str]:
+        default_profile = config.verification_profiles.get("default")
+        commands = list(default_profile.commands) if default_profile is not None else []
+        return commands or ["integration_verification"]
+
     def current_proposals() -> list[FeatureReviewProposalRecord]:
         return sorted(
             proposal_by_finding_id.values(),
@@ -2082,7 +2087,7 @@ def _run_feature_review_and_repair_loop(
         nonlocal last_verification_log_path
         rerun_dir = output_root / f"verification_rerun_{attempt:02d}"
         rerun_dir.mkdir(parents=True, exist_ok=True)
-        commands = list(config.verification_profiles["default"].commands)
+        commands = integration_verification_commands()
         allowed = set(allowed_verification_commands())
         if decision.rerun_verification_commands:
             unknown = [cmd for cmd in decision.rerun_verification_commands if cmd not in allowed]
@@ -2168,7 +2173,7 @@ def _run_feature_review_and_repair_loop(
         ) -> dict[str, Path]:
             accepted_required_finding_ids = accepted_required_finding_ids or set()
             written: dict[str, Path] = {}
-            validators_to_rerun = list(config.verification_profiles["default"].commands) or ["integration_verification"]
+            validators_to_rerun = integration_verification_commands()
             for finding in required_findings:
                 finding_id = finding.finding_id
                 is_accepted = finding_id in accepted_required_finding_ids
@@ -2355,7 +2360,7 @@ def _run_feature_review_and_repair_loop(
                 repo_path=config.repo_path,
                 integration_branch=integration_branch,
                 integration_commit=integration_commit,
-                commands=list(config.verification_profiles["default"].commands),
+                commands=integration_verification_commands(),
                 timeout_seconds=verification_timeout_seconds,
                 progress=progress,
             )
@@ -2465,7 +2470,7 @@ def _run_feature_review_and_repair_loop(
                         "selected_action": selected_action.value,
                         "outcome": outcome.value,
                         "fallback_plan": "Stop release finalization and escalate if blockers or malformed reviewer evidence remain.",
-                        "validators_to_rerun": list(config.verification_profiles["default"].commands) or ["integration_verification"],
+                        "validators_to_rerun": integration_verification_commands(),
                     }
                 )
                 attempt_path = write_supervisor_decision_artifact(
