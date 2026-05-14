@@ -1,0 +1,47 @@
+task_id: cost-runtime-governor-0002
+release_id: cost-runtime-governor
+title: Add typed cost-runtime supervisor decision artifact
+task_type: code_only
+budget_class: M
+objective: Extend supervisor decision models with a `cost_runtime_governance` decision
+  type and tests for strict validation, deterministic artifact pathing, and loading
+  behavior.
+allowed_files:
+- src/agentic_devloop/supervisor_decisions.py
+- tests/test_supervisor_decision_artifacts.py
+- tests/test_supervisor_decisions.py
+forbidden_changes:
+- Do not relax validation for existing supervisor decision artifact types.
+- Do not allow missing evidence paths to load silently for new strict artifacts.
+- Do not change release scheduling, execution strategy, environment repair, or scope-risk
+  decision semantics.
+- Do not introduce broad arbitrary JSON payload fields for the new decision.
+required_evidence:
+- Focused pytest output for `tests/test_supervisor_decision_artifacts.py` and `tests/test_supervisor_decisions.py`.
+- Tests proving valid cost-runtime decisions round-trip through write/load helpers.
+- Tests proving invalid actions, empty validators, and malformed role/budget fields
+  fail validation.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_supervisor_decision_artifacts.py tests/test_supervisor_decisions.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if the new artifact cannot be represented without weakening `StrictModel` validation.
+- Stop if existing supervisor decision tests require weakening or deleting assertions.
+- Stop if evidence-path validation conflicts with current strict artifact loading
+  behavior.
+- Stop if implementation requires release orchestration files outside `allowed_files`.
+non_goals:
+- Do not implement the cost/runtime decision policy in this task.
+- Do not consume the new decision in release planning or runtime loops.
+- Do not update documentation in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

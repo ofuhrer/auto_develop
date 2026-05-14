@@ -1,0 +1,26 @@
+release_id: cost-runtime-governor
+title: Turn release metrics into runtime and model-routing decisions
+objective: Use existing release metrics, budget ledgers, tuning reports, reviewer-wave
+  counts, verification time, context volume, and model-attempt evidence to let the
+  governor choose cheaper and more reliable execution strategies, model routes, review-wave
+  limits, and retry budgets before and during release execution.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- Governor or runtime-supervisor input includes compact release metrics and tuning
+  signals from recent runs, including model attempts/fallbacks, prompt/context/output
+  sizes, verification time, executor duration, review waves, repair counts, changed-file/diff
+  overages, and finalization/adjudication outcomes.
+- A typed supervisor decision artifact records runtime/model-routing choices such
+  as one-shot versus decomposed preference, primary/fallback worker role, reviewer-wave
+  cap, retry budget adjustment, or stop/replan recommendation with rationale and evidence
+  paths.
+- Release planning or run-governor consumes those decisions without weakening deterministic
+  hard gates for verification, forbidden paths, generated artifacts, lockfiles, migrations,
+  unsafe finalization, or missing credentials.
+- Cost/runtime decisions are deterministic to validate and auditable in run artifacts,
+  with regression tests covering metric extraction, decision persistence, fallback
+  behavior when metrics are absent, and at least one routing/budget decision influenced
+  by prior evidence.
+- Documentation explains implemented cost/runtime governance behavior and distinguishes
+  it from future billed-cost accounting or broader context-retrieval work.

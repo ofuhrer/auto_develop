@@ -1,0 +1,64 @@
+task_id: cost-runtime-governor-0004
+release_id: cost-runtime-governor
+title: Consume cost-runtime decisions in planning and release runtime
+task_type: code_only
+budget_class: L
+objective: Integrate the cost-runtime governance selector into existing planning/governor/release
+  seams so decisions are persisted and consumed for routing and bounded budgets without
+  weakening deterministic hard stops.
+allowed_files:
+- src/agentic_devloop/governor.py
+- src/agentic_devloop/execution_strategy.py
+- src/agentic_devloop/release.py
+- tests/test_execution_strategy.py
+- tests/test_release.py
+- tests/test_cli.py
+forbidden_changes:
+- Do not weaken deterministic hard gates for verification failures, forbidden paths,
+  generated artifacts, lockfiles, migrations, configured unsafe paths, unsafe finalization,
+  missing credentials, or out-of-scope files.
+- Do not make one-shot execution the default when metrics are absent or hard-gate
+  risk is present.
+- Do not remove existing execution-strategy, release-scheduling, final-review, or
+  scope-risk decision artifacts.
+- Do not add CLI flags unless existing configuration surfaces are insufficient and
+  tests prove backward compatibility.
+- Do not depend on developer-local Git state or pre-existing `runs/` artifacts in
+  tests.
+required_evidence:
+- Focused pytest output for `tests/test_execution_strategy.py`, `tests/test_release.py`,
+  and relevant `tests/test_cli.py` cases.
+- A regression test showing absent cost-runtime evidence preserves current default
+  behavior.
+- A regression test showing prior evidence changes at least one routing or budget
+  decision and writes a typed decision artifact path.
+- A regression test showing hard-gate inputs override any cheaper/faster recommendation.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_execution_strategy.py tests/test_release.py tests/test_cli.py
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if consuming the decision would require bypassing existing hard-gate checks.
+- Stop if absent or malformed governance evidence changes default execution behavior
+  instead of falling back conservatively.
+- Stop if reviewer-wave or retry-budget adjustments cannot be recorded in artifacts
+  with rationale and validators.
+- Stop if implementation requires editing config schemas, docs, or unrelated orchestration
+  modules outside `allowed_files`.
+non_goals:
+- Do not implement a one-shot worker runner if the current one-shot path is still
+  planning-only.
+- Do not implement provider billed-cost accounting.
+- Do not rewrite release scheduling or finalization policy selection.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- cost-runtime-governor-0003

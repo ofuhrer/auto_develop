@@ -1,0 +1,48 @@
+task_id: cost-runtime-governor-0001
+release_id: cost-runtime-governor
+title: Enrich compact release metrics for runtime governance
+task_type: code_only
+budget_class: M
+objective: Update release metric construction to add deterministic compact governance
+  signals from existing run artifacts without changing release decisions or hard gates.
+allowed_files:
+- src/agentic_devloop/release.py
+- tests/test_release.py
+forbidden_changes:
+- Do not change release execution, finalization, scheduling, or review-loop control
+  flow in this task.
+- Do not weaken deterministic hard gates for verification, forbidden paths, generated
+  artifacts, lockfiles, migrations, unsafe finalization, missing credentials, or out-of-scope
+  files.
+- Do not read provider billing APIs or introduce network calls.
+- Do not commit or require runtime artifacts under `runs/`.
+required_evidence:
+- Focused pytest output for `tests/test_release.py` covering enriched metric extraction.
+- Assertions showing absent optional artifacts produce zero or null fallback metrics
+  instead of failures.
+- Assertions showing model fallback counts, review waves, repair counts, overages,
+  and finalization/adjudication fields are present when source evidence exists.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_release.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if metric enrichment requires changing release acceptance or finalization behavior.
+- Stop if the new metrics can only be populated by parsing non-deterministic human
+  log text when structured artifacts exist.
+- Stop if missing optional evidence causes release metrics writing to fail.
+- Stop if implementation requires files outside `allowed_files`.
+non_goals:
+- Do not add cost/runtime decision models in this task.
+- Do not wire the governor or runtime supervisor to consume the metrics.
+- Do not update documentation in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

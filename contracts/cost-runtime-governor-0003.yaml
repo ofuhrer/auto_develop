@@ -1,0 +1,56 @@
+task_id: cost-runtime-governor-0003
+release_id: cost-runtime-governor
+title: Build deterministic cost-runtime governance selector
+task_type: code_only
+budget_class: M
+objective: Add a focused governance module that summarizes recent run evidence and
+  produces a typed cost-runtime decision using deterministic thresholds and conservative
+  fallbacks.
+allowed_files:
+- src/agentic_devloop/cost_runtime_governance.py
+- tests/test_cost_runtime_governance.py
+- src/agentic_devloop/supervisor_decisions.py
+forbidden_changes:
+- Do not change release, governor, CLI, or execution-strategy control flow in this
+  task.
+- Do not weaken hard-gate classification for forbidden paths, generated artifacts,
+  lockfiles, migrations, unsafe finalization, missing credentials, or failed verification.
+- Do not use network calls, provider billing APIs, or wall-clock dependent decisions
+  beyond artifact timestamps already present in evidence.
+- Do not parse free-form tuning Markdown when equivalent structured metrics or budget
+  fields are available; if Markdown parsing is unavoidable, keep it bounded and covered
+  by tests.
+required_evidence:
+- Focused pytest output for `tests/test_cost_runtime_governance.py`.
+- Tests covering metric extraction from present evidence, fallback behavior when metrics
+  are absent, and at least one routing or budget recommendation influenced by prior
+  evidence.
+- Assertions that produced decisions include evidence paths and validators to rerun.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_cost_runtime_governance.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if deterministic policy requires hidden global state or raw `runs/` scanning
+  without explicit evidence roots.
+- Stop if policy cannot explain each selected action with evidence paths and rationale.
+- Stop if missing metrics would cause an exception instead of a conservative default
+  decision.
+- Stop if implementation needs orchestration wiring outside `allowed_files`.
+non_goals:
+- Do not wire the selector into `run-governor`, `run-objective`, or `run-release`
+  in this task.
+- Do not implement billed-cost accounting or token-provider usage accounting.
+- Do not update documentation in this task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- cost-runtime-governor-0001
+- cost-runtime-governor-0002

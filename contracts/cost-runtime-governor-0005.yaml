@@ -1,0 +1,50 @@
+task_id: cost-runtime-governor-0005
+release_id: cost-runtime-governor
+title: Document implemented cost-runtime governance behavior
+task_type: documentation
+budget_class: S
+objective: Document the cost-runtime governance workflow, evidence artifacts, decision
+  fields, validation expectations, and non-goals in existing user and maintainer docs.
+allowed_files:
+- README.md
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/README.md
+forbidden_changes:
+- Do not describe future billed-cost accounting, token-provider usage, or broad context
+  retrieval as implemented.
+- Do not change CLI examples unless the implementation added or changed a real user-visible
+  option.
+- Do not edit source code or tests in this task.
+- Do not remove existing documentation for hard gates, supervisor decisions, or release
+  evidence.
+required_evidence:
+- Documentation diff showing implemented behavior and future-work boundaries.
+- grep or review evidence showing docs mention hard-gate preservation and fallback
+  behavior when metrics are absent.
+- git diff
+- changed-files list
+verification:
+  commands:
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if implementation contracts have not landed and the docs would be speculative.
+- Stop if documenting behavior requires claiming billed-cost accounting or provider
+  token usage exists.
+- Stop if source or test changes are required to make the documentation accurate.
+- Stop if docs conflict with existing hard-gate or supervisor-decision descriptions.
+- Stop if scope or verification cannot remain within the generated contract.
+non_goals:
+- Do not add architecture roadmap changes beyond clearly labeled future work.
+- Do not create new docs pages unless existing docs cannot hold the concise behavior
+  description.
+- Do not update examples under `configs/`, `objectives/`, or `contracts/` in this
+  task.
+scientific_assumptions: []
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- cost-runtime-governor-0004
