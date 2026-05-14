@@ -4930,6 +4930,9 @@ def test_run_release_feature_review_convergence_limit_final_adjudication_allows_
     assert isinstance(adjudication_paths, list)
     assert adjudication_paths
     assert all(Path(path).exists() for path in adjudication_paths)
+    assert summary["final_review_continuation_outcome"] in {"accepted_risk", "backlog_follow_up"}
+    assert summary["final_review_finding_adjudication_paths"]
+    assert all(Path(path).exists() for path in summary["final_review_finding_adjudication_paths"])
     backlog_state = yaml.safe_load((tmp_path / "repo_state" / "demo" / "backlog_state.yaml").read_text(encoding="utf-8"))
     memories = backlog_state["active_epics"][0]["final_review_follow_up_memories"]
     assert memories
@@ -5495,6 +5498,9 @@ def test_run_release_persists_final_review_continuation_decision_artifact(tmp_pa
     assert continuation["hard_stop_reason"]
     assert Path(summary["final_integration_verification_path"]).exists()
     assert "final_review_continuation_decision_path" in summary
+    assert summary["final_review_continuation_outcome"] == continuation["outcome"]
+    assert summary["final_review_continuation_finding_ids"] == continuation["finding_ids"]
+    assert summary["final_review_finding_adjudication_paths"] == continuation["finding_adjudication_paths"]
 
 
 def test_final_review_continuation_hard_stop_keeps_unresolved_required_finding_ids(tmp_path: Path) -> None:

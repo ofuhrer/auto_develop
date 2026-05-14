@@ -620,6 +620,27 @@ def test_add_release_final_review_follow_up_memory_persists_compact_record(tmp_p
     ]
 
 
+def test_add_release_final_review_follow_up_memory_supports_soft_observability_classification(tmp_path: Path) -> None:
+    state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
+    store = StateStore(state_path)
+    reference = FinalReviewFollowUpMemoryReference(
+        release_id="review-stop-policy-hardening",
+        finding_id="obs-1",
+        classification="soft_observability",
+        rationale_summary="Accepted as observability-only after final verification passed.",
+        evidence_paths=[Path("runs/r1/final_integration_verification.json")],
+        validators_rerun=["test -d docs"],
+        adjudication_artifact_path=Path("runs/r1/supervisor_decisions/final_review_finding_adjudication__obs-1.json"),
+        continuation_decision_path=Path("runs/r1/final_review_continuation_decision.json"),
+        recorded_at=datetime(2026, 5, 14, 0, 0, tzinfo=UTC),
+    )
+
+    state = store.add_release_final_review_follow_up_memory("review-stop-policy-hardening", reference)
+    assert state.active_epics
+    memory = state.active_epics[0].final_review_follow_up_memories[0]
+    assert memory.classification == "soft_observability"
+
+
 def test_add_release_final_review_follow_up_memory_requires_matching_release_id(tmp_path: Path) -> None:
     state_path = tmp_path / "repo_state" / "demo" / "backlog_state.yaml"
     store = StateStore(state_path)

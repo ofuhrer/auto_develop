@@ -52,7 +52,7 @@ class GovernorEventContext:
     stop_reason: str | None = None
     cycle_index: int | None = None
     artifact_count: int | None = None
-    details: dict[str, str | int | float | bool] | None = None
+    details: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.phase, str):
@@ -109,7 +109,9 @@ class GovernorEventContext:
         if self.artifact_count is not None:
             parts.append(f"artifact_count={self.artifact_count}")
         if self.details:
-            detail_value = ",".join(f"{key}:{value}" for key, value in sorted(self.details.items()))
+            detail_value = ",".join(
+                f"{key}:{json.dumps(value, sort_keys=True)}" for key, value in sorted(self.details.items())
+            )
             parts.append(f"details={detail_value}")
         return " ".join(parts)
 

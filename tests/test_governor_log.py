@@ -78,7 +78,12 @@ def test_governor_writer_emits_typed_context_and_readable_compact_logs(tmp_path:
             decision="continue",
             outcome="accepted",
             cycle_index=2,
-            details={"tests_passed": True, "duration_s": 42},
+            details={
+                "tests_passed": True,
+                "duration_s": 42,
+                "final_review_outcome": "accepted_risk",
+                "finding_adjudication_paths": ["runs/r1/a.json", "runs/r1/b.json"],
+            },
         ),
     )
 
@@ -90,11 +95,18 @@ def test_governor_writer_emits_typed_context_and_readable_compact_logs(tmp_path:
     assert "context=phase=final_verification_completed subphase=final_verification" in raw_text
     assert "release_id=rel-123" in raw_text
     assert "decision=continue" in raw_text
+    assert "final_review_outcome:\"accepted_risk\"" in raw_text
+    assert "finding_adjudication_paths:[\"runs/r1/a.json\", \"runs/r1/b.json\"]" in raw_text
     assert "(phase=final_verification_completed subphase=final_verification release_id=rel-123" in human_text
     assert record["context"] == {
         "cycle_index": 2,
         "decision": "continue",
-        "details": {"duration_s": 42, "tests_passed": True},
+        "details": {
+            "duration_s": 42,
+            "final_review_outcome": "accepted_risk",
+            "finding_adjudication_paths": ["runs/r1/a.json", "runs/r1/b.json"],
+            "tests_passed": True,
+        },
         "epic_id": "governor-cockpit-v2",
         "outcome": "accepted",
         "phase": "final_verification_completed",
