@@ -55,6 +55,7 @@ def build_cost_runtime_governance_decision(
     budget_class: str,
     release_metrics_path: Path | None,
     release_tuning_path: Path | None = None,
+    fallback_evidence_path: Path | None = None,
     decided_at: datetime | None = None,
 ) -> CostRuntimeGovernanceDecision:
     metrics = extract_cost_runtime_evidence_metrics(release_metrics_path=release_metrics_path)
@@ -118,8 +119,8 @@ def build_cost_runtime_governance_decision(
 
     evidence_paths: list[Path] = [
         path
-        for path in [release_metrics_path, release_tuning_path]
-        if path is not None
+        for path in [release_metrics_path, release_tuning_path, fallback_evidence_path]
+        if path is not None and path.exists()
     ]
 
     return CostRuntimeGovernanceDecision.model_validate(

@@ -801,6 +801,23 @@ def _load_or_build_cost_runtime_governance_decision(
         if prior_release_tuning_path is not None and prior_release_tuning_path.exists()
         else None
     )
+    fallback_evidence_path: Path | None = None
+    if release_metrics_path is None and release_tuning_path is None:
+        fallback_evidence_path = release_root / "cost_runtime_governance_fallback_evidence.json"
+        fallback_evidence_path.write_text(
+            json.dumps(
+                {
+                    "release_id": release_id,
+                    "current_run_id": current_run_id,
+                    "reason": "no prior release_metrics.json or release_tuning.md was available",
+                    "selected_default": "decomposed",
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
     decision = build_cost_runtime_governance_decision(
         decision_id=release_id,
@@ -809,6 +826,7 @@ def _load_or_build_cost_runtime_governance_decision(
         budget_class=_infer_budget_class(config),
         release_metrics_path=release_metrics_path,
         release_tuning_path=release_tuning_path,
+        fallback_evidence_path=fallback_evidence_path,
         decided_at=now,
     )
     written = write_supervisor_decision_artifact(release_bundle_path=release_root, decision=decision)

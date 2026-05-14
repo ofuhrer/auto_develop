@@ -817,6 +817,13 @@ class CostRuntimeGovernanceDecision(SupervisorDecisionBase):
     fallback_plan: str = Field(min_length=1)
     validators_to_rerun: list[str]
 
+    @field_validator("evidence_paths")
+    @classmethod
+    def evidence_paths_must_not_be_empty(cls, values: list[Path]) -> list[Path]:
+        if not values:
+            raise ValueError("evidence_paths must not be empty")
+        return values
+
     @field_validator("selected_model_role")
     @classmethod
     def selected_model_role_must_be_identifier_like(cls, value: str) -> str:

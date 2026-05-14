@@ -61,7 +61,7 @@ def test_build_cost_runtime_governance_decision_uses_conservative_fallback_when_
     assert decision.selected_action == CostRuntimeGovernanceAction.DECOMPOSED
     assert decision.outcome == CostRuntimeGovernanceOutcome.PROCEED_DECOMPOSED
     assert decision.selected_model_role == "balanced_worker"
-    assert decision.evidence_paths == [metrics_path, tuning_path]
+    assert decision.evidence_paths == [tuning_path]
     assert decision.validators_to_rerun == ["release_metrics", "verification", "budget_policy"]
 
 
