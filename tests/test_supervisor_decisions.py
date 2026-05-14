@@ -8,6 +8,9 @@ from pydantic import ValidationError
 from agentic_devloop.models import ContractNormalizationRefusalReason
 from agentic_devloop.models import ReleaseFinalizationPolicyName
 from agentic_devloop.supervisor_decisions import (
+    CostRuntimeGovernanceAction,
+    CostRuntimeGovernanceDecision,
+    CostRuntimeGovernanceOutcome,
     ContractNormalizationDecision,
     ContractNormalizationOutcome,
     DecisionRiskLevel,
@@ -1025,6 +1028,88 @@ def test_parse_supervisor_decision_rejects_unsupported_type() -> None:
 
     with pytest.raises(ValidationError):
         parse_supervisor_decision(payload)
+
+
+def test_parse_cost_runtime_governance_decision() -> None:
+    payload = {
+        **BASE,
+        "decision_type": SupervisorDecisionType.COST_RUNTIME_GOVERNANCE,
+        "risk_level": DecisionRiskLevel.MODERATE,
+        "selected_action": CostRuntimeGovernanceAction.ONE_SHOT,
+        "outcome": CostRuntimeGovernanceOutcome.PROCEED_ONE_SHOT,
+        "selected_model_role": "high_capability_worker",
+        "budget_class": "M",
+        "fallback_plan": "Decompose into bounded tasks if one-shot verification fails.",
+        "validators_to_rerun": ["verification", "budget_policy"],
+    }
+
+    decision = parse_supervisor_decision(payload)
+
+    assert isinstance(decision, CostRuntimeGovernanceDecision)
+    assert decision.selected_action == CostRuntimeGovernanceAction.ONE_SHOT
+    assert decision.outcome == CostRuntimeGovernanceOutcome.PROCEED_ONE_SHOT
+
+
+def test_cost_runtime_governance_requires_valid_fields() -> None:
+    with pytest.raises(ValidationError, match="selected_action must match outcome"):
+        CostRuntimeGovernanceDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.COST_RUNTIME_GOVERNANCE,
+                "risk_level": DecisionRiskLevel.MODERATE,
+                "selected_action": CostRuntimeGovernanceAction.DECOMPOSED,
+                "outcome": CostRuntimeGovernanceOutcome.PROCEED_ONE_SHOT,
+                "selected_model_role": "high_capability_worker",
+                "budget_class": "M",
+                "fallback_plan": "Retry with safer decomposition boundaries.",
+                "validators_to_rerun": ["verification"],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="validators to rerun must not be empty"):
+        CostRuntimeGovernanceDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.COST_RUNTIME_GOVERNANCE,
+                "risk_level": DecisionRiskLevel.MODERATE,
+                "selected_action": CostRuntimeGovernanceAction.ONE_SHOT,
+                "outcome": CostRuntimeGovernanceOutcome.PROCEED_ONE_SHOT,
+                "selected_model_role": "high_capability_worker",
+                "budget_class": "M",
+                "fallback_plan": "Retry with updated budget constraints.",
+                "validators_to_rerun": [],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="selected_model_role must be lower_snake_or_kebab_case"):
+        CostRuntimeGovernanceDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.COST_RUNTIME_GOVERNANCE,
+                "risk_level": DecisionRiskLevel.MODERATE,
+                "selected_action": CostRuntimeGovernanceAction.ONE_SHOT,
+                "outcome": CostRuntimeGovernanceOutcome.PROCEED_ONE_SHOT,
+                "selected_model_role": "Bad Role",
+                "budget_class": "M",
+                "fallback_plan": "Retry with canonical role mapping.",
+                "validators_to_rerun": ["verification"],
+            }
+        )
+
+    with pytest.raises(ValidationError, match="budget_class must be one of XS, S, M, L, XL"):
+        CostRuntimeGovernanceDecision.model_validate(
+            {
+                **BASE,
+                "decision_type": SupervisorDecisionType.COST_RUNTIME_GOVERNANCE,
+                "risk_level": DecisionRiskLevel.MODERATE,
+                "selected_action": CostRuntimeGovernanceAction.ONE_SHOT,
+                "outcome": CostRuntimeGovernanceOutcome.PROCEED_ONE_SHOT,
+                "selected_model_role": "high_capability_worker",
+                "budget_class": "medium",
+                "fallback_plan": "Retry with supported budget class.",
+                "validators_to_rerun": ["verification"],
+            }
+        )
 
 
 def test_parse_scope_risk_budget_policy_decision() -> None:

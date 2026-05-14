@@ -19,6 +19,10 @@ from agentic_devloop.models import (
     TaskContract,
 )
 from agentic_devloop.planning import ContractPlanResult
+from agentic_devloop.cost_runtime_governance import build_cost_runtime_governance_decision
+from agentic_devloop.governor import _build_execution_strategy_inputs
+from agentic_devloop.models import BacklogEpic, BacklogPlan, ReleaseObjective
+from agentic_devloop.supervisor_decisions import write_supervisor_decision_artifact
 
 
 def test_cli_help_exits_successfully(capsys) -> None:
@@ -218,6 +222,84 @@ def test_run_release_command_outputs_open_finalization_gate_after_review_flow(mo
     assert '"allowed": true' in captured.out
     assert '"reason": "allowed"' in captured.out
     assert '"decision": "accepted"' in captured.out
+
+
+def test_backlog_execution_strategy_inputs_consume_cost_runtime_governance(tmp_path: Path) -> None:
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    prior_release_run_dir = runs_dir / "20260514T010203Z_demo_release"
+    prior_release_run_dir.mkdir(parents=True)
+    metrics_path = prior_release_run_dir / "release_metrics.json"
+    metrics_path.write_text(
+        json.dumps(
+            {
+                "run_id": "demo-run",
+                "release_id": "demo",
+                "decision": "accepted",
+                "totals": {
+                    "prompt_chars": 1_100_000,
+                    "context_chars": 900_000,
+                },
+                "compact_governance": {
+                    "review_wave_count": 3,
+                    "feature_review_repair_wave_count": 2,
+                    "model_fallback_count": 3,
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    tuning_path = prior_release_run_dir / "release_tuning.md"
+    tuning_path.write_text("# tuning\n", encoding="utf-8")
+    decision = build_cost_runtime_governance_decision(
+        decision_id="demo",
+        release_id="demo",
+        decided_by="test",
+        budget_class="L",
+        release_metrics_path=metrics_path,
+        release_tuning_path=tuning_path,
+    )
+    write_supervisor_decision_artifact(release_bundle_path=prior_release_run_dir, decision=decision)
+
+    plan = BacklogPlan(
+        project_id="demo",
+        goal="demo",
+        roadmap_path=tmp_path / "roadmap.md",
+        epics=[],
+        selected_epic_id=None,
+        state_review_snapshot_path=None,
+        state_refresh_summary_path=None,
+    )
+    epic = BacklogEpic(
+        epic_id="demo-epic",
+        title="Demo",
+        objective="Demo objective",
+        rationale="Demo rationale",
+        priority=1,
+        acceptance_criteria=["ok"],
+        suggested_release_id="demo",
+    )
+    objective = ReleaseObjective(
+        release_id="demo",
+        title="Demo",
+        objective="Demo",
+        non_goals=["none"],
+        acceptance_criteria=["ok"],
+    )
+
+    selector_inputs = _build_execution_strategy_inputs(
+        plan=plan,
+        epic=epic,
+        objective=objective,
+        runs_dir=runs_dir,
+    )
+
+    assert selector_inputs["cohesive_scope"] is False
+    assert selector_inputs["coupled_tasks"] is True
+    assert selector_inputs["cost_runtime_governance_decision_path"] is not None
 
 
 def test_plan_release_command_is_registered(capsys) -> None:

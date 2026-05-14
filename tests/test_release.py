@@ -25,6 +25,10 @@ from agentic_devloop.models import Decision, Reviewer, ReviewDecision
 from agentic_devloop.models import FeatureReviewDecision, FeatureReviewRecheckRecord
 from agentic_devloop.orchestrator import TaskRunResult, executor_config_for_task, executor_configs_for_task
 from agentic_devloop.release import (
+    _build_release_metrics,
+    _cost_runtime_governance_decision_path,
+    _cost_runtime_governance_feature_review_max_repair_loops_override,
+    _load_or_build_cost_runtime_governance_decision,
     collect_release_planning_state_review_snapshot,
     make_release_run_id,
     _assert_safe_final_integration_verification_worktree,
@@ -46,6 +50,8 @@ from agentic_devloop.release import (
     run_release,
 )
 from agentic_devloop.supervisor_decisions import (
+    CostRuntimeGovernanceAction,
+    CostRuntimeGovernanceDecision,
     EnvironmentRepairDecision,
     EnvironmentRepairPolicyAction,
     FinalReviewFindingAdjudicationDecision,
@@ -257,6 +263,134 @@ class FlakyVerificationExecutor(FakeExecutor):
             backend="fake",
             model=None,
         )
+
+
+def test_cost_runtime_governance_falls_back_without_prior_metrics(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config = ProjectConfig.model_validate(
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {},
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 1,
+                "max_strong_model_calls_per_release": 0,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        }
+    )
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    release_root = tmp_path / "current_release"
+    release_root.mkdir()
+
+    decision = _load_or_build_cost_runtime_governance_decision(
+        release_root=release_root,
+        release_id="v0.1.0",
+        runs_dir=runs_dir,
+        current_run_id="20260514T020304Z_v0.1.0_release",
+        config=config,
+        now=None,
+        progress=None,
+    )
+
+    assert isinstance(decision, CostRuntimeGovernanceDecision)
+    assert decision.selected_action == CostRuntimeGovernanceAction.DECOMPOSED
+    fallback_evidence_path = release_root / "cost_runtime_governance_fallback_evidence.json"
+    assert decision.evidence_paths == [fallback_evidence_path]
+    assert fallback_evidence_path.exists()
+    assert isinstance(
+        load_supervisor_decision_artifact(_cost_runtime_governance_decision_path(release_root, "v0.1.0")),
+        CostRuntimeGovernanceDecision,
+    )
+    assert _cost_runtime_governance_feature_review_max_repair_loops_override(
+        decision=decision,
+        default_max_repair_loops=3,
+    ) is None
+
+
+def test_cost_runtime_governance_review_cap_writes_typed_decision_artifact(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config = ProjectConfig.model_validate(
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {},
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 1,
+                "max_strong_model_calls_per_release": 0,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        }
+    )
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    prior_release_run_dir = runs_dir / "20260514T010203Z_v0.1.0_release"
+    prior_release_run_dir.mkdir(parents=True)
+    (prior_release_run_dir / "release_tuning.md").write_text("# tuning\n", encoding="utf-8")
+    (prior_release_run_dir / "release_metrics.json").write_text(
+        json.dumps(
+            {
+                "run_id": "prior",
+                "release_id": "v0.1.0",
+                "decision": "accepted",
+                "totals": {"prompt_chars": 1000, "context_chars": 1000},
+                "compact_governance": {
+                    "review_wave_count": 3,
+                    "feature_review_repair_wave_count": 0,
+                    "model_fallback_count": 0,
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    release_root = tmp_path / "current_release"
+    release_root.mkdir()
+
+    decision = _load_or_build_cost_runtime_governance_decision(
+        release_root=release_root,
+        release_id="v0.1.0",
+        runs_dir=runs_dir,
+        current_run_id="20260514T040506Z_v0.1.0_release",
+        config=config,
+        now=None,
+        progress=None,
+    )
+
+    decision_path = _cost_runtime_governance_decision_path(release_root, "v0.1.0")
+    assert decision_path.exists()
+    assert isinstance(decision, CostRuntimeGovernanceDecision)
+    assert decision.selected_action == CostRuntimeGovernanceAction.REVIEW_CAPPED
+    assert (
+        _cost_runtime_governance_feature_review_max_repair_loops_override(
+            decision=decision,
+            default_max_repair_loops=3,
+        )
+        == 1
+    )
 
 
 class AllowedFilesExecutor:
@@ -869,6 +1003,203 @@ def test_run_release_writes_metrics_and_final_log_summary(tmp_path) -> None:
     assert str(result.budget_path) in log
     assert str(result.tuning_path) in log
     assert "Good luck, future humans. 🧑‍🚀🛠️🍀" in log
+
+
+def test_build_release_metrics_compact_governance_uses_zero_or_null_fallbacks_when_optional_artifacts_missing(tmp_path: Path) -> None:
+    run_id = "20260514T000000Z_v0.1.0_release"
+    release_id = "v0.1.0"
+    runs_dir = tmp_path / "runs"
+    bundle_path = runs_dir / "task_bundle"
+    bundle_path.mkdir(parents=True, exist_ok=True)
+    (bundle_path / "executor_attempts.json").write_text(
+        json.dumps(
+            [
+                {
+                    "model": "gpt-5.3-codex-spark",
+                    "exit_code": 0,
+                    "duration_seconds": 0.5,
+                    "prompt_chars": 10,
+                    "stdout_chars": 1,
+                    "stderr_chars": 0,
+                }
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (bundle_path / "run_state.json").write_text(
+        json.dumps({"diff_lines": 1, "verification_results": [{"duration_seconds": 0.1}]}) + "\n",
+        encoding="utf-8",
+    )
+    (bundle_path / "executor_prompt.md").write_text("prompt", encoding="utf-8")
+    (bundle_path / "changed_files.txt").write_text("docs/demo-0001.md\n", encoding="utf-8")
+    raw_log_path = runs_dir / run_id / "release_raw.log"
+    raw_log_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_log_path.write_text("", encoding="utf-8")
+    task_result = TaskRunResult(
+        run_id="task-run-1",
+        worktree_path=tmp_path / "worktree",
+        bundle_path=bundle_path,
+        decision=ReviewDecision(
+            task_id="demo-0001",
+            decision=Decision.ACCEPTED,
+            reviewer=Reviewer.DETERMINISTIC,
+            rationale="ok",
+        ),
+    )
+
+    metrics = _build_release_metrics(
+        run_id=run_id,
+        release_id=release_id,
+        decision=Decision.ACCEPTED,
+        task_results=[task_result],
+        raw_log_path=raw_log_path,
+        runs_dir=runs_dir,
+    )
+
+    compact = metrics["compact_governance"]
+    assert compact["model_fallback_count"] == 0
+    assert compact["review_wave_count"] == 0
+    assert compact["feature_review_repair_wave_count"] == 0
+    assert compact["runtime_repair_attempt_count"] == 0
+    assert compact["runtime_repair_success_count"] == 0
+    assert compact["runtime_repair_stop_count"] == 0
+    assert compact["admission_repair_count"] == 0
+    assert compact["scope_risk_overage_count"] == 0
+    assert compact["scope_risk_blocked_count"] == 0
+    assert compact["final_review_adjudication_count"] == 0
+    assert compact["final_review_continuation_outcome"] is None
+    assert compact["final_review_hard_stop_reason"] is None
+    assert compact["finalization_outcome"] is None
+    assert compact["finalization_stop_reason"] is None
+    assert compact["finalization_gate_reason"] is None
+
+
+def test_build_release_metrics_compact_governance_extracts_artifact_signals_when_present(tmp_path: Path) -> None:
+    run_id = "20260514T000001Z_v0.1.0_release"
+    release_id = "v0.1.0"
+    runs_dir = tmp_path / "runs"
+    release_root = runs_dir / run_id
+    bundle_path = runs_dir / "task_bundle"
+    bundle_path.mkdir(parents=True, exist_ok=True)
+    (bundle_path / "executor_attempts.json").write_text(
+        json.dumps(
+            [
+                {
+                    "model": "gpt-5.3-codex-spark",
+                    "exit_code": 1,
+                    "duration_seconds": 0.5,
+                    "prompt_chars": 10,
+                    "stdout_chars": 1,
+                    "stderr_chars": 5,
+                },
+                {
+                    "model": "gpt-5.3-codex",
+                    "exit_code": 0,
+                    "duration_seconds": 0.7,
+                    "prompt_chars": 12,
+                    "stdout_chars": 2,
+                    "stderr_chars": 1,
+                },
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (bundle_path / "run_state.json").write_text(
+        json.dumps({"diff_lines": 12, "verification_results": [{"duration_seconds": 0.2}]}) + "\n",
+        encoding="utf-8",
+    )
+    (bundle_path / "executor_prompt.md").write_text("prompt", encoding="utf-8")
+    (bundle_path / "changed_files.txt").write_text("docs/demo-0001.md\n", encoding="utf-8")
+    raw_log_path = release_root / "release_raw.log"
+    raw_log_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_log_path.write_text("event=context_loaded task=demo-0001 chars=42\n", encoding="utf-8")
+    task_result = TaskRunResult(
+        run_id="task-run-1",
+        worktree_path=tmp_path / "worktree",
+        bundle_path=bundle_path,
+        decision=ReviewDecision(
+            task_id="demo-0001",
+            decision=Decision.ACCEPTED,
+            reviewer=Reviewer.DETERMINISTIC,
+            rationale="ok",
+        ),
+    )
+    (release_root / "feature_review" / "repairs_01").mkdir(parents=True, exist_ok=True)
+    (release_root / "feature_review" / "repairs_02").mkdir(parents=True, exist_ok=True)
+    (release_root / "feature_review.json").write_text("{}", encoding="utf-8")
+    (release_root / "runtime_supervisor").mkdir(parents=True, exist_ok=True)
+    (release_root / "runtime_supervisor" / "repair_demo-0001.json").write_text(
+        json.dumps(
+            {
+                "attempts": [{"decision": "retry"}, {"decision": "stop"}],
+                "final_result": {"decision": "accepted"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (release_root / "runtime_supervisor" / "planner_admission_repairs.json").write_text(
+        json.dumps({"records": [{"task_id": "demo-0001"}, {"task_id": "demo-0002"}]}) + "\n",
+        encoding="utf-8",
+    )
+    (release_root / "supervisor_decisions").mkdir(parents=True, exist_ok=True)
+    (release_root / "supervisor_decisions" / "scope_risk_budget_policy__a.json").write_text(
+        json.dumps(
+            {
+                "configured_changed_files_limit": 2,
+                "actual_changed_files": 3,
+                "configured_diff_size_limit": 50,
+                "actual_diff_size": 40,
+                "outcome": "stopped",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (release_root / "final_review_continuation_decision.json").write_text(
+        json.dumps(
+            {
+                "outcome": "accepted_risk",
+                "hard_stop_reason": "none",
+                "finding_adjudication_paths": ["a.json", "b.json"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (release_root / "finalization_decision.json").write_text(
+        json.dumps({"outcome": "stopped", "stop_reason": "failed_gate", "blocked_reason": "unresolved_required_findings"})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    metrics = _build_release_metrics(
+        run_id=run_id,
+        release_id=release_id,
+        decision=Decision.ACCEPTED,
+        task_results=[task_result],
+        raw_log_path=raw_log_path,
+        runs_dir=runs_dir,
+    )
+
+    compact = metrics["compact_governance"]
+    assert compact["model_fallback_count"] == 1
+    assert compact["review_wave_count"] == 3
+    assert compact["feature_review_repair_wave_count"] == 2
+    assert compact["runtime_repair_attempt_count"] == 2
+    assert compact["runtime_repair_success_count"] == 1
+    assert compact["runtime_repair_stop_count"] == 1
+    assert compact["admission_repair_count"] == 2
+    assert compact["scope_risk_overage_count"] == 1
+    assert compact["scope_risk_blocked_count"] == 1
+    assert compact["final_review_adjudication_count"] == 2
+    assert compact["final_review_continuation_outcome"] == "accepted_risk"
+    assert compact["final_review_hard_stop_reason"] == "none"
+    assert compact["finalization_outcome"] == "stopped"
+    assert compact["finalization_stop_reason"] == "failed_gate"
+    assert compact["finalization_gate_reason"] == "unresolved_required_findings"
 
 
 def test_run_release_writes_final_integration_verification_evidence(tmp_path) -> None:

@@ -130,6 +130,7 @@ def test_records_consumed_optional_evidence_paths() -> None:
                 "state_review_snapshot_path": "repo_state/state_review_snapshot.json",
                 "release_review_path": "runs/release_review.md",
                 "release_metrics_path": "runs/release_metrics.json",
+                "cost_runtime_governance_decision_path": "runs/supervisor_decisions/cost_runtime_governance.json",
             }
         )
     )
@@ -138,4 +139,20 @@ def test_records_consumed_optional_evidence_paths() -> None:
         Path("repo_state/state_review_snapshot.json"),
         Path("runs/release_review.md"),
         Path("runs/release_metrics.json"),
+        Path("runs/supervisor_decisions/cost_runtime_governance.json"),
     ]
+
+
+def test_hard_gates_override_one_shot_recommendation() -> None:
+    decision = select_execution_strategy(
+        ExecutionStrategySelectorInput.model_validate(
+            {
+                **_base_input(),
+                "cohesive_scope": True,
+                "has_lockfile_changes": True,
+            }
+        )
+    )
+
+    assert decision.selected_action == ExecutionStrategyAction.STOP
+    assert decision.reason == ExecutionStrategyReason.UNSAFE_SCOPE

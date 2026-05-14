@@ -9,6 +9,9 @@ from pydantic import ValidationError
 
 from agentic_devloop.evidence import supervisor_decisions_artifacts_dir
 from agentic_devloop.supervisor_decisions import (
+    CostRuntimeGovernanceAction,
+    CostRuntimeGovernanceDecision,
+    CostRuntimeGovernanceOutcome,
     DecisionRiskLevel,
     EnvironmentRepairDecision,
     EnvironmentRepairOutcome,
@@ -188,6 +191,28 @@ def _scope_risk_budget_policy_decision(*, evidence_paths: list[Path]) -> ScopeRi
             "actual_diff_size": 910,
             "affected_scope": ScopeRiskAffectedScope.TASK,
             "affected_task_id": "soft-scope-budget-policy-0001",
+        }
+    )
+
+
+def _cost_runtime_governance_decision(*, evidence_paths: list[Path]) -> CostRuntimeGovernanceDecision:
+    return CostRuntimeGovernanceDecision.model_validate(
+        {
+            "schema_version": SCHEMA_VERSION_V1,
+            "decision_id": "cost-runtime-001",
+            "release_id": "cost-runtime-governor",
+            "decided_at": datetime(2026, 5, 13, 10, 0, 0, tzinfo=UTC),
+            "decided_by": "supervisor-agent",
+            "rationale": "Runtime and context metrics favor one-shot execution on a stronger role.",
+            "evidence_paths": evidence_paths,
+            "decision_type": SupervisorDecisionType.COST_RUNTIME_GOVERNANCE,
+            "risk_level": DecisionRiskLevel.MODERATE,
+            "selected_action": CostRuntimeGovernanceAction.ONE_SHOT,
+            "outcome": CostRuntimeGovernanceOutcome.PROCEED_ONE_SHOT,
+            "selected_model_role": "high_capability_worker",
+            "budget_class": "M",
+            "fallback_plan": "Decompose and cap review retries if one-shot verification fails.",
+            "validators_to_rerun": ["verification", "budget_policy"],
         }
     )
 
@@ -638,6 +663,29 @@ def test_scope_risk_budget_policy_artifact_serialization_and_round_trip(tmp_path
     assert serialized["evidence_paths"]
 
 
+def test_cost_runtime_governance_artifact_serialization_and_round_trip(tmp_path: Path) -> None:
+    evidence_file = tmp_path / "cost-runtime-metrics.json"
+    evidence_file.write_text('{"runtime_minutes": 17.2}\n', encoding="utf-8")
+    decision = _cost_runtime_governance_decision(evidence_paths=[Path("cost-runtime-metrics.json")])
+
+    artifact_path = write_supervisor_decision_artifact(
+        release_bundle_path=tmp_path,
+        decision=decision,
+    )
+    loaded = load_supervisor_decision_artifact(artifact_path)
+    serialized = decision.model_dump(mode="json")
+
+    assert artifact_path.exists()
+    assert artifact_path.name == "cost_runtime_governance__cost-runtime-001.json"
+    assert loaded == decision
+    assert serialized["decision_type"] == "cost_runtime_governance"
+    assert serialized["selected_action"] == "one_shot"
+    assert serialized["outcome"] == "proceed_one_shot"
+    assert serialized["selected_model_role"] == "high_capability_worker"
+    assert serialized["budget_class"] == "M"
+    assert serialized["validators_to_rerun"] == ["verification", "budget_policy"]
+
+
 def test_scope_risk_budget_policy_normalizes_naive_decided_at_to_utc() -> None:
     decision = ScopeRiskBudgetPolicyDecision.model_validate(
         {
@@ -739,6 +787,17 @@ def test_load_supervisor_decision_artifact_rejects_relative_evidence_path_traver
 
 def test_execution_strategy_load_fails_for_missing_evidence_path(tmp_path: Path) -> None:
     decision = _execution_strategy_decision(evidence_paths=[Path("missing-strategy-evidence.log")])
+    artifact_path = write_supervisor_decision_artifact(
+        release_bundle_path=tmp_path,
+        decision=decision,
+    )
+
+    with pytest.raises(ValueError, match="missing evidence path"):
+        load_supervisor_decision_artifact(artifact_path)
+
+
+def test_cost_runtime_governance_load_fails_for_missing_evidence_path(tmp_path: Path) -> None:
+    decision = _cost_runtime_governance_decision(evidence_paths=[Path("missing-cost-runtime-evidence.json")])
     artifact_path = write_supervisor_decision_artifact(
         release_bundle_path=tmp_path,
         decision=decision,

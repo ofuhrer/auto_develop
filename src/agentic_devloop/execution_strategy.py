@@ -51,6 +51,7 @@ class ExecutionStrategySelectorInput(StrictModel):
     state_review_snapshot_path: Path | None = None
     release_review_path: Path | None = None
     release_metrics_path: Path | None = None
+    cost_runtime_governance_decision_path: Path | None = None
 
     @model_validator(mode="after")
     def task_ids_must_be_non_empty(self) -> "ExecutionStrategySelectorInput":
@@ -155,6 +156,7 @@ def _consumed_optional_evidence_paths(inputs: ExecutionStrategySelectorInput) ->
             inputs.state_review_snapshot_path,
             inputs.release_review_path,
             inputs.release_metrics_path,
+            inputs.cost_runtime_governance_decision_path,
         )
         if path is not None
     ]
