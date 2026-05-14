@@ -632,7 +632,7 @@ Current limitation: the implemented control plane now supports deterministic sta
 
 ### Feature Review and Repair Flow
 
-The existing `release_review.md` is a deterministic release evidence summary. When `model_roles.reviewer` is configured, `run-release` now also runs a separate semantic feature-review loop. This loop is release-scoped: it reviews one integrated feature branch, produces structured findings, writes `feature_review.json` and `feature_review_recheck.json`, converts required findings into bounded repair contracts, reruns verification, and writes evidence that persistent governor memory can later consume. Typed supervisor decision records capture the bounded scheduling, finding, repair, and soft-budget choices that support this release-scoped loop; the broader multi-epic governor that would consume them across repeated epics is still planned.
+The existing `release_review.md` is a deterministic release evidence summary. When `model_roles.reviewer` is configured, `run-release` also runs a separate semantic feature-review loop. This loop is release-scoped: it reviews one integrated feature branch, produces structured findings, writes `feature_review.json` and `feature_review_recheck.json`, converts required findings into bounded repair contracts, reruns verification, and writes evidence that compact repo-state memory can later consume. Typed supervisor decision records capture the bounded scheduling, finding, repair, and soft-budget choices that support this release-scoped loop; the broader multi-epic governor that would consume them across repeated epics is still planned.
 
 1. After accepted task branches are integrated into `feature/<release>`, build a review packet containing objective, contracts, `base..feature` diff, changed-files list, release summary, verification logs, soft-gate artifacts, metrics, tuning reports, docs touched, and relevant architecture constraints.
 2. Invoke a reviewer agent that did not implement the worker tasks.
@@ -645,14 +645,28 @@ The existing `release_review.md` is a deterministic release evidence summary. Wh
 
 This review loop is intentionally agentic. Deterministic code should assemble evidence, enforce hard invariants, validate review schemas, and rerun verification; it should not try to encode semantic architecture review as brittle heuristics.
 
+### Final Adjudication After Repair Budget Exhaustion
+
+When bounded repair waves stop because the retry budget is exhausted or the loop otherwise converges without resolving every finding, the release performs a final integration verification rerun on the integrated feature branch before the supervisor writes final adjudication records. The supervisor then persists `review_finding_adjudication` artifacts under `runs/<run-id>/supervisor_decisions/` alongside the `feature_review.json` / `feature_review_recheck.json` trail and classifies the remaining findings.
+
+Final adjudication rules:
+
+- blocker findings keep finalization blocked until they are resolved or a hard gate, credential issue, or retry-budget stop makes escalation unavoidable;
+- soft, false-positive, and verification-only findings may be accepted with rationale only after the final integration verification rerun passes;
+- duplicate findings are deferred as next-cycle follow-up, not accepted, and should be recorded with typed supervisor rationale;
+- scope-expansion and backlog-follow-up findings are deferred as proposals for the next planning cycle; and
+- accepted or deferred outcomes are compacted into repo-state memory so the next planning cycle can consume a short summary without rereading the raw reviewer logs.
+
+Raw reviewer artifacts stay in `runs/`. The compact repo-state trail should preserve the outcome references, accepted-risks rationale, and deferred follow-up summaries needed for the next release or planning cycle.
+
 ### Review-Loop Convergence Policy
 
 The release-local reviewer loop needs explicit convergence behavior so repeated findings do not churn the retry budget without adding signal.
 
 - Required findings remain blockers until they are resolved, explicitly accepted with rationale, or stopped by retry budget, hard gates, missing policy/credentials, or configured human escalation.
-- Duplicate findings are treated as deferred non-blocking findings (tracked via `feature_review_recheck.json.deferred_finding_ids` and typed supervisor decision artifacts, not via `accepted_finding_ids`), while false-positive findings are the non-blocking acceptance path. Both paths require evidence and rationale.
+- Duplicate findings are treated as deferred non-blocking findings (tracked via `feature_review_recheck.json.deferred_finding_ids` and typed supervisor decision artifacts, not via `accepted_finding_ids`), while false-positive and verification-only findings are the non-blocking acceptance path. Both paths require evidence and rationale.
 - Soft findings are retained as auditable decisions with evidence paths, rationale, fallback plan, and validator rerun metadata.
-- Findings that expand scope or imply follow-up work should be recorded as proposals for the next planning cycle rather than being folded into the current release objective.
+- Findings that expand scope or imply follow-up work should be recorded as proposals for the next planning cycle rather than being folded into the current release objective, and their compact summaries should be written into repo-state memory.
 - The broader multi-epic governor that would apply this policy across repeated epics remains planned, even though the release-local review loop itself is implemented.
 
 ### Domain Validation Evidence
