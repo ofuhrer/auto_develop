@@ -4779,7 +4779,7 @@ def test_run_release_feature_review_convergence_limit_final_adjudication_allows_
     backlog_state = yaml.safe_load((tmp_path / "repo_state" / "demo" / "backlog_state.yaml").read_text(encoding="utf-8"))
     memories = backlog_state["active_epics"][0]["final_review_follow_up_memories"]
     assert memories
-    assert {item["classification"] for item in memories} >= {"false_positive", "backlog_follow_up"}
+    assert {item["classification"] for item in memories} >= {"verification_only", "backlog_follow_up"}
     sample = memories[0]
     assert sample["rationale_summary"]
     assert sample["evidence_paths"]

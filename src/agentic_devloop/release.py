@@ -2389,7 +2389,7 @@ def _run_feature_review_and_repair_loop(
                 raw_action = item.selected_action if item is not None else "repair"
 
                 if finding_id in accepted_required_ids:
-                    classification = FinalReviewFindingAdjudicationClassification.FALSE_POSITIVE
+                    classification = FinalReviewFindingAdjudicationClassification.VERIFICATION_ONLY
                     selected_action = FinalReviewFindingAdjudicationAction.ACCEPT
                     outcome = FinalReviewFindingAdjudicationOutcome.CONTINUE
                 elif raw_classification == "blocker":
@@ -4497,6 +4497,7 @@ _COMPACT_FINAL_FOLLOW_UP_CLASSIFICATIONS = {
     "backlog_follow_up",
     "duplicate",
     "false_positive",
+    "verification_only",
     "scope_expansion",
 }
 
@@ -4544,7 +4545,7 @@ def _persist_compact_final_review_follow_up_memory(
             for value in payload.get("evidence_paths", [])
             if isinstance(value, str) and value.strip()
         ]
-        if classification != "false_positive" and not evidence_paths:
+        if classification not in {"false_positive", "verification_only"} and not evidence_paths:
             continue
         validators_rerun = [
             value.strip()

@@ -327,6 +327,7 @@ class FinalReviewFindingAdjudicationClassification(StrEnum):
     BACKLOG_FOLLOW_UP = "backlog_follow_up"
     DUPLICATE = "duplicate"
     FALSE_POSITIVE = "false_positive"
+    VERIFICATION_ONLY = "verification_only"
     SCOPE_EXPANSION = "scope_expansion"
 
 
@@ -393,10 +394,14 @@ class FinalReviewFindingAdjudicationDecision(SupervisorDecisionBase):
         ):
             raise ValueError("scope_expansion classification must not use accept action")
         if (
-            self.classification in {FinalReviewFindingAdjudicationClassification.ACCEPTED_RISK}
+            self.classification
+            in {
+                FinalReviewFindingAdjudicationClassification.ACCEPTED_RISK,
+                FinalReviewFindingAdjudicationClassification.VERIFICATION_ONLY,
+            }
             and self.selected_action != FinalReviewFindingAdjudicationAction.ACCEPT
         ):
-            raise ValueError("accepted_risk classification requires accept action")
+            raise ValueError("accepted_risk and verification_only classifications require accept action")
         return self
 
 

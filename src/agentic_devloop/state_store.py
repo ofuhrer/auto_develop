@@ -73,6 +73,7 @@ class FinalReviewFollowUpMemoryReference(BaseModel):
         "backlog_follow_up",
         "duplicate",
         "false_positive",
+        "verification_only",
         "scope_expansion",
     ]
     rationale_summary: str = Field(min_length=1)
