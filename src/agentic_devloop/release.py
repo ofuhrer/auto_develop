@@ -5,6 +5,7 @@ import os
 import shlex
 import threading
 import re
+import warnings
 from hashlib import sha256
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
@@ -118,6 +119,16 @@ from agentic_devloop.state_review import (
     collect_state_review_snapshot,
     write_state_review_snapshot_artifact,
 )
+
+
+def _load_supervisor_decision_artifact_silencing_legacy_warning(path: Path) -> StrictModel:
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"loaded legacy supervisor decision artifact without validators_to_rerun: .*",
+            category=UserWarning,
+        )
+        return load_supervisor_decision_artifact(path)
 from agentic_devloop.state_store import FinalReviewFollowUpMemoryReference, StateStore
 from agentic_devloop.yaml_io import load_yaml_model
 
@@ -4999,7 +5010,7 @@ def _load_or_build_release_scheduling_decision(
     )
     if decision_path.exists():
         try:
-            loaded = load_supervisor_decision_artifact(decision_path)
+            loaded = _load_supervisor_decision_artifact_silencing_legacy_warning(decision_path)
         except Exception as error:  # noqa: BLE001 - bounded normalization handles typed reload safety.
             loaded = _normalize_release_scheduling_model_output_if_needed(
                 release_id=release_id,
