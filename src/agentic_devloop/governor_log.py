@@ -54,6 +54,19 @@ class GovernorEventContext:
     artifact_count: int | None = None
     details: dict[str, object] | None = None
 
+    @staticmethod
+    def _json_safe_value(value: object) -> object:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, dict):
+            safe_dict: dict[str, object] = {}
+            for key, nested_value in value.items():
+                safe_dict[str(key)] = GovernorEventContext._json_safe_value(nested_value)
+            return safe_dict
+        if isinstance(value, (list, tuple)):
+            return [GovernorEventContext._json_safe_value(item) for item in value]
+        return repr(value)
+
     def __post_init__(self) -> None:
         if isinstance(self.phase, str):
             try:
@@ -85,7 +98,10 @@ class GovernorEventContext:
         if self.artifact_count is not None:
             payload["artifact_count"] = self.artifact_count
         if self.details is not None:
-            payload["details"] = self.details
+            payload["details"] = {
+                key: GovernorEventContext._json_safe_value(value)
+                for key, value in self.details.items()
+            }
         return payload
 
     def to_compact_log(self) -> str:
@@ -110,7 +126,8 @@ class GovernorEventContext:
             parts.append(f"artifact_count={self.artifact_count}")
         if self.details:
             detail_value = ",".join(
-                f"{key}:{json.dumps(value, sort_keys=True)}" for key, value in sorted(self.details.items())
+                f"{key}:{json.dumps(GovernorEventContext._json_safe_value(value), sort_keys=True)}"
+                for key, value in sorted(self.details.items())
             )
             parts.append(f"details={detail_value}")
         return " ".join(parts)
