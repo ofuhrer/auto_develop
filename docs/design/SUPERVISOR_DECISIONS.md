@@ -49,6 +49,21 @@ should be used.
   report hash, base-branch commit, execution mode, and release-input hash used
   to detect stale scheduling artifacts.
 
+`environment_repair` is the narrow policy-bounded seam for verification-environment
+drift. It records the policy basis, selected action, outcome, fallback plan,
+source evidence paths, retry-budget impact, explicit `validators_to_rerun`,
+optional refusal reason, and any capture commands used to prove the environment
+state. The implemented actions are `apply_repair_and_retry`,
+`capture_evidence_only`, `escalate`, and `stop`. `apply_repair_and_retry`
+consumes retry budget and reruns the task's configured verification validators;
+`capture_evidence_only` records evidence without retrying; `escalate` and `stop`
+preserve the failure trail and require a refusal reason. Task-level decisions are
+written under `runs/<run-id>/<task-id>/evidence/supervisor_decisions/`, and
+release-level decisions use `runs/<run-id>/supervisor_decisions/`. This seam is
+intentionally not a general executor-liveness or infrastructure-repair system:
+it does not install dependencies, repair network or credential access, or
+mutate source files.
+
 `repair_loop_continuation` and `final_review_finding_adjudication` are the decision
 types that carry release-local review convergence behavior:
 
