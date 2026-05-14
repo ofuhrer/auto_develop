@@ -3848,6 +3848,23 @@ def _write_final_review_continuation_decision(
             if record.decision_artifact_path.strip()
         }
     )
+    deferred_adjudication_paths: list[Path] = []
+    for adjudication_path in sorted({path for path in final_review_finding_adjudication_paths if path}):
+        try:
+            payload = json.loads(adjudication_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        classification = str(payload.get("classification") or "").strip()
+        selected_action = str(payload.get("selected_action") or "").strip()
+        if selected_action != FinalReviewFindingAdjudicationAction.DEFER.value:
+            continue
+        if classification not in {
+            FinalReviewFindingAdjudicationClassification.BACKLOG_FOLLOW_UP.value,
+            FinalReviewFindingAdjudicationClassification.SCOPE_EXPANSION.value,
+            FinalReviewFindingAdjudicationClassification.DUPLICATE.value,
+        }:
+            continue
+        deferred_adjudication_paths.append(adjudication_path)
     rerun_validator_evidence_paths: list[Path] = []
     if final_integration_verification_path is not None:
         rerun_validator_evidence_paths.append(final_integration_verification_path)
@@ -3856,6 +3873,7 @@ def _write_final_review_continuation_decision(
     )
     generated_repair_contract_paths = sorted((release_root / "feature_review").glob("repairs_*/*.yaml"))
     adjudication_paths = sorted({path for path in final_review_finding_adjudication_paths if path})
+    backlog_follow_up_paths = [Path(item) for item in proposal_paths] or deferred_adjudication_paths
 
     if unresolved_required and generated_repair_contract_paths:
         decision = FinalReviewContinuationDecision(
@@ -3908,7 +3926,7 @@ def _write_final_review_continuation_decision(
             rerun_validator_evidence_paths=rerun_validator_evidence_paths,
             accepted_risk_rationale="\n".join(accepted_risks),
         )
-    elif bool(finalization_gate.get("allowed")) and proposal_paths and not unresolved_required:
+    elif bool(finalization_gate.get("allowed")) and backlog_follow_up_paths and not unresolved_required:
         decision = FinalReviewContinuationDecision(
             release_id=release_id,
             outcome=FinalReviewContinuationOutcome.BACKLOG_FOLLOW_UP,
@@ -3917,7 +3935,7 @@ def _write_final_review_continuation_decision(
             final_integration_verification_path=final_integration_verification_path,
             finding_ids=list(deferred_findings),
             finding_adjudication_paths=adjudication_paths,
-            backlog_follow_up_proposal_paths=[Path(item) for item in proposal_paths],
+            backlog_follow_up_proposal_paths=backlog_follow_up_paths,
             rerun_validator_evidence_paths=rerun_validator_evidence_paths,
         )
     else:

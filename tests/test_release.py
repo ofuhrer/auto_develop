@@ -5201,6 +5201,58 @@ def test_final_review_continuation_decision_serialized_examples() -> None:
     assert hard_stop.model_dump(mode="json")["outcome"] == "hard_stop"
 
 
+def test_final_review_continuation_uses_deferred_adjudication_paths_when_proposals_missing(tmp_path: Path) -> None:
+    adjudication = FinalReviewFindingAdjudicationDecision.model_validate(
+        {
+            "decision_id": "v0.1.0__final_review_finding__scope-finding",
+            "release_id": "v0.1.0",
+            "decided_at": datetime.now(UTC),
+            "decided_by": "test",
+            "rationale": "Scope expansion should be deferred after final verification passes.",
+            "evidence_paths": [str((tmp_path / "final_integration_verification.json").resolve())],
+            "finding_id": "scope-finding",
+            "classification": "scope_expansion",
+            "selected_action": "defer",
+            "outcome": "stop",
+            "fallback_plan": "Track a follow-up release if scope is later approved.",
+            "validators_to_rerun": ["integration_verification"],
+        }
+    )
+    adjudication_path = write_supervisor_decision_artifact(
+        release_bundle_path=tmp_path,
+        decision=adjudication,
+    )
+
+    decision_path = _write_final_review_continuation_decision(
+        release_root=tmp_path,
+        release_id="v0.1.0",
+        feature_review_decision=None,
+        feature_review_path=tmp_path / "feature_review.json",
+        feature_review_recheck=FeatureReviewRecheckRecord(
+            release_id="v0.1.0",
+            unresolved_finding_ids=[],
+            resolved_finding_ids=[],
+            accepted_finding_ids=[],
+            deferred_finding_ids=["scope-finding"],
+            stop_reason="accepted_with_rationale",
+        ),
+        feature_review_recheck_path=tmp_path / "feature_review_recheck.json",
+        feature_review_proposals=[],
+        final_integration_verification_path=tmp_path / "final_integration_verification.json",
+        final_review_finding_adjudication_paths=[adjudication_path],
+        finalization_gate={
+            "allowed": True,
+            "reason": "allowed",
+            "unresolved_required_finding_ids": [],
+        },
+    )
+
+    continuation = json.loads(decision_path.read_text(encoding="utf-8"))
+    assert continuation["outcome"] == "backlog_follow_up"
+    assert continuation["backlog_follow_up_proposal_paths"] == [str(adjudication_path)]
+    assert continuation["finding_ids"] == ["scope-finding"]
+
+
 def _task_contract(
     task_id: str,
     budget_class: str = "S",
