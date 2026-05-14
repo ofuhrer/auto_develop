@@ -1295,21 +1295,29 @@ def _is_verification_only_finding(finding: FeatureReviewFinding) -> bool:
 
 
 def _is_soft_observability_finding(finding: FeatureReviewFinding) -> bool:
-    observability_markers = (
-        "observability",
-        "log",
-        "logging",
-        "metric",
-        "telemetry",
-        "trace",
-        "tracing",
-        "monitor",
-        "alert",
-        "dashboard",
+    observability_markers = frozenset(
+        {
+            "observability",
+            "telemetry",
+            "metric",
+            "metrics",
+            "trace",
+            "tracing",
+            "monitor",
+            "monitoring",
+            "alert",
+            "alerts",
+            "dashboard",
+            "dashboards",
+        }
     )
     candidate_fields = [finding.summary, *finding.optional_follow_ups, *finding.affected_files]
-    normalized = " ".join(value.lower() for value in candidate_fields if value)
-    return any(marker in normalized for marker in observability_markers)
+    normalized_tokens: set[str] = set()
+    for value in candidate_fields:
+        if not value:
+            continue
+        normalized_tokens.update(_normalized_summary_tokens(value))
+    return any(token in observability_markers for token in normalized_tokens)
 
 
 def _ensure_convergence_gate_consistency(

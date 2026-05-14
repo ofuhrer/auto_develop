@@ -768,6 +768,37 @@ def test_classify_feature_review_findings_for_convergence_soft_observability_and
     assert repeat_finding.adjacent_similarity > 0.35
 
 
+def test_classify_feature_review_findings_for_convergence_does_not_treat_log_substring_as_observability() -> None:
+    decision = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-10b",
+            "reviewer": "strong_model",
+            "summary": "Optional cleanup follow-up.",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "optional-log-1",
+                    "severity": "low",
+                    "summary": "Rename catalog helper for readability.",
+                    "affected_files": ["src/catalog.py"],
+                    "optional_follow_ups": ["Use a clearer helper name in catalog sorting path."],
+                }
+            ],
+        }
+    )
+    result = classify_feature_review_findings_for_convergence(
+        decision=decision,
+        previous_decisions=[],
+        verification_passed=True,
+    )
+
+    finding = result.findings[0]
+    assert finding.classification == "soft_finding"
+    assert finding.selected_action == "accept"
+
+
 def test_classify_feature_review_findings_for_convergence_marks_backlog_follow_up_for_new_optional_overlap() -> None:
     previous = FeatureReviewDecision.model_validate(
         {
