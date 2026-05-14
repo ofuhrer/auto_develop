@@ -118,6 +118,7 @@ from agentic_devloop.state_review import (
     collect_state_review_snapshot,
     write_state_review_snapshot_artifact,
 )
+from agentic_devloop.state_store import FinalReviewFollowUpMemoryReference, StateStore
 from agentic_devloop.yaml_io import load_yaml_model
 
 
@@ -1102,6 +1103,14 @@ def run_release(
         "event=final_review_continuation_decision path="
         + str(final_review_continuation_decision_path),
     )
+    compact_memory_path = _persist_compact_final_review_follow_up_memory(
+        config_repo_path=config.repo_path,
+        repo_state_path=config.repo_state_path,
+        release_id=release_id,
+        continuation_decision_path=final_review_continuation_decision_path,
+    )
+    if compact_memory_path is not None:
+        _report(progress, "event=repo_state_follow_up_memory path=" + str(compact_memory_path))
     if not bool(finalization_gate["allowed"]):
         _report(
             progress,
@@ -4481,6 +4490,84 @@ def _write_release_log_summary(
         file.write(payload)
     with raw_log_path.open("a", encoding="utf-8") as file:
         file.write(payload)
+
+
+_COMPACT_FINAL_FOLLOW_UP_CLASSIFICATIONS = {
+    "accepted_risk",
+    "backlog_follow_up",
+    "duplicate",
+    "false_positive",
+    "scope_expansion",
+}
+
+
+def _persist_compact_final_review_follow_up_memory(
+    *,
+    config_repo_path: Path,
+    repo_state_path: Path | None,
+    release_id: str,
+    continuation_decision_path: Path,
+) -> Path | None:
+    if repo_state_path is None or not continuation_decision_path.exists():
+        return None
+    root = repo_state_path if repo_state_path.is_absolute() else config_repo_path / repo_state_path
+    backlog_state_path = root / "backlog_state.yaml"
+    store = StateStore(backlog_state_path)
+    try:
+        continuation = FinalReviewContinuationDecision.model_validate(
+            json.loads(continuation_decision_path.read_text(encoding="utf-8"))
+        )
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+    if continuation.outcome in {FinalReviewContinuationOutcome.BLOCKER, FinalReviewContinuationOutcome.HARD_STOP}:
+        return None
+    continuation_dir = continuation_decision_path.parent
+    for adjudication_path in continuation.finding_adjudication_paths:
+        resolved_adjudication_path = (
+            adjudication_path
+            if adjudication_path.is_absolute()
+            else (continuation_dir / adjudication_path)
+        )
+        try:
+            payload = json.loads(resolved_adjudication_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        classification = str(payload.get("classification") or "").strip()
+        if classification not in _COMPACT_FINAL_FOLLOW_UP_CLASSIFICATIONS:
+            continue
+        finding_id = str(payload.get("finding_id") or "").strip()
+        rationale = str(payload.get("rationale") or "").strip()
+        if not finding_id or not rationale:
+            continue
+        evidence_paths = [
+            Path(value)
+            for value in payload.get("evidence_paths", [])
+            if isinstance(value, str) and value.strip()
+        ]
+        if classification != "false_positive" and not evidence_paths:
+            continue
+        validators_rerun = [
+            value.strip()
+            for value in payload.get("validators_to_rerun", [])
+            if isinstance(value, str) and value.strip()
+        ]
+        fallback_plan = str(payload.get("fallback_plan") or "").strip() or None
+        store.add_epic_final_review_follow_up_memory(
+            release_id,
+            FinalReviewFollowUpMemoryReference(
+                release_id=release_id,
+                finding_id=finding_id,
+                classification=classification,
+                rationale_summary=rationale,
+                evidence_paths=evidence_paths,
+                fallback_plan=fallback_plan,
+                validators_rerun=validators_rerun,
+                adjudication_artifact_path=resolved_adjudication_path,
+                continuation_decision_path=continuation_decision_path,
+                recorded_at=datetime.now(UTC),
+            ),
+        )
+    return backlog_state_path
 
 
 def _task_metrics(result: TaskRunResult, raw_log_path: Path) -> dict[str, object]:
