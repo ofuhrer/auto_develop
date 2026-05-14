@@ -9,6 +9,9 @@ from agentic_devloop.process import run_process
 
 MAX_LOG_EXCERPT_CHARS = 4000
 _VERIFICATION_ENV_VALUE_ALLOWLIST: set[str] = {"SHARED_RT"}
+_WORKTREE_PYTHON = {".venv/bin/python", "./.venv/bin/python"}
+_UNSAFE_SHELL_OPERATORS = {"|", "||", "&", "&&", ";", "<", "<<", ">", ">>"}
+_ALLOWED_ENV_PREFIX_KEYS = {"PYTHONPATH"}
 
 
 class VerificationRunner:
@@ -95,11 +98,13 @@ def rewrite_worktree_local_verification_command(command: str, *, safe_runtime: s
         return command
     if ".venv/bin/python" not in command:
         return command
+    if not is_safe_worktree_python_rewrite_command(command):
+        return command
     tokens = shlex.split(command)
     rewritten = False
     updated_tokens: list[str] = []
     for token in tokens:
-        if token in {".venv/bin/python", "./.venv/bin/python"}:
+        if token in _WORKTREE_PYTHON:
             updated_tokens.append(safe_runtime)
             rewritten = True
             continue
@@ -107,6 +112,36 @@ def rewrite_worktree_local_verification_command(command: str, *, safe_runtime: s
     if not rewritten:
         return command
     return shlex.join(updated_tokens)
+
+
+def is_safe_worktree_python_rewrite_command(command: str) -> bool:
+    if "$(" in command or "`" in command:
+        return False
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return False
+    if not tokens:
+        return False
+    if any(token in _UNSAFE_SHELL_OPERATORS for token in tokens):
+        return False
+    python_token_index = 0
+    while python_token_index < len(tokens) and _is_allowed_env_assignment_token(tokens[python_token_index]):
+        python_token_index += 1
+    if python_token_index >= len(tokens):
+        return False
+    return tokens[python_token_index] in _WORKTREE_PYTHON
+
+
+def _is_allowed_env_assignment_token(token: str) -> bool:
+    if "=" not in token:
+        return False
+    key, value = token.split("=", 1)
+    if not key or value == "":
+        return False
+    if key not in _ALLOWED_ENV_PREFIX_KEYS:
+        return False
+    return key.replace("_", "").isalnum() and key[0].isalpha()
 
 
 def _render_env_additions(env_additions: dict[str, str]) -> str:

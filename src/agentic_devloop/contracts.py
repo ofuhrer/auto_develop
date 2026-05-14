@@ -16,7 +16,10 @@ from agentic_devloop.models import (
     ProjectConfig,
     TaskContract,
 )
-from agentic_devloop.verification import rewrite_worktree_local_verification_command
+from agentic_devloop.verification import (
+    is_safe_worktree_python_rewrite_command,
+    rewrite_worktree_local_verification_command,
+)
 
 
 _REQUIRED_EVIDENCE_ITEMS = ("git diff", "changed-files list")
@@ -28,8 +31,6 @@ _TASK_KEY_ALIASES = {
     "dependsOn": "depends_on",
 }
 _WORKTREE_PYTHON = {".venv/bin/python", "./.venv/bin/python"}
-_UNSAFE_SHELL_OPERATORS = {"|", "||", "&", "&&", ";", "<", "<<", ">", ">>"}
-_ALLOWED_ENV_PREFIX_KEYS = {"PYTHONPATH"}
 
 
 def normalize_contract_request(
@@ -117,35 +118,7 @@ def _contains_local_worktree_python_token(command: str) -> bool:
 
 
 def _is_safe_worktree_python_invocation(command: str) -> bool:
-    if "$(" in command or "`" in command:
-        return False
-    try:
-        tokens = shlex.split(command)
-    except ValueError:
-        return False
-    if not tokens:
-        return False
-    if any(token in _UNSAFE_SHELL_OPERATORS for token in tokens):
-        return False
-    python_token_index = 0
-    while python_token_index < len(tokens) and _is_allowed_env_assignment_token(tokens[python_token_index]):
-        python_token_index += 1
-    if python_token_index >= len(tokens):
-        return False
-    if tokens[python_token_index] not in _WORKTREE_PYTHON:
-        return False
-    return True
-
-
-def _is_allowed_env_assignment_token(token: str) -> bool:
-    if "=" not in token:
-        return False
-    key, value = token.split("=", 1)
-    if not key or value == "":
-        return False
-    if key not in _ALLOWED_ENV_PREFIX_KEYS:
-        return False
-    return key.replace("_", "").isalnum() and key[0].isalpha()
+    return is_safe_worktree_python_rewrite_command(command)
 
 
 def normalize_task_contract_payload(
