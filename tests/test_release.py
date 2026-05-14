@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import yaml
 import pytest
+from pydantic import ValidationError
 
 from agentic_devloop.git_finalize import FinalizeResult
 from agentic_devloop.models import (
@@ -409,6 +410,28 @@ def test_executor_configs_for_task_includes_fallback_models() -> None:
         "fallback",
         "fallback-2",
     ]
+
+
+@pytest.mark.parametrize("invalid_limit", [0, -1])
+def test_project_config_rejects_non_positive_feature_review_convergence_limit(invalid_limit: int) -> None:
+    with pytest.raises(ValidationError, match="feature_review_max_repair_loops"):
+        ProjectConfig.model_validate(
+            {
+                "project_id": "demo",
+                "repo_path": "/tmp/demo",
+                "default_base_branch": "main",
+                "worktree_root": "/tmp/worktrees",
+                "executor": {"type": "codex_cli", "model": "fallback", "max_walltime_minutes": 5},
+                "verification_profiles": {"default": {"commands": ["true"]}},
+                "feature_review_max_repair_loops": invalid_limit,
+                "budget": {
+                    "max_executor_attempts_per_task": 2,
+                    "max_strong_model_calls_per_release": 10,
+                    "max_changed_files_per_task": 8,
+                    "max_diff_lines_per_task": 600,
+                },
+            }
+        )
 
 
 def test_run_release_executes_ordered_contracts_and_writes_summary(tmp_path) -> None:
