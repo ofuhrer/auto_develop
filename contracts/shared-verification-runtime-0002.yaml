@@ -41,5 +41,4 @@ fixture_changes_allowed: false
 tolerance_changes_allowed: false
 benchmark_delta_required: false
 remote_dispatch: null
-depends_on:
-- shared-verification-runtime-0001
+depends_on: []
