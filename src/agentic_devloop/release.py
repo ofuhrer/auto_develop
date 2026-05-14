@@ -2372,6 +2372,35 @@ def _run_feature_review_and_repair_loop(
             if isinstance(log_path, str) and log_path.strip():
                 last_verification_log_path = Path(log_path)
 
+            missing_release_evidence: list[str] = []
+            if feature_review_path is None or not feature_review_path.exists():
+                missing_release_evidence.append("feature_review.json")
+            if final_integration_verification_path is None or not final_integration_verification_path.exists():
+                missing_release_evidence.append("final_integration_verification.json")
+            if last_verification_log_path is None or not last_verification_log_path.exists():
+                missing_release_evidence.append("verification.log")
+            if missing_release_evidence:
+                _report(
+                    progress,
+                    "event=final_review_missing_release_evidence artifacts="
+                    + json.dumps(sorted(set(missing_release_evidence)), sort_keys=True),
+                )
+                gating_decision = Decision.ESCALATED
+                sentinel_ids = [
+                    f"{release_id}:missing_release_evidence:{item}"
+                    for item in sorted(set(missing_release_evidence))
+                ]
+                feature_review_recheck = FeatureReviewRecheckRecord(
+                    release_id=release_id,
+                    unresolved_finding_ids=sentinel_ids,
+                    resolved_finding_ids=[],
+                    accepted_finding_ids=[],
+                    deferred_finding_ids=[],
+                    stop_reason="blocked_by_hard_gate",
+                )
+                feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
+                return build_result()
+
             accepted_optional_ids, deferred_optional_ids = optional_recheck_ids()
             accepted_required_ids = (
                 {
@@ -2498,10 +2527,17 @@ def _run_feature_review_and_repair_loop(
                     deferred_ids.append(finding_id)
 
             if malformed_ids:
+                _report(
+                    progress,
+                    "event=final_review_schema_invalid_reviewer_output finding_ids="
+                    + json.dumps(sorted(set(malformed_ids)), sort_keys=True),
+                )
                 gating_decision = Decision.ESCALATED
+                unresolved_payload = sorted(set(unresolved_ids or malformed_ids))
+                unresolved_payload.insert(0, f"{release_id}:schema_invalid_reviewer_output")
                 feature_review_recheck = FeatureReviewRecheckRecord(
                     release_id=release_id,
-                    unresolved_finding_ids=sorted(set(unresolved_ids or malformed_ids)),
+                    unresolved_finding_ids=unresolved_payload,
                     resolved_finding_ids=[],
                     accepted_finding_ids=sorted(set(accepted_ids) | set(accepted_optional_ids)),
                     deferred_finding_ids=sorted(set(deferred_ids) | set(deferred_optional_ids)),
@@ -2820,7 +2856,11 @@ def _normalize_feature_review_model_output_if_needed(
             normalized_artifact_path=None,
             refusal_reason=refusal_reason or "Reviewer output normalization refused by bounded policy.",
         )
-        _report(progress, "event=feature_review_output_normalization_refused reason=bounded_policy")
+        refusal_text = (refusal_reason or "").lower()
+        if "missing required release evidence artifacts" in refusal_text:
+            _report(progress, "event=feature_review_output_normalization_refused reason=missing_release_evidence")
+        else:
+            _report(progress, "event=feature_review_output_normalization_refused reason=schema_invalid_reviewer_output")
         return fallback_decision, decision_path, None
 
     try:
@@ -2981,7 +3021,38 @@ def _bounded_normalize_feature_review_payload(
             derived = _derive_feature_review_evidence_paths(finding_payload=finding_payload, context=context)
             if not derived:
                 finding_id = str(finding_payload.get("finding_id", "<unknown>"))
-                return None, f"finding {finding_id} has empty evidence_paths that are not derivable from release evidence."
+                missing_release_artifacts: list[str] = []
+                for label, candidate in (
+                    ("release_summary_path", getattr(context, "release_summary_path", None)),
+                    ("release_review_path", getattr(context, "release_review_path", None)),
+                    ("release_metrics_path", getattr(context, "release_metrics_path", None)),
+                    ("release_budget_path", getattr(context, "release_budget_path", None)),
+                    ("release_tuning_path", getattr(context, "release_tuning_path", None)),
+                    ("final_integration_verification_path", getattr(context, "final_integration_verification_path", None)),
+                    (
+                        "final_integration_verification_log_path",
+                        getattr(context, "final_integration_verification_log_path", None),
+                    ),
+                ):
+                    if candidate is None:
+                        missing_release_artifacts.append(label)
+                        continue
+                    try:
+                        exists = bool(getattr(candidate, "exists", None) and candidate.exists())
+                    except Exception:  # noqa: BLE001 - release evidence must be treated conservatively.
+                        exists = False
+                    if not exists:
+                        missing_release_artifacts.append(label)
+                missing_hint = (
+                    "; missing_release_evidence_artifacts=" + ", ".join(sorted(set(missing_release_artifacts)))
+                    if missing_release_artifacts
+                    else ""
+                )
+                return (
+                    None,
+                    "missing required release evidence artifacts to derive reviewer finding evidence_paths "
+                    f"for finding {finding_id}{missing_hint}",
+                )
             finding_payload["evidence_paths"] = derived
         normalized_findings.append(finding_payload)
     normalized_findings.extend(_normalize_feature_review_limitations(payload=normalized, context=context))
@@ -3907,16 +3978,22 @@ def _write_final_review_continuation_decision(
             hard_stop_reason="missing_generated_repair_contracts",
         )
     elif feature_review_recheck is not None and feature_review_recheck.stop_reason == "blocked_by_hard_gate":
+        hard_stop_reason = "blocked_by_hard_gate"
+        unresolved = list(feature_review_recheck.unresolved_finding_ids)
+        if any(item.startswith(f"{release_id}:missing_release_evidence:") for item in unresolved):
+            hard_stop_reason = "missing_release_evidence"
+        elif f"{release_id}:schema_invalid_reviewer_output" in unresolved:
+            hard_stop_reason = "schema_invalid_reviewer_output"
         decision = FinalReviewContinuationDecision(
             release_id=release_id,
             outcome=FinalReviewContinuationOutcome.HARD_STOP,
             feature_review_path=feature_review_path,
             feature_review_recheck_path=feature_review_recheck_path,
             final_integration_verification_path=final_integration_verification_path,
-            finding_ids=list(feature_review_recheck.unresolved_finding_ids),
+            finding_ids=unresolved,
             finding_adjudication_paths=adjudication_paths,
             generated_repair_contract_paths=generated_repair_contract_paths,
-            hard_stop_reason="blocked_by_hard_gate",
+            hard_stop_reason=hard_stop_reason,
         )
     elif (
         feature_review_recheck is not None
