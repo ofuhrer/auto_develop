@@ -4,8 +4,245 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from agentic_devloop.models import StateRefreshSummary, StateReviewSnapshot
+from agentic_devloop.models import ReleaseObjective, StateRefreshSummary, StateReviewSnapshot
 from agentic_devloop.process import run_process
+from agentic_devloop.yaml_io import load_yaml_model
+
+
+def write_state_review_context_bundle(
+    *,
+    snapshot: StateReviewSnapshot,
+    state_review_snapshot_path: Path,
+    runs_dir: Path,
+    artifacts_dir: Path,
+    objective_path: Path | None = None,
+    max_chars: int = 50_000,
+    now: datetime | None = None,
+) -> tuple[Path, Path]:
+    """Persist a state-review-phase context bundle + manifest next to snapshot artifacts."""
+
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = artifacts_dir / "state_review_context_bundle.md"
+    manifest_path = artifacts_dir / "state_review_context_manifest.json"
+
+    included_categories: list[str] = []
+    omitted_categories: list[str] = []
+    truncation_records: list[dict[str, object]] = []
+    artifact_paths: dict[str, list[str]] = {}
+
+    remaining = max(0, int(max_chars))
+    sections: list[str] = []
+
+    def append_category(*, name: str, content: str, sources: list[Path]) -> None:
+        nonlocal remaining
+        if remaining <= 0:
+            omitted_categories.append(name)
+            return
+        if len(content) <= remaining:
+            sections.append(content)
+            remaining -= len(content)
+            included_categories.append(name)
+            artifact_paths[name] = [str(path.resolve()) for path in sources]
+            return
+        included = content[:remaining]
+        sections.append(included)
+        truncation_records.append(
+            {
+                "category": name,
+                "source_path": str(sources[0].resolve()) if sources else None,
+                "original_chars": len(content),
+                "included_chars": len(included),
+                "omitted_chars": len(content) - len(included),
+            }
+        )
+        remaining = 0
+        included_categories.append(name)
+        artifact_paths[name] = [str(path.resolve()) for path in sources]
+
+    created_at = now or datetime.now(UTC)
+    objective: ReleaseObjective | None = None
+    if objective_path is not None and objective_path.exists():
+        objective = load_yaml_model(objective_path, ReleaseObjective)
+        objective_payload = json.dumps(objective.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"
+        append_category(
+            name="objective",
+            content=(
+                "\n".join(
+                    [
+                        "## Release Objective",
+                        "",
+                        f"objective_path={objective_path.resolve()}",
+                        "",
+                        f"```json\n{objective_payload}```",
+                        "",
+                    ]
+                )
+            ),
+            sources=[objective_path],
+        )
+    else:
+        omitted_categories.append("objective")
+
+    snapshot_payload = json.dumps(snapshot.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"
+    append_category(
+        name="state_review_snapshot",
+        content=(
+            "\n".join(
+                [
+                    "## State Review Snapshot",
+                    "",
+                    f"snapshot_path={state_review_snapshot_path.resolve()}",
+                    "",
+                    f"```json\n{snapshot_payload}```",
+                    "",
+                ]
+            )
+        ),
+        sources=[state_review_snapshot_path],
+    )
+
+    repo_state_paths: list[Path] = []
+    for key in (
+        "architecture_summary",
+        "active_constraints",
+        "backlog_state",
+        "release_plan",
+        "benchmark_status",
+    ):
+        raw_path = snapshot.repo_state_files.get(key)
+        if isinstance(raw_path, str) and raw_path.strip():
+            repo_state_paths.append(Path(raw_path))
+
+    if repo_state_paths:
+        pieces: list[str] = []
+        per_file_cap = 12_000
+        for path in repo_state_paths:
+            try:
+                content = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            snippet = content
+            if len(snippet) > per_file_cap:
+                snippet = snippet[:per_file_cap]
+                truncation_records.append(
+                    {
+                        "category": "repo_state_memory",
+                        "source_path": str(path.resolve()),
+                        "original_chars": len(content),
+                        "included_chars": len(snippet),
+                        "omitted_chars": len(content) - len(snippet),
+                    }
+                )
+            pieces.append(f"### {path.name}\n\n```\n{snippet.rstrip()}\n```\n")
+        if pieces:
+            append_category(
+                name="repo_state_memory",
+                content=("\n".join(["## Repo-State Memory", "", "\n".join(pieces).rstrip(), ""]) + "\n"),
+                sources=repo_state_paths,
+            )
+        else:
+            omitted_categories.append("repo_state_memory")
+    else:
+        omitted_categories.append("repo_state_memory")
+
+    metric_paths: list[Path] = []
+    finding_paths: list[Path] = []
+    for run_name in list(snapshot.recent_release_runs)[:3]:
+        run_dir = runs_dir / run_name
+        if not run_dir.is_dir():
+            continue
+        metrics = run_dir / "release_metrics.json"
+        if metrics.exists():
+            metric_paths.append(metrics)
+        for candidate in (
+            run_dir / "release_review.md",
+            run_dir / "feature_review.json",
+            run_dir / "feature_review_recheck.json",
+        ):
+            if candidate.exists():
+                finding_paths.append(candidate)
+
+    if metric_paths:
+        pieces: list[str] = []
+        for path in metric_paths:
+            try:
+                content = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            pieces.append(f"### {path.parent.name}/{path.name}\n\n```json\n{content.rstrip()}\n```\n")
+        if pieces:
+            append_category(
+                name="recent_metrics",
+                content=("\n".join(["## Recent Metrics", "", "\n".join(pieces).rstrip(), ""]) + "\n"),
+                sources=metric_paths,
+            )
+        else:
+            omitted_categories.append("recent_metrics")
+    else:
+        omitted_categories.append("recent_metrics")
+
+    if finding_paths:
+        pieces: list[str] = []
+        per_file_cap = 10_000
+        for path in finding_paths:
+            try:
+                content = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            snippet = content
+            if len(snippet) > per_file_cap:
+                snippet = snippet[:per_file_cap]
+                truncation_records.append(
+                    {
+                        "category": "prior_findings",
+                        "source_path": str(path.resolve()),
+                        "original_chars": len(content),
+                        "included_chars": len(snippet),
+                        "omitted_chars": len(content) - len(snippet),
+                    }
+                )
+            fence = "json" if path.suffix == ".json" else ""
+            pieces.append(f"### {path.parent.name}/{path.name}\n\n```{fence}\n{snippet.rstrip()}\n```\n")
+        if pieces:
+            append_category(
+                name="prior_findings",
+                content=("\n".join(["## Prior Findings", "", "\n".join(pieces).rstrip(), ""]) + "\n"),
+                sources=finding_paths,
+            )
+        else:
+            omitted_categories.append("prior_findings")
+    else:
+        omitted_categories.append("prior_findings")
+
+    bundle_text = "\n".join(["# State-Review Context Bundle", "", *sections]).rstrip() + "\n"
+    bundle_path.write_text(bundle_text, encoding="utf-8")
+
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "phase": "state_review",
+                "created_at": created_at.isoformat().replace("+00:00", "Z"),
+                "created_by": "state_review",
+                "release_id": objective.release_id if objective is not None else None,
+                "max_chars": int(max_chars),
+                "included_categories": included_categories,
+                "omitted_categories": sorted(set(omitted_categories)),
+                "total_chars_included": len(bundle_text),
+                "total_chars_omitted": sum(int(record.get("omitted_chars", 0)) for record in truncation_records),
+                "truncation_records": truncation_records,
+                "artifact_paths": artifact_paths,
+                "bundle_path": str(bundle_path.resolve()),
+                "state_review_snapshot_path": str(state_review_snapshot_path.resolve()),
+                "objective_path": str(objective_path.resolve()) if objective_path is not None else None,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return bundle_path, manifest_path
 
 
 def collect_state_review_snapshot(

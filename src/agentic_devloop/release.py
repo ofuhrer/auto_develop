@@ -123,6 +123,7 @@ from agentic_devloop.supervisor_decisions import (
 )
 from agentic_devloop.state_review import (
     collect_state_review_snapshot,
+    write_state_review_context_bundle,
     write_state_review_snapshot_artifact,
 )
 from agentic_devloop.state_store import FinalReviewFollowUpMemoryReference, StateStore
@@ -1647,6 +1648,8 @@ def collect_release_planning_state_review_snapshot(
     repo_state_path: Path | None,
     runs_dir: Path,
     planning_artifacts_dir: Path,
+    objective_path: Path | None = None,
+    context_bundle_max_chars: int = 50_000,
     now: datetime | None = None,
 ) -> Path:
     if not planning_artifacts_dir.exists():
@@ -1659,10 +1662,21 @@ def collect_release_planning_state_review_snapshot(
         runs_dir=runs_dir,
         now=now,
     )
-    return write_state_review_snapshot_artifact(
+    snapshot_path = write_state_review_snapshot_artifact(
         snapshot=snapshot,
         artifacts_dir=planning_artifacts_dir,
     )
+
+    write_state_review_context_bundle(
+        snapshot=snapshot,
+        state_review_snapshot_path=snapshot_path,
+        runs_dir=runs_dir,
+        artifacts_dir=planning_artifacts_dir,
+        objective_path=objective_path,
+        max_chars=context_bundle_max_chars,
+        now=now,
+    )
+    return snapshot_path
 
 
 def _run_release_sequential(
