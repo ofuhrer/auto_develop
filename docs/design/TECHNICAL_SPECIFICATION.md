@@ -614,6 +614,7 @@ The supervisor should classify executor state as:
 - `environment_blocked`: command/runtime/dependency unavailable under current worktree.
 
 For `environment_blocked`, the preferred repair is policy-driven command/runtime normalization. Worktrees should not be required to contain their own `.venv`. Project config should define a shared verification runtime or command wrapper, and verification should inject `PYTHONPATH=<worktree>/src` while using the configured Python executable. A repair may rewrite `.venv/bin/python` inside a worktree to the configured shared runtime only when project policy permits it, and must record the original command, repaired command, reason, and retry result.
+When rendering verification metadata, `verification.log` must not expose sensitive runtime environment values; by default values are redacted and only explicitly allowlisted keys may render plaintext values.
 
 ### `plan-backlog` Flow
 

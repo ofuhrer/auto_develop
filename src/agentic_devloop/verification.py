@@ -8,6 +8,7 @@ from agentic_devloop.process import run_process
 
 
 MAX_LOG_EXCERPT_CHARS = 4000
+_VERIFICATION_ENV_VALUE_ALLOWLIST: set[str] = {"SHARED_RT"}
 
 
 class VerificationRunner:
@@ -111,7 +112,12 @@ def rewrite_worktree_local_verification_command(command: str, *, safe_runtime: s
 def _render_env_additions(env_additions: dict[str, str]) -> str:
     if not env_additions:
         return "<none>"
-    items = [f"{key}={value}" for key, value in sorted(env_additions.items())]
+    items = []
+    for key, value in sorted(env_additions.items()):
+        if key in _VERIFICATION_ENV_VALUE_ALLOWLIST:
+            items.append(f"{key}={value}")
+            continue
+        items.append(f"{key}=<redacted>")
     return ", ".join(items)
 
 
