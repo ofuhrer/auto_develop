@@ -65,13 +65,13 @@ types that carry release-local review convergence behavior:
 Blocker findings keep the release blocked until they are resolved or the hard
 policy, retry budget, or credentials require escalation. Soft findings and
 false-positive or verification-only findings can continue the release with
-explicit rationale after the final verification rerun passes. Duplicate,
+explicit rationale only after the final verification rerun passes. Duplicate,
 scope-expansion, and backlog-follow-up findings are deferred, non-blocking
 classifications. They are written to `deferred_finding_ids` in
-`feature_review_recheck.json` and to typed supervisor decision artifacts with
-`selected_action=defer`; they are not `accepted_finding_ids`. Accepted IDs are
-reserved for the soft and false-positive adjudications that continue the
-release with explicit rationale.
+`feature_review_recheck.json` and to typed supervisor decision artifacts under
+`runs/<run-id>/supervisor_decisions/` with `selected_action=defer`; they are not
+`accepted_finding_ids`. Accepted IDs are reserved for the soft and
+false-positive adjudications that continue the release with explicit rationale.
 
 ## Artifact Layout
 

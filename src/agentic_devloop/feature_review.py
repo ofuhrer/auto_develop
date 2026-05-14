@@ -78,6 +78,7 @@ class FeatureReviewBackendResult:
 FeatureReviewFindingClassification = Literal[
     "blocker",
     "soft_finding",
+    "soft_observability",
     "duplicate",
     "false_positive",
     "scope_expansion",
@@ -593,21 +594,22 @@ def classify_feature_review_findings_for_convergence(
     classified: list[FeatureReviewFindingConvergenceResult] = []
     required_repair_ids: set[str] = set()
     for finding in decision.findings:
-        if not finding.required_repairs and not finding.optional_follow_ups:
+        required_repairs = _effective_required_repairs(finding.required_repairs)
+        if not required_repairs and not finding.optional_follow_ups:
             raise FeatureReviewClassificationError(
                 "feature review finding "
                 f"{finding.finding_id} must include required_repairs or optional_follow_ups"
             )
-        if finding.required_repairs:
+        if required_repairs:
             required_repair_ids.add(finding.finding_id)
         previous_match, repeated_by_id, adjacent_similarity = _match_previous_finding(
             finding=finding,
             previous_findings=previous_findings,
         )
         verification_false_positive_candidate = (
-            verification_passed and bool(finding.required_repairs) and _is_verification_only_finding(finding)
+            verification_passed and bool(required_repairs) and _is_verification_only_finding(finding)
         )
-        if finding.required_repairs:
+        if required_repairs:
             result = FeatureReviewFindingConvergenceResult(
                 finding_id=finding.finding_id,
                 classification="blocker",
@@ -653,10 +655,13 @@ def classify_feature_review_findings_for_convergence(
                     )
                 )
                 continue
+            classification: FeatureReviewFindingClassification = "soft_finding"
+            if _is_soft_observability_finding(finding):
+                classification = "soft_observability"
             classified.append(
                 FeatureReviewFindingConvergenceResult(
                     finding_id=finding.finding_id,
-                    classification="soft_finding",
+                    classification=classification,
                     selected_action="accept",
                     matched_previous_finding_id=None,
                     repeated_by_finding_id=False,
@@ -688,6 +693,24 @@ def classify_feature_review_findings_for_convergence(
             item.finding_id for item in classified if item.verification_false_positive_candidate
         ),
     )
+
+
+def _effective_required_repairs(required_repairs: list[str]) -> list[str]:
+    no_op_prefixes = (
+        "none",
+        "no repair",
+        "no required repair",
+        "not required",
+    )
+    effective: list[str] = []
+    for repair in required_repairs:
+        normalized = repair.strip().lower()
+        if not normalized:
+            continue
+        if any(normalized.startswith(prefix) for prefix in no_op_prefixes):
+            continue
+        effective.append(repair)
+    return effective
 
 
 def _repair_scope_finding(finding: FeatureReviewFinding) -> FeatureReviewFinding:
@@ -1288,6 +1311,32 @@ def _is_verification_only_finding(finding: FeatureReviewFinding) -> bool:
         return False
     verification_markers = ("verification", "pytest", "test", "junit")
     return all(any(marker in str(path).lower() for marker in verification_markers) for path in finding.evidence_paths)
+
+
+def _is_soft_observability_finding(finding: FeatureReviewFinding) -> bool:
+    observability_markers = frozenset(
+        {
+            "observability",
+            "telemetry",
+            "metric",
+            "metrics",
+            "trace",
+            "tracing",
+            "monitor",
+            "monitoring",
+            "alert",
+            "alerts",
+            "dashboard",
+            "dashboards",
+        }
+    )
+    candidate_fields = [finding.summary, *finding.optional_follow_ups, *finding.affected_files]
+    normalized_tokens: set[str] = set()
+    for value in candidate_fields:
+        if not value:
+            continue
+        normalized_tokens.update(_normalized_summary_tokens(value))
+    return any(token in observability_markers for token in normalized_tokens)
 
 
 def _ensure_convergence_gate_consistency(

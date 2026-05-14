@@ -2430,7 +2430,7 @@ def _run_feature_review_and_repair_loop(
                 feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
                 return build_result()
 
-            accepted_optional_ids, deferred_optional_ids = optional_recheck_ids()
+            accepted_optional_ids, deferred_optional_ids = optional_recheck_ids() if last_verification_ok else ([], [])
             accepted_required_ids = (
                 {
                     finding.finding_id
@@ -2469,6 +2469,10 @@ def _run_feature_review_and_repair_loop(
                     outcome = FinalReviewFindingAdjudicationOutcome.CONTINUE
                 elif raw_classification == "soft_finding":
                     classification = FinalReviewFindingAdjudicationClassification.ACCEPTED_RISK
+                    selected_action = FinalReviewFindingAdjudicationAction.ACCEPT
+                    outcome = FinalReviewFindingAdjudicationOutcome.CONTINUE
+                elif raw_classification == "soft_observability":
+                    classification = FinalReviewFindingAdjudicationClassification.SOFT_OBSERVABILITY
                     selected_action = FinalReviewFindingAdjudicationAction.ACCEPT
                     outcome = FinalReviewFindingAdjudicationOutcome.CONTINUE
                 elif raw_classification == "false_positive":
@@ -2516,6 +2520,7 @@ def _run_feature_review_and_repair_loop(
                         FinalReviewFindingAdjudicationClassification.SCOPE_EXPANSION,
                         FinalReviewFindingAdjudicationClassification.DUPLICATE,
                         FinalReviewFindingAdjudicationClassification.FALSE_POSITIVE,
+                        FinalReviewFindingAdjudicationClassification.SOFT_OBSERVABILITY,
                         FinalReviewFindingAdjudicationClassification.VERIFICATION_ONLY,
                     }
                     and not evidence_paths
@@ -4116,6 +4121,12 @@ def _write_release_summary(
     summary_dir = runs_dir / run_id
     summary_dir.mkdir(parents=True, exist_ok=True)
     summary_path = summary_dir / "release_summary.json"
+    final_review_continuation_payload = _read_json_object(final_review_continuation_decision_path)
+    final_review_outcome = final_review_continuation_payload.get("outcome")
+    final_review_finding_ids = final_review_continuation_payload.get("finding_ids")
+    final_review_adjudication_paths = final_review_continuation_payload.get("finding_adjudication_paths")
+    final_review_backlog_follow_up_paths = final_review_continuation_payload.get("backlog_follow_up_proposal_paths")
+    final_review_hard_stop_reason = final_review_continuation_payload.get("hard_stop_reason")
     summary = {
         "run_id": run_id,
         "release_id": release_id,
@@ -4144,6 +4155,27 @@ def _write_release_summary(
             str(feature_review_normalized_artifact_path) if feature_review_normalized_artifact_path else None
         ),
         "final_review_continuation_decision_path": str(final_review_continuation_decision_path),
+        "final_review_continuation_outcome": final_review_outcome if isinstance(final_review_outcome, str) else None,
+        "final_review_continuation_finding_ids": (
+            [str(item) for item in final_review_finding_ids if str(item).strip()]
+            if isinstance(final_review_finding_ids, list)
+            else []
+        ),
+        "final_review_finding_adjudication_paths": (
+            [str(item) for item in final_review_adjudication_paths if str(item).strip()]
+            if isinstance(final_review_adjudication_paths, list)
+            else []
+        ),
+        "final_review_backlog_follow_up_paths": (
+            [str(item) for item in final_review_backlog_follow_up_paths if str(item).strip()]
+            if isinstance(final_review_backlog_follow_up_paths, list)
+            else []
+        ),
+        "final_review_hard_stop_reason": (
+            str(final_review_hard_stop_reason).strip()
+            if isinstance(final_review_hard_stop_reason, str) and final_review_hard_stop_reason.strip()
+            else None
+        ),
         "finalization_gate": finalization_gate,
         "finalization_decision_path": str(finalization_decision_path) if finalization_decision_path else None,
         "integration_branch": integration_branch,
@@ -4300,6 +4332,18 @@ def _write_release_review(
         if feature_review_recheck is not None and feature_review_recheck.stop_reason is not None:
             lines.append(f"- Recheck status: `{feature_review_recheck.stop_reason}`")
         lines.append(f"- Continuation decision artifact: `{final_review_continuation_decision_path}`")
+        continuation_payload = _read_json_object(final_review_continuation_decision_path)
+        continuation_outcome = continuation_payload.get("outcome")
+        if isinstance(continuation_outcome, str) and continuation_outcome.strip():
+            lines.append(f"- Final review continuation outcome: `{continuation_outcome}`")
+        continuation_hard_stop = continuation_payload.get("hard_stop_reason")
+        if isinstance(continuation_hard_stop, str) and continuation_hard_stop.strip():
+            lines.append(f"- Final review hard-stop reason: `{continuation_hard_stop}`")
+        adjudication_paths = continuation_payload.get("finding_adjudication_paths")
+        if isinstance(adjudication_paths, list):
+            cleaned_adjudication_paths = [str(item) for item in adjudication_paths if str(item).strip()]
+            lines.append(f"- Final review adjudication artifacts: `{len(cleaned_adjudication_paths)}`")
+            lines.extend(f"- `{path}`" for path in cleaned_adjudication_paths)
         lines.append(
             "- The continuation decision artifact links the final verification evidence, repair contracts, "
             "and backlog follow-up proposal paths."
@@ -4637,6 +4681,7 @@ def _write_release_log_summary(
 
 _COMPACT_FINAL_FOLLOW_UP_CLASSIFICATIONS = {
     "accepted_risk",
+    "soft_observability",
     "backlog_follow_up",
     "duplicate",
     "false_positive",

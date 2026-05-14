@@ -10,6 +10,7 @@ from pydantic import Field
 from agentic_devloop.models import StrictModel
 from agentic_devloop.state_store import (
     EpicRefreshOutcome,
+    FinalReviewFollowUpMemoryReference,
     FinalizationOutcomeReference,
     OutcomeReference,
     UnresolvedFindingReference,
@@ -48,6 +49,7 @@ class PostCycleStateRefreshArtifact(StrictModel):
     repair_count: int | None = Field(default=None, ge=0)
     next_recommendations: list[str] = Field(default_factory=list)
     unresolved_finding_references: list[UnresolvedFindingReference] = Field(default_factory=list)
+    final_review_follow_up_memories: list[FinalReviewFollowUpMemoryReference] = Field(default_factory=list)
 
 
 def build_post_cycle_state_refresh(
@@ -67,6 +69,10 @@ def build_post_cycle_state_refresh(
     review_payload = _load_json_mapping(review_path)
     recheck_payload = _load_json_mapping(recheck_path)
     review_finding_summaries = _review_finding_summaries(review_payload)
+    final_review_follow_up_memories = _final_review_follow_up_memories(
+        summary_payload=summary_payload,
+        release_id=result.release_id,
+    )
 
     decision = _release_decision_value(result.release)
     unresolved_ids = _unresolved_finding_ids(
@@ -116,6 +122,7 @@ def build_post_cycle_state_refresh(
         outcome_references=[outcome_reference],
         finalization_outcome_references=[finalization_reference],
         unresolved_finding_references=unresolved_refs,
+        final_review_follow_up_memories=final_review_follow_up_memories,
     )
     refresh_artifact = PostCycleStateRefreshArtifact(
         captured_at=captured_at,
@@ -140,6 +147,7 @@ def build_post_cycle_state_refresh(
         repair_count=repair_count,
         next_recommendations=recommendation,
         unresolved_finding_references=unresolved_refs,
+        final_review_follow_up_memories=final_review_follow_up_memories,
     )
     return refresh_artifact, refresh_outcome
 
@@ -340,6 +348,85 @@ def _review_finding_summaries(review_payload: dict[str, object]) -> list[str]:
         if summary:
             summaries.append(summary)
     return summaries
+
+
+_FINAL_REVIEW_FOLLOW_UP_CLASSIFICATIONS = {
+    "accepted_risk",
+    "soft_observability",
+    "backlog_follow_up",
+    "duplicate",
+    "false_positive",
+    "verification_only",
+    "scope_expansion",
+}
+
+
+def _final_review_follow_up_memories(
+    *,
+    summary_payload: dict[str, object],
+    release_id: str,
+) -> list[FinalReviewFollowUpMemoryReference]:
+    continuation_path = _path_from_payload(summary_payload, "final_review_continuation_decision_path")
+    if continuation_path is None:
+        return []
+    continuation_payload = _load_json_mapping(continuation_path)
+    if not continuation_payload:
+        return []
+    outcome = str(continuation_payload.get("outcome") or "").strip()
+    if outcome in {"blocker", "hard_stop"}:
+        return []
+    adjudication_values = continuation_payload.get("finding_adjudication_paths")
+    if not isinstance(adjudication_values, list):
+        return []
+
+    continuation_dir = continuation_path.parent if continuation_path is not None else Path(".")
+    memories: list[FinalReviewFollowUpMemoryReference] = []
+    for value in adjudication_values:
+        raw_path = str(value).strip()
+        if not raw_path:
+            continue
+        adjudication_path = Path(raw_path)
+        if not adjudication_path.is_absolute():
+            adjudication_path = continuation_dir / adjudication_path
+        payload = _load_json_mapping(adjudication_path)
+        if not payload:
+            continue
+        classification = str(payload.get("classification") or "").strip()
+        if classification not in _FINAL_REVIEW_FOLLOW_UP_CLASSIFICATIONS:
+            continue
+        finding_id = str(payload.get("finding_id") or "").strip()
+        rationale = str(payload.get("rationale") or "").strip()
+        if not finding_id or not rationale:
+            continue
+        evidence_values = payload.get("evidence_paths")
+        evidence_paths = (
+            [Path(str(item)) for item in evidence_values if str(item).strip()]
+            if isinstance(evidence_values, list)
+            else []
+        )
+        if not evidence_paths:
+            continue
+        validators_to_rerun = payload.get("validators_to_rerun")
+        validators_rerun = (
+            [str(item).strip() for item in validators_to_rerun if str(item).strip()]
+            if isinstance(validators_to_rerun, list)
+            else []
+        )
+        fallback_plan = str(payload.get("fallback_plan") or "").strip() or None
+        memories.append(
+            FinalReviewFollowUpMemoryReference(
+                release_id=release_id,
+                finding_id=finding_id,
+                classification=classification,
+                rationale_summary=rationale,
+                evidence_paths=evidence_paths,
+                fallback_plan=fallback_plan,
+                validators_rerun=validators_rerun,
+                adjudication_artifact_path=adjudication_path,
+                continuation_decision_path=continuation_path,
+            )
+        )
+    return memories
 
 
 def _path_from_payload(payload: dict[str, object], key: str) -> Path | None:

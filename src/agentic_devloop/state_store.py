@@ -70,6 +70,7 @@ class FinalReviewFollowUpMemoryReference(BaseModel):
     finding_id: str = Field(min_length=1)
     classification: Literal[
         "accepted_risk",
+        "soft_observability",
         "backlog_follow_up",
         "duplicate",
         "false_positive",

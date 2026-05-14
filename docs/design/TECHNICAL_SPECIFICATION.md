@@ -650,7 +650,7 @@ This review loop is intentionally agentic. Deterministic code should assemble ev
 
 ### Final Adjudication After Repair Budget Exhaustion
 
-When bounded repair waves stop because the retry budget is exhausted or the loop otherwise converges without resolving every finding, the release performs a final integration verification rerun on the integrated feature branch before the supervisor writes final adjudication records. The supervisor then persists `final_review_finding_adjudication` artifacts under `runs/<run-id>/supervisor_decisions/` alongside the `feature_review.json` / `feature_review_recheck.json` trail and classifies the remaining findings.
+When bounded repair waves stop because the retry budget is exhausted or the loop otherwise converges without resolving every finding, the release performs a final integration verification rerun on the integrated feature branch before the supervisor writes final adjudication records. This rerun is the convergence boundary for final review stop hardening. The supervisor then persists `final_review_finding_adjudication` artifacts under `runs/<run-id>/supervisor_decisions/` alongside the `feature_review.json` / `feature_review_recheck.json` trail and classifies the remaining findings.
 
 The adjudication artifact must always include non-empty `evidence_paths`, but this requirement is satisfied by release-generated evidence (feature-review artifact path, final integration verification evidence path, and verification log path when available). Reviewer-provided `FeatureReviewFinding.evidence_paths` remain optional context and are not a hard requirement for accepted-risk, backlog-follow-up, duplicate, scope-expansion, false-positive, or verification-only final classifications.
 

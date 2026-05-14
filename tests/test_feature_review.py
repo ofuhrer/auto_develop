@@ -604,6 +604,40 @@ def test_classify_feature_review_findings_for_convergence_preserves_required_rep
     assert result.false_positive_candidate_ids == ["required-1"]
 
 
+def test_classify_feature_review_findings_for_convergence_ignores_noop_required_repairs() -> None:
+    decision = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-8a",
+            "reviewer": "strong_model",
+            "summary": "Advisory observability finding.",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "noop-required-1",
+                    "severity": "low",
+                    "summary": "Monitoring wording could be narrower.",
+                    "affected_files": ["src/agentic_devloop/feature_review.py"],
+                    "required_repairs": ["None (acceptable if intended)."],
+                    "optional_follow_ups": ["Consider narrowing observability marker detection."],
+                }
+            ],
+        }
+    )
+    result = classify_feature_review_findings_for_convergence(
+        decision=decision,
+        previous_decisions=[],
+        verification_passed=True,
+    )
+
+    finding = result.findings[0]
+    assert finding.classification == "soft_observability"
+    assert finding.selected_action == "accept"
+    assert result.blocking_finding_ids == []
+    assert result.accepted_finding_ids == ["noop-required-1"]
+
+
 def test_classify_feature_review_findings_for_convergence_marks_duplicate_by_finding_id() -> None:
     previous = FeatureReviewDecision.model_validate(
         {
@@ -707,6 +741,96 @@ def test_classify_feature_review_findings_for_convergence_marks_adjacent_similar
     assert finding.selected_action == "defer"
     assert finding.matched_previous_finding_id == "prior-a"
     assert finding.adjacent_similarity > 0.35
+
+
+def test_classify_feature_review_findings_for_convergence_soft_observability_and_adjacent_repeat() -> None:
+    first_wave = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-10a",
+            "reviewer": "strong_model",
+            "summary": "Observability follow-up.",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "obs-1",
+                    "severity": "low",
+                    "summary": "Add telemetry metric for governor stop reason.",
+                    "affected_files": ["src/release.py"],
+                    "optional_follow_ups": ["Add tracing fields for stop-policy observability."],
+                }
+            ],
+        }
+    )
+    first_result = classify_feature_review_findings_for_convergence(
+        decision=first_wave,
+        previous_decisions=[],
+        verification_passed=True,
+    )
+    first_finding = first_result.findings[0]
+    assert first_finding.classification == "soft_observability"
+    assert first_finding.selected_action == "accept"
+
+    repeat_wave = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-10a",
+            "reviewer": "strong_model",
+            "summary": "Observability follow-up repeat.",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "obs-2",
+                    "severity": "low",
+                    "summary": "Add logging metric for governor stop reason decisions.",
+                    "affected_files": ["src/release.py"],
+                    "optional_follow_ups": ["Add telemetry fields for stop-policy traces."],
+                }
+            ],
+        }
+    )
+    repeat_result = classify_feature_review_findings_for_convergence(
+        decision=repeat_wave,
+        previous_decisions=[first_wave],
+        verification_passed=True,
+    )
+    repeat_finding = repeat_result.findings[0]
+    assert repeat_finding.classification == "duplicate"
+    assert repeat_finding.selected_action == "defer"
+    assert repeat_finding.adjacent_similarity > 0.35
+
+
+def test_classify_feature_review_findings_for_convergence_does_not_treat_log_substring_as_observability() -> None:
+    decision = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-10b",
+            "reviewer": "strong_model",
+            "summary": "Optional cleanup follow-up.",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "optional-log-1",
+                    "severity": "low",
+                    "summary": "Rename catalog helper for readability.",
+                    "affected_files": ["src/catalog.py"],
+                    "optional_follow_ups": ["Use a clearer helper name in catalog sorting path."],
+                }
+            ],
+        }
+    )
+    result = classify_feature_review_findings_for_convergence(
+        decision=decision,
+        previous_decisions=[],
+        verification_passed=True,
+    )
+
+    finding = result.findings[0]
+    assert finding.classification == "soft_finding"
+    assert finding.selected_action == "accept"
 
 
 def test_classify_feature_review_findings_for_convergence_marks_backlog_follow_up_for_new_optional_overlap() -> None:
