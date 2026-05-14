@@ -4671,6 +4671,11 @@ def _build_release_metrics(
     runs_dir: Path,
 ) -> dict[str, object]:
     task_metrics = [_task_metrics(result, raw_log_path) for result in task_results]
+    compact_governance = _build_compact_governance_metrics(
+        run_id=run_id,
+        runs_dir=runs_dir,
+        task_metrics=task_metrics,
+    )
     model_attempts: dict[str, dict[str, object]] = {}
     for task in task_metrics:
         for attempt in task["executor_attempts"]:
@@ -4721,6 +4726,7 @@ def _build_release_metrics(
         "release_id": release_id,
         "decision": decision,
         "totals": totals,
+        "compact_governance": compact_governance,
         "strong_model_calls": _strong_model_calls(runs_dir, release_id),
         "model_attempts": model_attempts,
         "tasks": task_metrics,
@@ -4730,6 +4736,134 @@ def _build_release_metrics(
         ],
     }
     return metrics
+
+
+def _build_compact_governance_metrics(
+    *,
+    run_id: str,
+    runs_dir: Path,
+    task_metrics: list[dict[str, object]],
+) -> dict[str, object]:
+    release_root = runs_dir / run_id
+    runtime_supervisor_dir = release_root / "runtime_supervisor"
+    feature_review_dir = release_root / "feature_review"
+    model_fallback_count = 0
+    for task in task_metrics:
+        attempts = task.get("executor_attempts")
+        if not isinstance(attempts, list) or not attempts:
+            continue
+        first_model = str((attempts[0] or {}).get("model") or "<none>")
+        fallback_attempts = 0
+        for attempt in attempts[1:]:
+            if not isinstance(attempt, dict):
+                continue
+            model = str(attempt.get("model") or "<none>")
+            if model != first_model:
+                fallback_attempts += 1
+        model_fallback_count += fallback_attempts
+
+    repair_wave_count = len(
+        [path for path in feature_review_dir.glob("repairs_*") if path.is_dir()]
+    )
+    review_wave_count = 0
+    if (release_root / "feature_review.json").exists():
+        review_wave_count = 1 + repair_wave_count
+
+    runtime_repair_attempt_count = 0
+    runtime_repair_success_count = 0
+    runtime_repair_stop_count = 0
+    for repair_path in runtime_supervisor_dir.glob("repair_*.json"):
+        payload = _read_json_object(repair_path)
+        attempts = payload.get("attempts")
+        if not isinstance(attempts, list):
+            continue
+        runtime_repair_attempt_count += len(attempts)
+        for attempt in attempts:
+            if not isinstance(attempt, dict):
+                continue
+            if str(attempt.get("decision") or "").strip().lower() == "stop":
+                runtime_repair_stop_count += 1
+        final_result = payload.get("final_result")
+        if isinstance(final_result, dict) and str(final_result.get("decision") or "").strip().lower() == "accepted":
+            runtime_repair_success_count += 1
+
+    admission_repair_count = 0
+    admission_repairs = _read_json_object(runtime_supervisor_dir / "planner_admission_repairs.json")
+    records = admission_repairs.get("records")
+    if isinstance(records, list):
+        admission_repair_count = len(records)
+
+    scope_risk_overage_count = 0
+    scope_risk_blocked_count = 0
+    for decision_path in (release_root / "supervisor_decisions").glob("scope_risk_budget_policy__*.json"):
+        decision = _read_json_object(decision_path)
+        configured_changed_files_limit = decision.get("configured_changed_files_limit")
+        actual_changed_files = decision.get("actual_changed_files")
+        configured_diff_size_limit = decision.get("configured_diff_size_limit")
+        actual_diff_size = decision.get("actual_diff_size")
+        changed_files_over = (
+            isinstance(configured_changed_files_limit, int)
+            and isinstance(actual_changed_files, int)
+            and actual_changed_files > configured_changed_files_limit
+        )
+        diff_size_over = (
+            isinstance(configured_diff_size_limit, int)
+            and isinstance(actual_diff_size, int)
+            and actual_diff_size > configured_diff_size_limit
+        )
+        if changed_files_over or diff_size_over:
+            scope_risk_overage_count += 1
+        if str(decision.get("outcome") or "").strip() == ScopeRiskOutcome.STOPPED.value:
+            scope_risk_blocked_count += 1
+
+    continuation_payload = _read_json_object(release_root / "final_review_continuation_decision.json")
+    finding_adjudication_paths = continuation_payload.get("finding_adjudication_paths")
+    final_review_adjudication_count = len(finding_adjudication_paths) if isinstance(finding_adjudication_paths, list) else 0
+    final_review_continuation_outcome = (
+        str(continuation_payload.get("outcome")).strip()
+        if str(continuation_payload.get("outcome") or "").strip()
+        else None
+    )
+    final_review_hard_stop_reason = (
+        str(continuation_payload.get("hard_stop_reason")).strip()
+        if str(continuation_payload.get("hard_stop_reason") or "").strip()
+        else None
+    )
+
+    finalization_payload = _read_json_object(release_root / "finalization_decision.json")
+    finalization_outcome = (
+        str(finalization_payload.get("outcome")).strip()
+        if str(finalization_payload.get("outcome") or "").strip()
+        else None
+    )
+    finalization_stop_reason = (
+        str(finalization_payload.get("stop_reason")).strip()
+        if str(finalization_payload.get("stop_reason") or "").strip()
+        else None
+    )
+    finalization_gate_reason = (
+        str(finalization_payload.get("blocked_reason")).strip()
+        if str(finalization_payload.get("blocked_reason") or "").strip()
+        else None
+    )
+
+    return {
+        "model_fallback_count": model_fallback_count,
+        "review_wave_count": review_wave_count,
+        "feature_review_repair_wave_count": repair_wave_count,
+        "runtime_repair_attempt_count": runtime_repair_attempt_count,
+        "runtime_repair_success_count": runtime_repair_success_count,
+        "runtime_repair_stop_count": runtime_repair_stop_count,
+        "admission_repair_count": admission_repair_count,
+        "scope_risk_overage_count": scope_risk_overage_count,
+        "scope_risk_blocked_count": scope_risk_blocked_count,
+        "final_review_adjudication_count": final_review_adjudication_count,
+        "final_review_continuation_outcome": final_review_continuation_outcome,
+        "final_review_hard_stop_reason": final_review_hard_stop_reason,
+        "finalization_outcome": finalization_outcome,
+        "finalization_stop_reason": finalization_stop_reason,
+        "finalization_gate_reason": finalization_gate_reason,
+    }
 
 
 def _write_release_metrics(
