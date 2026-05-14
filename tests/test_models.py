@@ -69,8 +69,8 @@ def test_sample_yaml_files_validate() -> None:
     )
 
     assert project.project_id == "auto_develop"
-    assert project.model_catalog["coding_worker"].model == "gpt-5.3-codex"
-    assert project.model_catalog["micro_repair"].availability == ModelAvailability.UNKNOWN
+    assert project.model_catalog["coding_worker"].model == "gpt-5.3-codex-spark"
+    assert project.model_catalog["micro_repair"].availability == ModelAvailability.SUPPORTED
     assert objective.release_id == "demo-release"
     assert contract.task_id == "rr-0001"
 

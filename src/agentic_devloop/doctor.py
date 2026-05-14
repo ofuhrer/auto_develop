@@ -13,7 +13,7 @@ DEFAULT_MODEL_CATALOG = {
         model="gpt-5.3-codex-spark",
         capabilities=["micro_repair"],
         budget_class="XS",
-        availability=ModelAvailability.UNSUPPORTED,
+        availability=ModelAvailability.SUPPORTED,
     )
 }
 

@@ -42,31 +42,62 @@ candidate_epics:
     worktree-local assumptions.
   priority: 1
   next_release_id: shared-verification-runtime
+- id: review-stop-policy-hardening
+  title: Bound reviewer churn with explicit stop and adjudication policy.
+  rationale: The five-cycle dogfood run spent repeated repair waves on adjacent
+    review findings after deterministic verification was already green; the governor
+    needs accept, defer, block, or follow-up decisions instead of unbounded review
+    convergence attempts.
+  priority: 2
+  next_release_id: review-stop-policy-hardening
 - id: environment-repair-actions
   title: Repair safe verification-environment drift autonomously.
   rationale: Stale editable installs, command-not-found errors, missing PYTHONPATH,
     and dependency runtime drift should become bounded repair actions when project
     policy declares a safe repair.
-  priority: 2
+  priority: 3
   next_release_id: environment-repair-actions
+- id: cost-runtime-governor
+  title: Turn release metrics into runtime and model-routing decisions.
+  rationale: Retained metrics show high repeated context volume, expensive review
+    churn, and no actual billed-cost accounting; the governor should use those
+    signals to choose one-shot versus decomposed execution, cap review waves, and
+    route models.
+  priority: 4
+  next_release_id: cost-runtime-governor
+- id: context-slimming-and-retrieval
+  title: Build phase-specific context bundles for workers, reviewers, and repairs.
+  rationale: Repair and review tasks often received large roadmap/design context
+    bundles even when they only needed a finding, touched files, tests, and prior
+    evidence.
+  priority: 5
+  next_release_id: context-slimming-and-retrieval
 - id: executor-liveness-supervision
   title: Classify active, stalled, hung, and environment-blocked executors.
   rationale: Long-running workers need process/output/file heartbeat evidence so the
     supervisor can wait, inspect, restart, or stop without human guessing.
-  priority: 3
+  priority: 6
   next_release_id: executor-liveness-supervision
+- id: multi-epic-cockpit-log
+  title: Provide one tail-able cockpit log across repeated epic cycles.
+  rationale: Operators still correlate parent governor logs, child release logs,
+    raw logs, review artifacts, and state refresh artifacts manually; one structured
+    log should show what is being implemented, repaired, reviewed, finalized, and
+    why the loop stopped.
+  priority: 7
+  next_release_id: multi-epic-cockpit-log
 - id: target-artifact-ownership
   title: Store target development memory in the target repo or a durable control repo.
   rationale: Deleting and recloning the auto_develop controller should not lose target
     repo-state, objectives, contracts, completed-epic history, or next-epic planning
     context.
-  priority: 4
+  priority: 8
   next_release_id: target-artifact-ownership
 - id: onboarding-bootstrap
   title: Bootstrap a freshly cloned target repository from one or two onboarding prompts.
   rationale: The target operator experience is minimal setup followed by a high-level
     epic-count loop.
-  priority: 5
+  priority: 9
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
 active_epics:
@@ -343,14 +374,22 @@ notes:
 - 'Dogfood finding: one-shot high-capability agents produced coherent implementations
   faster than over-decomposed contract batches. Prioritize supervisor-owned execution
   strategy and normalization before expanding multi-epic autonomy.'
+- 'Five-cycle dogfood review: 7 release attempts, 51 worker/reviewer task runs,
+  183.5 executor minutes, 28.0 verification minutes, 1.84M prompt characters,
+  1.57M injected context characters, and 25.3MB of raw stderr/audit chatter.
+  Main bottlenecks were shared runtime drift, repeated review convergence churn,
+  coarse context slicing, incomplete cost governance, and manual finalization/state
+  compaction.'
 - 'Completed gap: hard file-count and diff-size budgets now produce supervisor-adjudicated
   scope-risk findings after hard gates pass, so broad-but-mechanical changes are no
   longer stopped automatically unless they cross a hard safety boundary.'
-- 'Current top gap: bounded review convergence still needs supervisor-owned final
-  adjudication. Recent cycles reached review convergence limits and required manual
-  final repair despite passing focused and full deterministic verification.'
-- 'Next sequencing: review-convergence-adjudicator, shared-verification-runtime, environment
-  repair, then executor liveness.'
+- 'Current top gap: shared verification runtime. Recent cycles still needed worktree-safe
+  absolute runtime commands and worker-side `.venv` assumptions created false
+  failures or noisy environment reports.'
+- 'Next sequencing: shared-verification-runtime, review-stop-policy-hardening,
+  environment-repair-actions, cost-runtime-governor, context-slimming-and-retrieval,
+  executor-liveness-supervision, multi-epic-cockpit-log, target-artifact-ownership,
+  onboarding-bootstrap.'
 - Hard file-count and diff-size budgets are implemented as scope-risk signals for
   supervisor adjudication unless they cross configured hard-policy boundaries; broad
   mechanical changes require stronger verification, not automatic rejection.

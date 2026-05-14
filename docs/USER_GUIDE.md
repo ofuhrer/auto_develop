@@ -120,9 +120,10 @@ repo_state_path: .auto_develop/repo_state/my_project
 
 executor:
   type: codex_cli
-  model: gpt-5.3-codex
+  model: gpt-5.3-codex-spark
   max_walltime_minutes: 25
   fallback_models:
+    - gpt-5.3-codex
     - gpt-5.4-mini
 
 model_catalog:
@@ -135,17 +136,17 @@ model_catalog:
     model: gpt-5.2
     capabilities: [runtime_supervision, review, long_running_stability]
     budget_class: L
-    availability: unknown
+    availability: supported
   coding_worker:
-    model: gpt-5.3-codex
+    model: gpt-5.3-codex-spark
     capabilities: [implementation, refactoring, tests]
     budget_class: M
-    availability: unknown
+    availability: supported
   micro_repair:
     model: gpt-5.3-codex-spark
     capabilities: [conflict_repair, lint_repair, tiny_patches]
     budget_class: XS
-    availability: unknown
+    availability: supported
   cheap_router:
     model: gpt-5.4-mini
     capabilities: [routing, summarization, fallback_worker]
@@ -155,9 +156,10 @@ model_catalog:
 model_roles:
   worker:
     type: codex_cli
-    model: gpt-5.3-codex
+    model: gpt-5.3-codex-spark
     max_walltime_minutes: 25
     fallback_models:
+      - gpt-5.3-codex
       - gpt-5.4-mini
   repair:
     type: codex_cli
@@ -253,11 +255,11 @@ The recommended hierarchy is:
 
 - `gpt-5.5` for strategic planning, hard debugging, and semantic review.
 - `gpt-5.2` for runtime/review supervision where long-session stability matters.
-- `gpt-5.3-codex` for implementation workers.
-- `gpt-5.3-codex-spark` for tiny repair loops, when supported by the account.
+- `gpt-5.3-codex-spark` for implementation workers and tiny repair loops.
+- `gpt-5.3-codex` as the fallback when Spark needs a sturdier coding model.
 - `gpt-5.4-mini` for cheap routing, summarization, and safe fallbacks.
 
-The current `agent-loop` runtime orchestrator is deterministic Python. It schedules tasks, manages branches, verifies work, and writes evidence. Models are bounded executors or planners behind explicit roles. Because model availability can change by account and over time, mark uncertain catalog entries as `unknown` and keep at least one known supported fallback for worker and repair roles.
+The current `agent-loop` runtime orchestrator is deterministic Python. It schedules tasks, manages branches, verifies work, and writes evidence. Models are bounded executors or planners behind explicit roles. Because model availability can change by account and over time, keep at least one known supported fallback for worker and repair roles.
 
 ## Step 4: Run Doctor
 

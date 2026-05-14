@@ -52,9 +52,10 @@ worktree_root: /path/to/worktrees/my_project
 
 executor:
   type: codex_cli
-  model: gpt-5.3-codex
+  model: gpt-5.3-codex-spark
   max_walltime_minutes: 25
   fallback_models:
+    - gpt-5.3-codex
     - gpt-5.4-mini
 
 model_catalog:
@@ -67,17 +68,17 @@ model_catalog:
     model: gpt-5.2
     capabilities: [runtime_supervision, review, long_running_stability]
     budget_class: L
-    availability: unknown
+    availability: supported
   coding_worker:
-    model: gpt-5.3-codex
+    model: gpt-5.3-codex-spark
     capabilities: [implementation, refactoring, tests]
     budget_class: M
-    availability: unknown
+    availability: supported
   micro_repair:
     model: gpt-5.3-codex-spark
     capabilities: [conflict_repair, lint_repair, tiny_patches]
     budget_class: XS
-    availability: unknown
+    availability: supported
   cheap_router:
     model: gpt-5.4-mini
     capabilities: [routing, summarization, fallback_worker]
@@ -87,9 +88,10 @@ model_catalog:
 model_roles:
   worker:
     type: codex_cli
-    model: gpt-5.3-codex
+    model: gpt-5.3-codex-spark
     max_walltime_minutes: 25
     fallback_models:
+      - gpt-5.3-codex
       - gpt-5.4-mini
   repair:
     type: codex_cli

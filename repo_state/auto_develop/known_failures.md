@@ -26,11 +26,9 @@
 
 ## Closed-loop run learning: unsupported primary worker
 
-- The first full release run showed that `gpt-5.3-codex-spark` is not
-  supported for the current Codex ChatGPT account.
-- Project configs now express the recommended model hierarchy with safe
-  fallbacks and `model_catalog` availability diagnostics. `gpt-5.3-codex-spark`
-  remains a repair-role candidate with fallback to `gpt-5.4-mini`.
+- The first full release run exposed account limits for `gpt-5.3-codex-spark`.
+- Current project configs now treat Spark as the preferred worker and repair
+  choice with safe fallbacks to `gpt-5.3-codex` and `gpt-5.4-mini`.
 
 ## Current Gap: autonomous roadmap governor
 

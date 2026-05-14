@@ -9,5 +9,6 @@ Read in this order:
 3. [Roadmap and Backlog](ROADMAP_AND_BACKLOG.md): Phase 1-3 implementation status, critical path, edge cases, and backlog.
 4. [Critical Assessment](CRITICAL_ASSESSMENT.md): known risks, simplifications, and decisions to revisit.
 5. [Supervisor Decision Records](SUPERVISOR_DECISIONS.md): typed supervisor decision schemas, artifact layout, loading rules, and the boundary between soft decisions and hard gates.
+6. [Five-Cycle Dogfood Review](FIVE_CYCLE_DOGFOOD_REVIEW.md): measured cost, runtime, manual-intervention, and autonomy findings from the five-epic self-development effort.
 
 User-facing how-to content belongs in [../USER_GUIDE.md](../USER_GUIDE.md), not in this directory.

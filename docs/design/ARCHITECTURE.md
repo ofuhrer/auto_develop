@@ -186,7 +186,7 @@ Recommended default hierarchy:
 ```text
 strategic planner:      gpt-5.5
 runtime/review control: gpt-5.2
-coding worker:          gpt-5.3-codex
+coding worker:          gpt-5.3-codex-spark
 micro repair:           gpt-5.3-codex-spark
 cheap routing/fallback: gpt-5.4-mini
 ```
