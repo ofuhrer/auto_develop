@@ -849,16 +849,11 @@ def _build_execution_strategy_inputs(
                 cost_runtime_governance_decision = loaded
     # Cost-runtime governance can recommend one-shot as a cost hint, but run-governor
     # must stay executable until a one-shot runner exists.
-    one_shot_hint = bool(
-        cost_runtime_governance_decision
-        and cost_runtime_governance_decision.selected_action == CostRuntimeGovernanceAction.ONE_SHOT
-    )
     return {
         "release_id": objective.release_id,
         "task_ids": [epic.epic_id],
         "cohesive_scope": False,
         "coupled_tasks": True,
-        "one_shot_recommendation_hint": one_shot_hint,
         "state_review_snapshot_path": plan.state_review_snapshot_path,
         "release_review_path": release_review_path if release_review_path is not None and release_review_path.exists() else None,
         "release_metrics_path": release_metrics_path if release_metrics_path is not None and release_metrics_path.exists() else None,

@@ -299,7 +299,6 @@ def test_backlog_execution_strategy_inputs_consume_cost_runtime_governance(tmp_p
 
     assert selector_inputs["cohesive_scope"] is False
     assert selector_inputs["coupled_tasks"] is True
-    assert selector_inputs["one_shot_recommendation_hint"] is True
     assert selector_inputs["cost_runtime_governance_decision_path"] is not None
 
 
