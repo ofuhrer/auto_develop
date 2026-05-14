@@ -5,8 +5,8 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   subsystem failures, normalizes useful model output before strict validation, and
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
-current_focus: review-stop-policy-hardening
-active_epic: review-stop-policy-hardening
+current_focus: environment-repair-actions
+active_epic: null
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -34,16 +34,9 @@ completed_epics:
 - soft-scope-budget-policy
 - review-convergence-adjudicator
 - shared-verification-runtime
+- review-stop-policy-hardening
 blocked_epics: []
 candidate_epics:
-- id: review-stop-policy-hardening
-  title: Bound reviewer churn with explicit stop and adjudication policy.
-  rationale: The five-cycle dogfood run spent repeated repair waves on adjacent review
-    findings after deterministic verification was already green; the governor needs
-    accept, defer, block, or follow-up decisions instead of unbounded review convergence
-    attempts.
-  priority: 1
-  next_release_id: review-stop-policy-hardening
 - id: environment-repair-actions
   title: Repair safe verification-environment drift autonomously.
   rationale: Stale editable installs, command-not-found errors, missing PYTHONPATH,
@@ -92,21 +85,55 @@ candidate_epics:
   priority: 8
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
-active_epics:
-- epic_id: review-stop-policy-hardening
-  next_recommendations: []
-  retry_count: 0
-  repair_count: 0
-  outcome_references: []
-  finalization_outcome_references: []
-  unresolved_finding_references: []
-  final_review_follow_up_memories: []
-  state_review_snapshot_references: []
-  metrics_snapshot_references: []
-  tuning_report_references: []
-  updated_at: '2026-05-14T08:05:50.680437Z'
+active_epics: []
 reviewed_epics: []
 completed_epic_records:
+- epic_id: review-stop-policy-hardening
+  status_reason: completed via feature/review-stop-policy-hardening and merged into
+    main after accepted implementation, repair waves, full-suite verification, and
+    a final manual classifier fix for no-op required-repair wording; bounded final
+    review convergence, final verification ordering, summary/state exposure, and
+    documentation are implemented.
+  next_recommendations:
+  - Treat no-op reviewer required-repair phrases as normalized advisory findings;
+    the final manual fix should become part of future reviewer-output normalization
+    expectations.
+  - Revisit finalization policy because the release reached needs_revision despite
+    repairable low-severity advisory wording and green verification.
+  retry_count: 1
+  repair_count: 4
+  outcome_references:
+  - release_id: review-stop-policy-hardening
+    outcome: accepted
+    run_summary_path: runs/20260514T072327Z_five_cycle_sprint/20260514T081408Z_review-stop-policy-hardening_release/release_summary.json
+    recorded_at: '2026-05-14T09:25:00Z'
+  finalization_outcome_references:
+  - release_id: review-stop-policy-hardening
+    outcome: accepted
+    branch: feature/review-stop-policy-hardening
+    commit: 8449f27b2e437e12cc5bb38781e59473f03466db
+    unresolved_finding_ids:
+    - RSHP-002
+    recommended_backlog_state: completed
+    recorded_at: '2026-05-14T09:25:00Z'
+  unresolved_finding_references:
+  - finding_id: RSHP-002
+    summary: Final review classified low-severity no-op required-repair wording as
+      a blocker; the feature branch added classifier normalization and regression
+      coverage before merge.
+    severity: low
+    source_path: runs/20260514T072327Z_five_cycle_sprint/20260514T081408Z_review-stop-policy-hardening_release/feature_review_recheck.json
+  final_review_follow_up_memories: []
+  state_review_snapshot_references: []
+  metrics_snapshot_references:
+  - metrics_path: runs/20260514T072327Z_five_cycle_sprint/20260514T081408Z_review-stop-policy-hardening_release/release_metrics.json
+    recorded_at: '2026-05-14T09:25:00Z'
+    release_id: review-stop-policy-hardening
+  tuning_report_references:
+  - tuning_report_path: runs/20260514T072327Z_five_cycle_sprint/20260514T081408Z_review-stop-policy-hardening_release/release_tuning.md
+    recorded_at: '2026-05-14T09:25:00Z'
+    release_id: review-stop-policy-hardening
+  updated_at: '2026-05-14T09:25:00Z'
 - epic_id: shared-verification-runtime
   status_reason: completed via feature/shared-verification-runtime and merged into
     main after accepted release; added shared verification runtime schema, runtime-aware
