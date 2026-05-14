@@ -1090,6 +1090,19 @@ def test_run_task_writes_injected_diagnosis_for_verification_failure(tmp_path) -
     )
     assert failure_diagnosis["category"] == "injected_verification_failure"
     assert failure_diagnosis["source_metadata"]["backend"] == "recording-test-backend"
+    assert failure_diagnosis["verification_environment_repair_input_path"] == str(
+        result.bundle_path / "verification_environment_repair_input.json"
+    )
+    repair_input_payload = json.loads(
+        (result.bundle_path / "verification_environment_repair_input.json").read_text(encoding="utf-8")
+    )
+    assert repair_input_payload["repair_input"]["command"] == "false"
+    assert repair_input_payload["repair_input"]["exit_code"] == 1
+    assert repair_input_payload["repair_input"]["allowed_files_snapshot"] == ["docs/**"]
+    assert repair_input_payload["verification_log_path"] == str(result.bundle_path / "verification.log")
+    assert repair_input_payload["worktree_path"] == str(result.worktree_path)
+    assert repair_input_payload["project_id"] == "demo"
+    assert repair_input_payload["prior_repair_attempts"] == []
 
 
 def test_run_task_keeps_failure_diagnosis_yaml_artifact_compatible(tmp_path) -> None:

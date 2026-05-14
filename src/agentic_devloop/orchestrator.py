@@ -18,6 +18,7 @@ from agentic_devloop.evidence import (
     write_review_decision,
     write_scientific_outputs,
     write_task_soft_gate_decision,
+    write_verification_environment_repair_input,
 )
 from agentic_devloop.executor import CodexExecutor
 from agentic_devloop.failure_diagnosis import (
@@ -52,6 +53,7 @@ from agentic_devloop.models import (
     TaskContract,
     TaskRun,
     TaskState,
+    VerificationEnvironmentRepairInput,
 )
 from agentic_devloop.supervisor_decisions import (
     BudgetAcceptanceOutcome,
@@ -77,7 +79,7 @@ from agentic_devloop.runtime_supervisor import (
 from agentic_devloop.prompt import write_executor_prompt
 from agentic_devloop.review import deterministic_review
 from agentic_devloop.scientific import analyze_scientific_changes
-from agentic_devloop.verification import VerificationRunner
+from agentic_devloop.verification import VerificationRunner, bounded_verification_excerpt
 from agentic_devloop.worktree import create_worktree
 from agentic_devloop.yaml_io import load_yaml_model
 
@@ -249,6 +251,7 @@ def run_task(
             backend=diagnosis_backend,
             max_executor_attempts=config.budget.max_executor_attempts_per_task,
             progress=progress,
+            verification_environment_repair_input_path=None,
         )
         write_review_decision(bundle, decision)
         _report(progress, f"event=review_decision task={task.task_id} decision={decision.decision} rationale={json.dumps(decision.rationale)}")
@@ -320,7 +323,16 @@ def run_task(
         release_id=task.release_id,
     )
     bundle = write_scientific_outputs(bundle, task, scientific_review)
+    verification_environment_repair_input_path: Path | None = None
     if any(result.exit_code != 0 for result in verification_results):
+        verification_environment_repair_input_path = _capture_verification_environment_repair_input(
+            bundle=bundle,
+            config=config,
+            task=task,
+            worktree_path=worktree_path,
+            verification_results=verification_results,
+            verification_log_path=bundle.verification_log_path,
+        )
         bundle = _diagnose_failure(
             bundle=bundle,
             config=config,
@@ -333,6 +345,7 @@ def run_task(
             backend=diagnosis_backend,
             max_executor_attempts=config.budget.max_executor_attempts_per_task,
             progress=progress,
+            verification_environment_repair_input_path=verification_environment_repair_input_path,
         )
     write_review_decision(bundle, decision)
     _report(progress, f"event=review_decision task={task.task_id} decision={decision.decision} rationale={json.dumps(decision.rationale)}")
@@ -701,6 +714,7 @@ def _diagnose_failure(
     backend: FailureDiagnosisBackend,
     max_executor_attempts: int,
     progress: Callable[[str], None] | None,
+    verification_environment_repair_input_path: Path | None = None,
 ) -> EvidenceBundle:
     diagnosis_result = backend.diagnose(
         FailureDiagnosisRequest(
@@ -721,10 +735,21 @@ def _diagnose_failure(
         bundle=bundle,
         verification_log_path=verification_log_path,
     )
-    return write_failure_diagnosis(bundle, _failure_diagnosis_payload(diagnosis_result.diagnosis, runtime_supervisor_payload))
+    return write_failure_diagnosis(
+        bundle,
+        _failure_diagnosis_payload(
+            diagnosis_result.diagnosis,
+            runtime_supervisor_payload,
+            verification_environment_repair_input_path,
+        ),
+    )
 
 
-def _failure_diagnosis_payload(diagnosis: FailureDiagnosis, runtime_supervisor: dict | None = None) -> dict:
+def _failure_diagnosis_payload(
+    diagnosis: FailureDiagnosis,
+    runtime_supervisor: dict | None = None,
+    verification_environment_repair_input_path: Path | None = None,
+) -> dict:
     payload = diagnosis.model_dump(mode="json")
     payload["final_exit_code"] = diagnosis.source_metadata.exit_code
     payload["attempts"] = [
@@ -732,7 +757,55 @@ def _failure_diagnosis_payload(diagnosis: FailureDiagnosis, runtime_supervisor: 
     ]
     if runtime_supervisor is not None:
         payload["runtime_supervisor"] = runtime_supervisor
+    if verification_environment_repair_input_path is not None:
+        payload["verification_environment_repair_input_path"] = str(verification_environment_repair_input_path)
     return payload
+
+
+def _capture_verification_environment_repair_input(
+    *,
+    bundle: EvidenceBundle,
+    config: ProjectConfig,
+    task: TaskContract,
+    worktree_path: Path,
+    verification_results: list[CommandResult],
+    verification_log_path: Path,
+) -> Path | None:
+    failed = next((result for result in verification_results if result.exit_code != 0), None)
+    if failed is None:
+        return None
+    stdout_excerpt = _read_command_output_excerpt(failed.stdout_path)
+    stderr_excerpt = _read_command_output_excerpt(failed.stderr_path)
+    repair_input = VerificationEnvironmentRepairInput(
+        command=failed.command,
+        exit_code=failed.exit_code,
+        stdout_excerpt=stdout_excerpt,
+        stderr_excerpt=stderr_excerpt,
+        allowed_files_snapshot=task.allowed_files,
+    )
+    payload = {
+        "repair_input": repair_input.model_dump(mode="json"),
+        "resolved_command": failed.command,
+        "verification_runtime_python_path": (
+            str(config.verification_runtime.python_path) if config.verification_runtime is not None else None
+        ),
+        "verification_runtime_env_keys": (
+            sorted(config.verification_runtime.env.keys()) if config.verification_runtime is not None else []
+        ),
+        "worktree_path": str(worktree_path),
+        "project_id": config.project_id,
+        "verification_log_path": str(verification_log_path),
+        "stdout_path": str(failed.stdout_path) if failed.stdout_path is not None else None,
+        "stderr_path": str(failed.stderr_path) if failed.stderr_path is not None else None,
+        "prior_repair_attempts": [],
+    }
+    return write_verification_environment_repair_input(bundle, payload)
+
+
+def _read_command_output_excerpt(path: Path | None) -> str:
+    if path is None or not path.exists():
+        return "<empty>"
+    return bounded_verification_excerpt(path.read_text(encoding="utf-8"))
 
 
 def _runtime_supervisor_payload(

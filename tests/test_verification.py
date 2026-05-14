@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 
-from agentic_devloop.verification import VerificationRunner
+from agentic_devloop.verification import MAX_LOG_EXCERPT_CHARS, VerificationRunner, bounded_verification_excerpt
 
 
 def test_verification_runner_records_output(tmp_path) -> None:
@@ -99,3 +99,11 @@ def test_verification_runner_uses_runtime_python_and_env(tmp_path) -> None:
     assert "original_command=.venv/bin/python -c " in log
     assert f"resolved_command={sys.executable}" in log
     assert "env_additions=SHARED_RT=enabled" in log
+
+
+def test_bounded_verification_excerpt_truncates_to_log_limit() -> None:
+    text = "a" * (MAX_LOG_EXCERPT_CHARS + 37)
+    excerpt = bounded_verification_excerpt(text)
+
+    assert excerpt.startswith("a" * MAX_LOG_EXCERPT_CHARS)
+    assert "... <truncated 37 chars>" in excerpt

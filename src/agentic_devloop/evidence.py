@@ -192,6 +192,15 @@ def write_failure_diagnosis(bundle: EvidenceBundle, diagnosis: FailureDiagnosis 
     return bundle.model_copy(update={"failure_diagnosis_path": failure_diagnosis_path})
 
 
+def write_verification_environment_repair_input(
+    bundle: EvidenceBundle,
+    payload: dict,
+) -> Path:
+    repair_input_path = bundle.bundle_path / "verification_environment_repair_input.json"
+    repair_input_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return repair_input_path
+
+
 def write_scientific_outputs(
     bundle: EvidenceBundle,
     task: TaskContract,

@@ -93,6 +93,10 @@ def _excerpt(text: str) -> str:
     return text[:MAX_LOG_EXCERPT_CHARS].rstrip("\n") + f"\n... <truncated {omitted} chars>"
 
 
+def bounded_verification_excerpt(text: str) -> str:
+    return _excerpt(text)
+
+
 def rewrite_worktree_local_verification_command(command: str, *, safe_runtime: str | None) -> str:
     if not safe_runtime:
         return command
