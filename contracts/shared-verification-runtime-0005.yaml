@@ -1,0 +1,48 @@
+task_id: shared-verification-runtime-0005
+release_id: shared-verification-runtime
+title: Exercise isolated worktree runtime regression path
+task_type: code_only
+budget_class: M
+objective: Add focused regression coverage proving isolated task worktrees can run
+  verification through the shared runtime without a local .venv and that unsafe local
+  verification assumptions are rejected or normalized as intended.
+allowed_files:
+- tests/test_worktree.py
+- tests/test_verification.py
+- tests/test_orchestrator.py
+- tests/test_release.py
+- tests/test_planning.py
+- tests/fixtures/**
+forbidden_changes:
+- Do not make tests depend on network access or global machine state beyond the configured runtime path.
+- Do not skip existing full-suite verification.
+- Do not weaken assertions around failed verification remaining authoritative.
+- Do not change production code except where a prior contract already added the behavior.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_worktree.py tests/test_verification.py tests/test_orchestrator.py tests/test_release.py tests/test_planning.py
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_worktree.py tests/test_verification.py tests/test_orchestrator.py tests/test_release.py tests/test_planning.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if the regression requires a worktree-local virtual environment.
+- Stop if the test would pass when verification commands are skipped.
+- Stop if production behavior from earlier contracts is not available.
+- Stop if this task requires editing more than 6 files.
+non_goals:
+- Do not add new runtime schema fields.
+- Do not update user documentation.
+- Do not add broad integration-test infrastructure.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- shared-verification-runtime-0002
+- shared-verification-runtime-0003
+- shared-verification-runtime-0004

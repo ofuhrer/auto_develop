@@ -1,0 +1,51 @@
+task_id: shared-verification-runtime-0006
+release_id: shared-verification-runtime
+title: Document shared verification runtime setup
+task_type: documentation
+budget_class: S
+objective: Update user-facing and contributor documentation with concise guidance for
+  configuring shared verification runtimes in self-development and external target
+  repositories.
+allowed_files:
+- README.md
+- docs/README.md
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/design/TECHNICAL_SPECIFICATION.md
+- docs/design/ROADMAP_AND_BACKLOG.md
+- repo_state/auto_develop/backlog_state.yaml
+forbidden_changes:
+- Do not claim environment-repair actions are fully implemented unless code and tests exist.
+- Do not remove existing safety, verification, or finalization guidance.
+- Do not add target-specific instructions for a private external repository.
+- Do not update generated run artifacts.
+required_evidence:
+- git diff
+- changed-files list
+- documentation review summary
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if docs imply a worker may bypass deterministic verification.
+- Stop if docs require a per-worktree virtual environment for normal verification.
+- Stop if this task requires editing more than 7 files.
+- Stop if the implementation tasks did not land.
+non_goals:
+- Do not implement code changes.
+- Do not clean historical run artifacts.
+- Do not change model-routing defaults.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- shared-verification-runtime-0001
+- shared-verification-runtime-0002
+- shared-verification-runtime-0003
+- shared-verification-runtime-0004
+- shared-verification-runtime-0005

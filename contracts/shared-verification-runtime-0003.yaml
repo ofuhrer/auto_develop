@@ -1,0 +1,47 @@
+task_id: shared-verification-runtime-0003
+release_id: shared-verification-runtime
+title: Record resolved verification runtime evidence
+task_type: code_only
+budget_class: M
+objective: Persist evidence for resolved verification runtime, command, working
+  directory, environment additions, stdout, stderr, exit code, duration, timeout,
+  and failure reason.
+allowed_files:
+- src/agentic_devloop/verification.py
+- src/agentic_devloop/evidence.py
+- src/agentic_devloop/orchestrator.py
+- tests/test_verification.py
+- tests/test_evidence.py
+- tests/test_orchestrator.py
+forbidden_changes:
+- Do not remove existing verification.log or decision artifacts.
+- Do not hide stdout, stderr, exit code, timeout, or failure details from raw evidence.
+- Do not make human-facing logs the only source of verification evidence.
+- Do not change planner or release-review behavior.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_verification.py tests/test_evidence.py tests/test_orchestrator.py
+- example evidence artifact showing resolved runtime metadata
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_verification.py tests/test_evidence.py tests/test_orchestrator.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if evidence metadata omits cwd, resolved command, exit code, or failure reason.
+- Stop if the new artifact breaks existing evidence bundle readers.
+- Stop if the task requires changing more than 6 files.
+- Stop if deterministic verification failures can be overwritten by evidence metadata.
+non_goals:
+- Do not change runtime schema.
+- Do not add planner command normalization.
+- Do not update user documentation.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- shared-verification-runtime-0002

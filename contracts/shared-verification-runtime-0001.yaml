@@ -1,0 +1,44 @@
+task_id: shared-verification-runtime-0001
+release_id: shared-verification-runtime
+title: Add shared verification runtime config schema
+task_type: code_only
+budget_class: M
+objective: Add an explicit project configuration model for a shared verification runtime
+  that can be resolved from isolated task worktrees without requiring a per-worktree
+  virtual environment.
+allowed_files:
+- src/agentic_devloop/models.py
+- src/agentic_devloop/config.py
+- tests/test_models.py
+- tests/test_config.py
+- configs/auto_develop.yaml
+forbidden_changes:
+- Do not remove or weaken existing ProjectConfig, verification_profiles, or budget validation.
+- Do not change executor model routing behavior.
+- Do not change task execution, release execution, or planner behavior in this task.
+- Do not introduce network-dependent setup behavior.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_models.py and tests/test_config.py
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_models.py tests/test_config.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if the schema change requires editing more than 5 files.
+- Stop if existing configs without the new field no longer validate.
+- Stop if the runtime policy cannot express an absolute interpreter path plus environment variables.
+- Stop if this task requires changing verification execution behavior.
+non_goals:
+- Do not normalize generated contract commands.
+- Do not change evidence bundle layout.
+- Do not update broad design documentation.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

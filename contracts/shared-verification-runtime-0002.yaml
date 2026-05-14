@@ -1,0 +1,45 @@
+task_id: shared-verification-runtime-0002
+release_id: shared-verification-runtime
+title: Resolve verification commands through shared runtime
+task_type: code_only
+budget_class: M
+objective: Route verification command execution through the configured shared runtime
+  so commands run in the task worktree source context while using the configured
+  interpreter and environment additions.
+allowed_files:
+- src/agentic_devloop/verification.py
+- src/agentic_devloop/process.py
+- src/agentic_devloop/orchestrator.py
+- tests/test_verification.py
+- tests/test_orchestrator.py
+forbidden_changes:
+- Do not allow workers to redefine deterministic verification success.
+- Do not skip configured verification commands.
+- Do not make verification depend on network access.
+- Do not change release scheduling, planner admission, or model routing.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_verification.py and tests/test_orchestrator.py
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_verification.py tests/test_orchestrator.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if verification can pass without running every configured command.
+- Stop if the resolved working directory is not the task worktree.
+- Stop if shared runtime support requires weakening timeout or exit-code handling.
+- Stop if the task requires changing files outside allowed_files.
+non_goals:
+- Do not change generated contract normalization.
+- Do not add user documentation.
+- Do not implement environment repair actions.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- shared-verification-runtime-0001

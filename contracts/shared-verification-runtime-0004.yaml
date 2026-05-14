@@ -1,0 +1,46 @@
+task_id: shared-verification-runtime-0004
+release_id: shared-verification-runtime
+title: Normalize planner verification commands safely
+task_type: code_only
+budget_class: M
+objective: Normalize generated planner contract verification commands to the configured
+  shared runtime for a narrow safe subset of worktree-local Python invocations while
+  preserving all hard admission gates.
+allowed_files:
+- src/agentic_devloop/contracts.py
+- src/agentic_devloop/planning.py
+- tests/test_contract_normalization.py
+- tests/test_planning.py
+- tests/test_models.py
+forbidden_changes:
+- Do not parse or rewrite arbitrary shell syntax.
+- Do not relax forbidden paths, required evidence, stop-condition, or whole-repo-scope gates.
+- Do not normalize commands that contain unsafe shell operators or ambiguous interpreter usage.
+- Do not change runtime execution behavior.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_contract_normalization.py tests/test_planning.py tests/test_models.py
+- validation examples for normalized safe commands and refused unsafe commands
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest tests/test_contract_normalization.py tests/test_planning.py tests/test_models.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if normalization broadens task allowed_files or changes task intent.
+- Stop if a command with shell pipes, redirects, command substitution, or unknown executable is rewritten.
+- Stop if any existing hard admission test must be weakened.
+- Stop if this task requires editing more than 5 files.
+non_goals:
+- Do not change release execution evidence.
+- Do not update docs.
+- Do not implement runtime repair actions.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- shared-verification-runtime-0001

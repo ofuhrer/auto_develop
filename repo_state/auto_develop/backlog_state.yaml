@@ -6,6 +6,7 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
 current_focus: shared-verification-runtime
+active_epic: shared-verification-runtime
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -97,7 +98,19 @@ candidate_epics:
   priority: 9
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
-active_epics: []
+active_epics:
+- epic_id: shared-verification-runtime
+  next_recommendations: []
+  retry_count: 0
+  repair_count: 0
+  outcome_references: []
+  finalization_outcome_references: []
+  unresolved_finding_references: []
+  final_review_follow_up_memories: []
+  state_review_snapshot_references: []
+  metrics_snapshot_references: []
+  tuning_report_references: []
+  updated_at: '2026-05-14T07:24:13.405173Z'
 reviewed_epics: []
 completed_epic_records:
 - epic_id: review-convergence-adjudicator

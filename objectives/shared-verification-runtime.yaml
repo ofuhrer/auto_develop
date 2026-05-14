@@ -1,0 +1,20 @@
+release_id: shared-verification-runtime
+title: Shared Verification Runtime for Isolated Worktrees
+objective: Make task and release verification run through an explicit project-configured
+  shared runtime so isolated worktrees do not assume a local .venv, while preserving
+  deterministic verification evidence and hard-gate behavior.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- Project configuration exposes a clear shared verification runtime policy usable
+  from task worktrees without requiring a per-worktree .venv.
+- Generated and repaired contracts normalize verification commands to the configured
+  runtime when safe, with admission validation preserving hard gates.
+- run-task, run-release, run-objective, run-backlog, and run-governor verification
+  evidence records the resolved runtime, command, cwd, environment assumptions, stdout/stderr,
+  exit code, and failure reason.
+- Focused regression tests cover isolated worktree verification without a local .venv,
+  planner/admission normalization of unsafe worktree-local commands, and no weakening
+  of forbidden-path, evidence, or verification hard gates.
+- User and development docs explain how target repositories configure shared runtime
+  paths and how external targets avoid assuming controller-local virtual environments.
