@@ -135,6 +135,42 @@ Raw per-release logs can remain for audit, but the primary live view should be c
 4. Replace phase-specific artifact sprawl with one run manifest plus a few optional phase records.
 5. Cut tests that only prove internal policy branches once those branches disappear.
 
+## Patterns To Borrow
+
+The inspiration here is not “more harness.” It is the opposite: make the system smaller and let the agent own more of the policy.
+
+### From `autoresearch`
+
+Borrow the strongest simplification principle:
+
+- keep the repo tiny,
+- let the agent edit one or two real files,
+- use one primary metric,
+- and keep the loop easy to understand.
+
+The architectural lesson is that a small stable kernel plus a single agent-editable instruction file is often enough. If the agent can directly own the main decision surface, the harness does not need to keep simulating policy in code.
+
+### From `autonomous-dev`
+
+Borrow the project-level policy idea:
+
+- put goals, scope, constraints, and architecture into a project manifest,
+- have the agent read that before work,
+- and block work that is clearly out of scope.
+
+That part is useful because it externalizes policy. But do not copy the large hook/command/agent surface. That would reintroduce the same complexity problem in a different package.
+
+### Combined lesson
+
+The best target shape is:
+
+- a tiny deterministic kernel,
+- one project-level policy file,
+- one agent instruction file,
+- and a small number of structured decision envelopes.
+
+That is much closer to `autoresearch` than to a large enforcement-heavy harness.
+
 ## Bottom Line
 
 This project will not get smaller by adding more rules. It will get smaller by moving more judgment out of code and into agents.
@@ -156,6 +192,7 @@ This plan assumes we are willing to accept temporary instability, broken tests, 
 1. Freeze new deterministic policy branches unless they are true safety invariants.
 2. Reject new enums, validators, and bespoke repair paths unless they replace at least as much code as they add.
 3. Default to prompt changes, supervisor decisions, or smaller generic schemas instead of new phase-specific logic.
+4. Add a project-level policy manifest and instruction file if they are missing, and make them the first place where policy lives.
 
 ### Phase 2: Collapse the policy surface
 
@@ -163,6 +200,7 @@ This plan assumes we are willing to accept temporary instability, broken tests, 
 2. Remove duplicate normalization logic across planning, review, runtime supervision, and finalization.
 3. Move soft-budget handling out of hard-stop code paths and into supervisor-adjudicated findings.
 4. Simplify the durable state model to a single active lease plus compact outcome records.
+5. Move scope, goals, and constraints out of code and into a project manifest that the supervisor and agents read directly.
 
 ### Phase 3: Hand more authority to agents
 
@@ -170,12 +208,14 @@ This plan assumes we are willing to accept temporary instability, broken tests, 
 2. Put review interpretation and ambiguity handling into prompts and structured outputs.
 3. Treat the kernel as an executor and validator, not as a hidden policy engine.
 4. Prefer a failed or degraded autonomous decision over a large amount of brittle fallback code.
+5. Make the agent instructions the canonical place for “how to behave,” and keep Python mostly as transport and validation.
 
 ### Phase 4: Remove brittle guardrails
 
 1. Downgrade operational thresholds such as context size and task size from hard blockers to soft findings unless they are actual safety boundaries.
 2. Eliminate hard-coded special cases that exist only to recover from previous hard-coded special cases.
 3. Allow some cycles to fail visibly while the new prompt-driven policy is being learned and stabilized.
+4. Keep only hard gates that protect against irreversible damage, unsafe paths, and failed verification.
 
 ### Phase 5: Rebuild around a smaller kernel
 
@@ -183,11 +223,12 @@ This plan assumes we are willing to accept temporary instability, broken tests, 
 2. Reintroduce policy only where a prompt-based supervisor cannot represent it cleanly.
 3. Measure success by fewer code paths, fewer record types, fewer repair modes, and fewer tests.
 4. Accept that the transitional version may be less stable before it becomes simpler and more maintainable.
+5. Prefer one or two stable editable files over many phase-specific policy modules.
 
 ### Execution Order
 
 1. Start with state, logging, and finalization precedence, because those create the most visible brittleness.
-2. Then reduce policy code in planning and feature review.
+2. Then move policy out of `planning.py`, `feature_review.py`, and `release.py` into prompts and project manifests.
 3. Then simplify `models.py` and `runtime_supervisor.py`.
 4. Then cut artifact sprawl and trim tests around removed behavior.
 5. Finally, collapse the remaining orchestration glue so the kernel is clearly thinner than the agent policy layer.
@@ -199,3 +240,4 @@ This plan assumes we are willing to accept temporary instability, broken tests, 
 3. More explicit agent ownership of judgment-heavy choices.
 4. A smaller, less brittle kernel that only enforces what truly must be deterministic.
 5. Lower LOC and lower test volume as a direct outcome of removing policy from code.
+6. A project policy file and agent instruction file that carry the bulk of the behavior.
