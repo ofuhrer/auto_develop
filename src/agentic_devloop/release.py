@@ -18,6 +18,7 @@ from pydantic import Field, field_validator, model_validator
 from agentic_devloop.artifacts import cleanup_task_artifacts
 from agentic_devloop.budget import build_budget_ledger, build_tuning_report
 from agentic_devloop.config import load_project_config
+from agentic_devloop.cost_runtime_governance import build_cost_runtime_governance_decision
 from agentic_devloop.evidence import (
     write_final_integration_verification_evidence,
     write_feature_review_decision,
@@ -88,6 +89,8 @@ from agentic_devloop.runtime_supervisor import (
     load_planner_admission_repair_decision_artifact,
 )
 from agentic_devloop.supervisor_decisions import (
+    CostRuntimeGovernanceAction,
+    CostRuntimeGovernanceDecision,
     DecisionRiskLevel,
     EnvironmentRepairDecision,
     EnvironmentRepairOutcome,
@@ -719,6 +722,123 @@ def _release_scheduling_decision_path(release_root: Path, release_id: str) -> Pa
     )
 
 
+def _cost_runtime_governance_decision_path(release_root: Path, release_id: str) -> Path:
+    return supervisor_decision_artifact_path(
+        release_bundle_path=release_root,
+        decision_type=SupervisorDecisionType.COST_RUNTIME_GOVERNANCE,
+        decision_id=release_id,
+    )
+
+
+def _latest_release_run_dir(
+    *,
+    runs_dir: Path,
+    release_id: str,
+    exclude_run_id: str | None = None,
+) -> Path | None:
+    if not runs_dir.exists():
+        return None
+    suffix = f"_{release_id}_release"
+    candidates = [
+        path
+        for path in runs_dir.iterdir()
+        if path.is_dir() and path.name.endswith(suffix) and path.name != exclude_run_id
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: path.name)
+
+
+def _infer_budget_class(config: "ProjectConfig") -> str:
+    model = config.executor.model
+    entry = config.model_catalog.get(model)
+    if entry is not None:
+        return entry.budget_class
+    return "L"
+
+
+def _load_or_build_cost_runtime_governance_decision(
+    *,
+    release_root: Path,
+    release_id: str,
+    runs_dir: Path,
+    current_run_id: str,
+    config: "ProjectConfig",
+    now: datetime | None,
+    progress: Callable[[str], None] | None = None,
+) -> CostRuntimeGovernanceDecision:
+    decision_path = _cost_runtime_governance_decision_path(release_root, release_id)
+    if decision_path.exists():
+        loaded = load_supervisor_decision_artifact(decision_path)
+        if not isinstance(loaded, CostRuntimeGovernanceDecision):
+            raise ValueError(
+                f"cost-runtime governance decision artifact has unsupported type: {loaded.decision_type}"
+            )
+        return loaded
+
+    prior_release_run_dir = _latest_release_run_dir(
+        runs_dir=runs_dir,
+        release_id=release_id,
+        exclude_run_id=current_run_id,
+    )
+    prior_release_metrics_path = (
+        prior_release_run_dir / "release_metrics.json"
+        if prior_release_run_dir is not None
+        else None
+    )
+    prior_release_tuning_path = (
+        prior_release_run_dir / "release_tuning.md"
+        if prior_release_run_dir is not None
+        else None
+    )
+    release_metrics_path = (
+        prior_release_metrics_path
+        if prior_release_metrics_path is not None and prior_release_metrics_path.exists()
+        else None
+    )
+    release_tuning_path = (
+        prior_release_tuning_path
+        if prior_release_tuning_path is not None and prior_release_tuning_path.exists()
+        else None
+    )
+
+    decision = build_cost_runtime_governance_decision(
+        decision_id=release_id,
+        release_id=release_id,
+        decided_by="deterministic",
+        budget_class=_infer_budget_class(config),
+        release_metrics_path=release_metrics_path,
+        release_tuning_path=release_tuning_path,
+        decided_at=now,
+    )
+    written = write_supervisor_decision_artifact(release_bundle_path=release_root, decision=decision)
+    if written != decision_path:
+        raise RuntimeError(
+            f"cost-runtime governance decision artifact was written to unexpected path: {written}"
+        )
+    loaded = load_supervisor_decision_artifact(decision_path)
+    if not isinstance(loaded, CostRuntimeGovernanceDecision):
+        raise ValueError(
+            f"cost-runtime governance decision artifact has unsupported type: {loaded.decision_type}"
+        )
+    _report(
+        progress,
+        "event=cost_runtime_governance_decision "
+        f"action={loaded.selected_action.value} outcome={loaded.outcome.value} path={decision_path}",
+    )
+    return loaded
+
+
+def _cost_runtime_governance_feature_review_max_repair_loops_override(
+    *,
+    decision: CostRuntimeGovernanceDecision,
+    default_max_repair_loops: int,
+) -> int | None:
+    if decision.selected_action != CostRuntimeGovernanceAction.REVIEW_CAPPED:
+        return None
+    return min(default_max_repair_loops, 1)
+
+
 def _persist_planner_admission_repairs_from_warnings(
     *,
     release_root: Path,
@@ -981,6 +1101,27 @@ def run_release(
         f"outcome={scheduling_decision.outcome.value} "
         f"path={_release_scheduling_decision_path(release_root, release_id)}",
     )
+
+    cost_runtime_governance_decision = _load_or_build_cost_runtime_governance_decision(
+        release_root=release_root,
+        release_id=release_id,
+        runs_dir=runs_dir,
+        current_run_id=run_id,
+        config=config,
+        now=now,
+        progress=progress,
+    )
+    max_feature_review_repair_loops_override = _cost_runtime_governance_feature_review_max_repair_loops_override(
+        decision=cost_runtime_governance_decision,
+        default_max_repair_loops=config.feature_review_max_repair_loops,
+    )
+    if max_feature_review_repair_loops_override is not None:
+        _report(
+            progress,
+            "event=cost_runtime_governance_review_cap "
+            f"max_feature_review_repair_loops={max_feature_review_repair_loops_override} "
+            f"path={_cost_runtime_governance_decision_path(release_root, release_id)}",
+        )
     if scheduling_decision.selected_action == ReleaseSchedulingAction.PARALLEL:
         task_results = _run_release_parallel(
             project_id=project_id,
@@ -1116,6 +1257,7 @@ def run_release(
             push_on_accept=push_on_accept,
             debug_keep_artifacts=debug_keep_artifacts,
             progress=progress,
+            max_feature_review_repair_loops_override=max_feature_review_repair_loops_override,
         )
         task_results = feature_review_loop.task_results
         feature_review_path = feature_review_loop.feature_review_path
@@ -2135,6 +2277,7 @@ def _run_feature_review_and_repair_loop(
     push_on_accept: bool,
     debug_keep_artifacts: bool,
     progress: Callable[[str], None] | None,
+    max_feature_review_repair_loops_override: int | None = None,
 ) -> FeatureReviewLoopResult:
     output_root = release_root / "feature_review"
     output_root.mkdir(parents=True, exist_ok=True)
@@ -2324,7 +2467,11 @@ def _run_feature_review_and_repair_loop(
     decision = run_review(attempt=1)
     previous_review_decisions.append(decision)
 
-    max_feature_review_repair_loops = config.feature_review_max_repair_loops
+    max_feature_review_repair_loops = (
+        max_feature_review_repair_loops_override
+        if max_feature_review_repair_loops_override is not None
+        else config.feature_review_max_repair_loops
+    )
     for loop_index in range(max_feature_review_repair_loops + 1):
         required_findings = [finding for finding in decision.findings if finding.required_repairs]
         if required_findings:

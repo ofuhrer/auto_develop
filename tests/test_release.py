@@ -26,6 +26,9 @@ from agentic_devloop.models import FeatureReviewDecision, FeatureReviewRecheckRe
 from agentic_devloop.orchestrator import TaskRunResult, executor_config_for_task, executor_configs_for_task
 from agentic_devloop.release import (
     _build_release_metrics,
+    _cost_runtime_governance_decision_path,
+    _cost_runtime_governance_feature_review_max_repair_loops_override,
+    _load_or_build_cost_runtime_governance_decision,
     collect_release_planning_state_review_snapshot,
     make_release_run_id,
     _assert_safe_final_integration_verification_worktree,
@@ -47,6 +50,8 @@ from agentic_devloop.release import (
     run_release,
 )
 from agentic_devloop.supervisor_decisions import (
+    CostRuntimeGovernanceAction,
+    CostRuntimeGovernanceDecision,
     EnvironmentRepairDecision,
     EnvironmentRepairPolicyAction,
     FinalReviewFindingAdjudicationDecision,
@@ -258,6 +263,127 @@ class FlakyVerificationExecutor(FakeExecutor):
             backend="fake",
             model=None,
         )
+
+
+def test_cost_runtime_governance_falls_back_without_prior_metrics(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config = ProjectConfig.model_validate(
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {},
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 1,
+                "max_strong_model_calls_per_release": 0,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        }
+    )
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    release_root = tmp_path / "current_release"
+    release_root.mkdir()
+
+    decision = _load_or_build_cost_runtime_governance_decision(
+        release_root=release_root,
+        release_id="v0.1.0",
+        runs_dir=runs_dir,
+        current_run_id="20260514T020304Z_v0.1.0_release",
+        config=config,
+        now=None,
+        progress=None,
+    )
+
+    assert isinstance(decision, CostRuntimeGovernanceDecision)
+    assert decision.selected_action == CostRuntimeGovernanceAction.DECOMPOSED
+    assert _cost_runtime_governance_feature_review_max_repair_loops_override(
+        decision=decision,
+        default_max_repair_loops=3,
+    ) is None
+
+
+def test_cost_runtime_governance_review_cap_writes_typed_decision_artifact(tmp_path: Path) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config = ProjectConfig.model_validate(
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {},
+            "model_routing": {"default_role": "worker"},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 1,
+                "max_strong_model_calls_per_release": 0,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        }
+    )
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    prior_release_run_dir = runs_dir / "20260514T010203Z_v0.1.0_release"
+    prior_release_run_dir.mkdir(parents=True)
+    (prior_release_run_dir / "release_tuning.md").write_text("# tuning\n", encoding="utf-8")
+    (prior_release_run_dir / "release_metrics.json").write_text(
+        json.dumps(
+            {
+                "run_id": "prior",
+                "release_id": "v0.1.0",
+                "decision": "accepted",
+                "totals": {"prompt_chars": 1000, "context_chars": 1000},
+                "compact_governance": {
+                    "review_wave_count": 3,
+                    "feature_review_repair_wave_count": 0,
+                    "model_fallback_count": 0,
+                },
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    release_root = tmp_path / "current_release"
+    release_root.mkdir()
+
+    decision = _load_or_build_cost_runtime_governance_decision(
+        release_root=release_root,
+        release_id="v0.1.0",
+        runs_dir=runs_dir,
+        current_run_id="20260514T040506Z_v0.1.0_release",
+        config=config,
+        now=None,
+        progress=None,
+    )
+
+    decision_path = _cost_runtime_governance_decision_path(release_root, "v0.1.0")
+    assert decision_path.exists()
+    assert isinstance(decision, CostRuntimeGovernanceDecision)
+    assert decision.selected_action == CostRuntimeGovernanceAction.REVIEW_CAPPED
+    assert (
+        _cost_runtime_governance_feature_review_max_repair_loops_override(
+            decision=decision,
+            default_max_repair_loops=3,
+        )
+        == 1
+    )
 
 
 class AllowedFilesExecutor:

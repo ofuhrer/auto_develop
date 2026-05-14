@@ -40,6 +40,13 @@ from agentic_devloop.state_refresh import (
     write_post_cycle_state_refresh_artifact,
 )
 from agentic_devloop.state_store import StateStore
+from agentic_devloop.supervisor_decisions import (
+    CostRuntimeGovernanceAction,
+    CostRuntimeGovernanceDecision,
+    SupervisorDecisionType,
+    load_supervisor_decision_artifact,
+    supervisor_decision_artifact_path,
+)
 from agentic_devloop.yaml_io import load_yaml_model, write_yaml_model
 
 
@@ -824,13 +831,37 @@ def _build_execution_strategy_inputs(
     release_metrics_path = (
         (prior_release_run_dir / "release_metrics.json") if prior_release_run_dir is not None else None
     )
+    cost_runtime_governance_decision_path: Path | None = None
+    cost_runtime_governance_decision: CostRuntimeGovernanceDecision | None = None
+    if prior_release_run_dir is not None:
+        candidate = supervisor_decision_artifact_path(
+            release_bundle_path=prior_release_run_dir,
+            decision_type=SupervisorDecisionType.COST_RUNTIME_GOVERNANCE,
+            decision_id=objective.release_id,
+        )
+        if candidate.exists():
+            cost_runtime_governance_decision_path = candidate
+            try:
+                loaded = load_supervisor_decision_artifact(candidate)
+            except Exception:
+                loaded = None
+            if isinstance(loaded, CostRuntimeGovernanceDecision):
+                cost_runtime_governance_decision = loaded
     return {
         "release_id": objective.release_id,
         "task_ids": [epic.epic_id],
-        "coupled_tasks": True,
+        "cohesive_scope": bool(
+            cost_runtime_governance_decision
+            and cost_runtime_governance_decision.selected_action == CostRuntimeGovernanceAction.ONE_SHOT
+        ),
+        "coupled_tasks": not bool(
+            cost_runtime_governance_decision
+            and cost_runtime_governance_decision.selected_action == CostRuntimeGovernanceAction.ONE_SHOT
+        ),
         "state_review_snapshot_path": plan.state_review_snapshot_path,
         "release_review_path": release_review_path if release_review_path is not None and release_review_path.exists() else None,
         "release_metrics_path": release_metrics_path if release_metrics_path is not None and release_metrics_path.exists() else None,
+        "cost_runtime_governance_decision_path": cost_runtime_governance_decision_path,
     }
 
 
