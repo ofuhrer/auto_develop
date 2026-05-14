@@ -1,0 +1,55 @@
+task_id: review-stop-policy-hardening-0005
+release_id: review-stop-policy-hardening
+title: Document review stop hardening behavior
+task_type: documentation
+budget_class: S
+objective: Update user, developer, and design documentation for the supervisor-governed
+  final review stop policy, including configuration, final integration verification
+  ordering, allowed final classifications, blocker rules, artifact paths, cockpit
+  events, and repo-state follow-up compaction.
+allowed_files:
+- README.md
+- docs/README.md
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/design/SUPERVISOR_DECISIONS.md
+- docs/design/TECHNICAL_SPECIFICATION.md
+- docs/design/ROADMAP_AND_BACKLOG.md
+forbidden_changes:
+- Do not describe aspirational governor-wide decisioning as implemented.
+- Do not add CLI examples or config keys that are not implemented and tested by earlier
+  tasks.
+- Do not modify source code or tests in this documentation task.
+- Do not claim accepted or deferred findings can bypass final integration verification.
+- Do not claim blocker findings can be finalized.
+required_evidence:
+- git diff
+- changed-files list
+- documentation excerpt showing configured convergence boundary
+- documentation excerpt showing final integration verification runs before final adjudication
+- documentation excerpt showing blocker versus accepted/deferred classification rules
+- documentation excerpt showing summary, cockpit, and repo-state follow-up artifacts
+- git diff --check output
+verification:
+  commands:
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if docs would need to describe behavior not implemented by tasks 0001-0004.
+- Stop if documentation changes require committing generated runtime evidence or repo_state
+  artifacts.
+- Stop if docs would imply human judgment is still required after green verification
+  for non-blocking final findings.
+- Stop if the task requires changing files outside allowed_files.
+non_goals:
+- Do not change code or tests.
+- Do not rewrite unrelated architecture or roadmap sections.
+- Do not add new objective or contract examples.
+scientific_assumptions:
+- Not applicable; documentation task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- review-stop-policy-hardening-0004

@@ -1,0 +1,55 @@
+task_id: review-stop-policy-hardening-0001
+release_id: review-stop-policy-hardening
+title: Configure bounded final review convergence
+task_type: code_only
+budget_class: M
+objective: Add a validated project configuration setting for the maximum feature-review
+  repair convergence boundary and wire release orchestration to use it instead of
+  the hard-coded loop limit. Reaching the configured boundary must stop additional
+  review waves and enter the existing final review continuation/adjudication path.
+allowed_files:
+- src/agentic_devloop/models.py
+- src/agentic_devloop/config.py
+- src/agentic_devloop/release.py
+- configs/auto_develop.yaml
+- tests/test_config.py
+- tests/test_release.py
+forbidden_changes:
+- Do not change task execution, branch naming, worktree creation, merge, cleanup,
+  or finalization mechanics outside the feature-review loop boundary.
+- Do not remove existing final review continuation or adjudication artifact writing.
+- Do not permit zero or negative convergence limits.
+- Do not make the default behavior less bounded than the current hard-coded limit.
+- Do not add runtime evidence under runs/ or durable repo_state files.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_config.py and focused tests/test_release.py boundary
+  cases
+- configuration example showing the default or auto_develop convergence boundary
+- test evidence showing no additional reviewer wave is launched after the configured
+  boundary
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_config.py tests/test_release.py -k 'feature_review or convergence or
+    final_review'
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if configuration plumbing requires changing more than 6 files.
+- Stop if a release can continue launching reviewer attempts after the configured
+  boundary is reached.
+- Stop if the boundary setting cannot be validated before run-release starts.
+- Stop if the task requires changing files outside allowed_files.
+non_goals:
+- Do not redesign finding classification.
+- Do not change repo-state memory compaction.
+- Do not update user documentation in this task.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: true
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

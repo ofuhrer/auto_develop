@@ -1,0 +1,57 @@
+task_id: review-stop-policy-hardening-0002
+release_id: review-stop-policy-hardening
+title: Classify adjacent review findings deterministically
+task_type: code_only
+budget_class: M
+objective: Update feature-review convergence classification and typed supervisor decision
+  validation to include soft observability issues, strengthen duplicate/adjacent finding
+  suppression, and keep required implementation-change findings blocking unless they
+  are repaired and reverified.
+allowed_files:
+- src/agentic_devloop/feature_review.py
+- src/agentic_devloop/supervisor_decisions.py
+- tests/test_feature_review.py
+- tests/test_supervisor_decisions.py
+forbidden_changes:
+- Do not loosen evidence path, rationale, fallback plan, or validators_to_rerun requirements
+  for accepted or deferred decisions.
+- Do not allow blocker or required implementation-change findings to be accepted by
+  classification rules.
+- Do not change release orchestration flow in this task.
+- Do not rename existing serialized enum values unless backward-compatibility tests
+  are added in this task.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_feature_review.py and tests/test_supervisor_decisions.py
+- unit test showing adjacent repeated findings are classified as duplicate or deferred
+  follow-up instead of creating another repair wave
+- unit test showing required implementation-change findings remain blocker/repair
+- serialized decision example for soft observability issue with evidence paths, rationale,
+  fallback plan, and validators_to_rerun
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_feature_review.py tests/test_supervisor_decisions.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if classification requires editing release orchestration files.
+- Stop if accepted or deferred findings can serialize without evidence paths, rationale,
+  fallback plan, or validators_to_rerun.
+- Stop if required implementation-change findings can be classified as accepted risk,
+  duplicate, false-positive, verification-only, or soft observability without repair
+  and verification.
+- Stop if the task requires changing files outside allowed_files.
+non_goals:
+- Do not run final integration verification.
+- Do not persist repo-state memory.
+- Do not update documentation.
+scientific_assumptions:
+- Not applicable; deterministic classification task.
+fixture_changes_allowed: true
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- review-stop-policy-hardening-0001

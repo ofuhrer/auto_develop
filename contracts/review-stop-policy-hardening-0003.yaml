@@ -1,0 +1,64 @@
+task_id: review-stop-policy-hardening-0003
+release_id: review-stop-policy-hardening
+title: Run final verification before boundary adjudication
+task_type: code_only
+budget_class: L
+objective: Wire the configured convergence boundary into release orchestration so
+  final integration verification always runs on the feature branch before remaining
+  findings are adjudicated. Persist typed final review finding decisions for blocker,
+  accepted risk, deferred backlog follow-up, duplicate, false-positive, verification-only,
+  and soft observability classifications, and prevent finalization when blockers remain
+  or final verification fails.
+allowed_files:
+- src/agentic_devloop/release.py
+- src/agentic_devloop/evidence.py
+- src/agentic_devloop/supervisor_decisions.py
+- tests/test_release.py
+- tests/test_evidence.py
+forbidden_changes:
+- Do not bypass deterministic verification failures to make review adjudication pass.
+- Do not finalize a release before final integration verification has completed successfully
+  for accepted or deferred findings.
+- Do not accept or defer required implementation-change findings unless they were
+  repaired and reverified.
+- Do not delete or overwrite feature_review.json, feature_review_recheck.json, final_integration_verification.json,
+  or supervisor_decisions artifacts.
+- Do not change unrelated planner, executor, Git finalization, cleanup, or worktree
+  behavior.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_release.py and tests/test_evidence.py
+- test fixture proving green final verification with residual non-blocking findings
+  records accepted/deferred decisions
+- test fixture proving unresolved implementation blocker stops finalization
+- test fixture proving final verification failure blocks accept/defer outcomes
+- example final_review_finding_adjudication artifact paths linked from the continuation
+  decision
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_release.py tests/test_evidence.py -k 'final_review or feature_review
+    or final_integration'
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if final integration verification cannot be proven to run before per-finding
+  final adjudication.
+- Stop if any blocker classification can reach finalization.
+- Stop if failed final verification can produce accepted or deferred final review
+  outcomes.
+- Stop if implementation requires changing more than 5 files.
+- Stop if the task requires changing files outside allowed_files.
+non_goals:
+- Do not modify repo-state memory compaction.
+- Do not update governor cockpit rendering or documentation.
+- Do not redesign reviewer prompts.
+scientific_assumptions:
+- Not applicable; release orchestration task.
+fixture_changes_allowed: true
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- review-stop-policy-hardening-0002

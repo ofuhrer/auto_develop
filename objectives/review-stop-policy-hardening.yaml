@@ -1,0 +1,24 @@
+release_id: review-stop-policy-hardening
+title: Bound reviewer churn with explicit stop and adjudication policy
+objective: Implement a supervisor-governed final review stop policy that caps repeated
+  adjacent reviewer findings, runs final integration verification at the convergence
+  boundary, and records typed accept, defer, block, or backlog-follow-up decisions
+  so review repair does not require human judgment after verification is green.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- A configured maximum review/repair convergence boundary produces a typed supervisor
+  decision instead of launching unbounded additional review waves.
+- At the convergence boundary, the governor runs final integration verification on
+  the feature branch before classifying remaining findings.
+- Remaining reviewer findings are classified as blocker, accepted risk, deferred backlog
+  follow-up, duplicate, false-positive, or soft observability issue with evidence
+  paths, rationale, fallback plan, and validators to rerun.
+- Required implementation-change findings remain blocking unless repaired and reverified;
+  verification-only or policy/observability findings can be accepted or deferred only
+  with typed rationale.
+- Release summary, governor cockpit events, and repo-state refresh include the final
+  review stop/adjudication outcome so the next epic selection sees unresolved follow-ups.
+- Focused tests cover green-verification accept/defer behavior, unresolved blocker
+  stops, duplicate/adjacent finding suppression, and state-memory compaction of review
+  follow-ups.

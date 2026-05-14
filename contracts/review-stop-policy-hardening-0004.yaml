@@ -1,0 +1,62 @@
+task_id: review-stop-policy-hardening-0004
+release_id: review-stop-policy-hardening
+title: Expose final stop outcome to summaries and state
+task_type: code_only
+budget_class: M
+objective: Update release summary JSON/markdown, governor cockpit event rendering,
+  and repo-state refresh memory so final review stop and adjudication outcomes include
+  final verification evidence, per-finding decision artifact paths, unresolved blockers,
+  accepted risks, deferred backlog follow-ups, duplicates, false positives, and soft
+  observability issues.
+allowed_files:
+- src/agentic_devloop/release.py
+- src/agentic_devloop/governor_log.py
+- src/agentic_devloop/state_refresh.py
+- src/agentic_devloop/state_store.py
+- src/agentic_devloop/models.py
+- tests/test_release.py
+- tests/test_governor_log.py
+- tests/test_state_store.py
+forbidden_changes:
+- Do not store full reviewer transcripts in compact repo-state memory when artifact
+  paths and compact summaries are sufficient.
+- Do not write accepted/deferred follow-up memory for blocker or hard-stop outcomes.
+- Do not change epic selection behavior except by making unresolved follow-up memory
+  visible to existing state refresh inputs.
+- Do not remove existing summary fields or break machine-readable JSON compatibility.
+- Do not add target-specific repo_state files to the source repository.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_release.py tests/test_governor_log.py tests/test_state_store.py
+- release summary assertion showing final review stop outcome and adjudication artifact
+  paths
+- cockpit event assertion showing final review stop/adjudication status
+- state-store assertion showing compact unresolved follow-ups are available for future
+  selection
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_release.py tests/test_governor_log.py tests/test_state_store.py -k
+    'final_review or adjudication or follow_up or cockpit'
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if reporting requires changing the final adjudication rules from the prior
+  task.
+- Stop if blockers or hard stops can be compacted as accepted/deferred follow-ups.
+- Stop if release summary compatibility would require removing existing fields.
+- Stop if implementation requires changing more than 8 files.
+- Stop if the task requires changing files outside allowed_files.
+non_goals:
+- Do not implement new classifier categories beyond those added earlier in this release.
+- Do not modify cleanup retention policy.
+- Do not update documentation in this task.
+scientific_assumptions:
+- Not applicable; reporting and state persistence task.
+fixture_changes_allowed: true
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- review-stop-policy-hardening-0003
