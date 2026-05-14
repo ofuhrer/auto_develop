@@ -195,9 +195,6 @@ class FeatureReviewLoopResult:
 
 
 _RELEASE_BUDGET_SOFT_OVERAGE_RATIO = 0.2
-_FEATURE_REVIEW_MAX_REPAIR_LOOPS = 2
-
-
 class ReleaseFinalizationGate(StrictModel):
     allowed: bool
     reason: Literal[
@@ -2141,7 +2138,8 @@ def _run_feature_review_and_repair_loop(
     decision = run_review(attempt=1)
     previous_review_decisions.append(decision)
 
-    for loop_index in range(_FEATURE_REVIEW_MAX_REPAIR_LOOPS + 1):
+    max_feature_review_repair_loops = config.feature_review_max_repair_loops
+    for loop_index in range(max_feature_review_repair_loops + 1):
         required_findings = [finding for finding in decision.findings if finding.required_repairs]
         if required_findings:
             outstanding_required_finding_ids.update(finding.finding_id for finding in required_findings)
@@ -2345,14 +2343,14 @@ def _run_feature_review_and_repair_loop(
             return written
 
         if (
-            loop_index >= _FEATURE_REVIEW_MAX_REPAIR_LOOPS
+            loop_index >= max_feature_review_repair_loops
             and required_findings
             and decision.recommendation != FeatureReviewRecommendation.ESCALATE
         ):
             _report(
                 progress,
                 "event=feature_review_convergence_limit_reached "
-                f"limit={_FEATURE_REVIEW_MAX_REPAIR_LOOPS} unresolved_required_findings="
+                f"limit={max_feature_review_repair_loops} unresolved_required_findings="
                 + json.dumps([finding.finding_id for finding in required_findings], sort_keys=True),
             )
             rerun_verification(loop_index + 1, decision)
@@ -2669,7 +2667,7 @@ def _run_feature_review_and_repair_loop(
             feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
             return build_result()
 
-        if loop_index >= _FEATURE_REVIEW_MAX_REPAIR_LOOPS:
+        if loop_index >= max_feature_review_repair_loops:
             verification_ok = last_verification_ok
             adjudicated_finding_ids = (
                 [

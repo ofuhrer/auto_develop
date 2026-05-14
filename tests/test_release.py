@@ -4286,6 +4286,7 @@ def test_run_release_feature_review_required_findings_stop_at_convergence_limit(
             },
             "model_routing": {"default_role": "worker"},
             "verification_profiles": {"default": {"commands": ["test -d docs"]}},
+            "feature_review_max_repair_loops": 1,
             "budget": {
                 "max_executor_attempts_per_task": 2,
                 "max_strong_model_calls_per_release": 10,
@@ -4342,26 +4343,6 @@ def test_run_release_feature_review_required_findings_stop_at_convergence_limit(
                 ],
             }
         ),
-        FeatureReviewDecision.model_validate(
-            {
-                "release_id": "v0.1.0",
-                "reviewer": "strong_model",
-                "summary": "Still blocked after repairs.",
-                "recommendation": "require_repairs",
-                "accepted_risks": [],
-                "rerun_verification_commands": [],
-                "findings": [
-                    {
-                        "finding_id": "finding-repeat",
-                        "severity": "high",
-                        "summary": "Fix required.",
-                        "affected_files": ["docs/demo-0001.md"],
-                        "required_repairs": ["Update docs yet again."],
-                        "optional_follow_ups": [],
-                    }
-                ],
-            }
-        ),
     ]
 
     class FakeBackendResult:
@@ -4391,7 +4372,9 @@ def test_run_release_feature_review_required_findings_stop_at_convergence_limit(
     assert recheck["stop_reason"] == "blocked_by_retry_budget"
     assert recheck["unresolved_finding_ids"] == ["finding-repeat"]
     assert "event=feature_review_convergence_limit_reached" in log_text
+    assert "limit=1" in log_text
     assert Path(summary["final_integration_verification_path"]).exists()
+    assert not decisions
 
     classification_path = supervisor_decision_artifact_path(
         release_bundle_path=result.summary_path.parent,

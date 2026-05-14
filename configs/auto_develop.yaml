@@ -127,6 +127,8 @@ unsafe_overlap_paths:
   - contracts/**
   - objectives/**
 
+feature_review_max_repair_loops: 2
+
 budget:
   max_executor_attempts_per_task: 2
   max_strong_model_calls_per_release: 10

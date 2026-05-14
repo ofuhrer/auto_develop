@@ -152,6 +152,7 @@ class ProjectConfig(StrictModel):
     verification_runtime: VerificationRuntimeConfig | None = None
     verification_profiles: dict[str, VerificationProfile] = Field(min_length=1)
     unsafe_overlap_paths: list[str] = Field(default_factory=list)
+    feature_review_max_repair_loops: int = Field(default=2, gt=0)
     release_finalization_policy: ReleaseFinalizationPolicy | None = None
     budget: Budget
     repo_state_path: Path | None = None
