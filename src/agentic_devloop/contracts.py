@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from copy import deepcopy
 import json
+import shlex
 from typing import Any
 
 from agentic_devloop.config import discover_safe_verification_runtime
@@ -15,7 +16,10 @@ from agentic_devloop.models import (
     ProjectConfig,
     TaskContract,
 )
-from agentic_devloop.verification import rewrite_worktree_local_verification_command
+from agentic_devloop.verification import (
+    is_safe_worktree_python_rewrite_command,
+    rewrite_worktree_local_verification_command,
+)
 
 
 _REQUIRED_EVIDENCE_ITEMS = ("git diff", "changed-files list")
@@ -26,6 +30,7 @@ _TASK_KEY_ALIASES = {
     "stopConditions": "stop_conditions",
     "dependsOn": "depends_on",
 }
+_WORKTREE_PYTHON = {".venv/bin/python", "./.venv/bin/python"}
 
 
 def normalize_contract_request(
@@ -54,7 +59,12 @@ def normalize_contract_request(
     safe_runtime = discover_safe_verification_runtime(project_config)
     updated_commands = list(updated_contract.verification.commands)
     command_changed = False
+    refusal_reasons: list[ContractNormalizationRefusalReason] = []
     for index, command in enumerate(updated_commands):
+        if safe_runtime and _contains_local_worktree_python_token(command):
+            if not _is_safe_worktree_python_invocation(command):
+                refusal_reasons.append(ContractNormalizationRefusalReason.UNSAFE_NORMALIZATION)
+                continue
         rewritten = rewrite_worktree_local_verification_command(command, safe_runtime=safe_runtime)
         if rewritten != command:
             command_changed = True
@@ -70,6 +80,18 @@ def normalize_contract_request(
         updated_contract = updated_contract.model_copy(
             update={"verification": updated_contract.verification.model_copy(update={"commands": updated_commands})}
         )
+    if refusal_reasons:
+        return ContractNormalizationOutcome(
+            release_id=request.release_id,
+            task_id=request.task_id,
+            decision=ContractNormalizationDecision.REFUSED,
+            rationale="Suggested verification command normalization exceeded bounded safe command policy.",
+            before_snapshot=request.before_snapshot,
+            after_snapshot=None,
+            changed_fields=[],
+            refusal_reasons=_dedupe_refusal_reasons(refusal_reasons),
+            artifact_paths=request.artifact_paths,
+        )
 
     return ContractNormalizationOutcome(
         release_id=request.release_id,
@@ -81,6 +103,22 @@ def normalize_contract_request(
         changed_fields=changed_fields,
         artifact_paths=request.artifact_paths,
     )
+
+
+def is_safe_worktree_python_verification_command(command: str) -> bool:
+    return _is_safe_worktree_python_invocation(command)
+
+
+def _contains_local_worktree_python_token(command: str) -> bool:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return False
+    return any(token in _WORKTREE_PYTHON for token in tokens)
+
+
+def _is_safe_worktree_python_invocation(command: str) -> bool:
+    return is_safe_worktree_python_rewrite_command(command)
 
 
 def normalize_task_contract_payload(

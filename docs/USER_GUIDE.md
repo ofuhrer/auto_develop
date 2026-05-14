@@ -199,13 +199,13 @@ release_finalization_policy:
 verification_profiles:
   default:
     commands:
-      - cd /path/to/target_project/main && PYTHONPATH={worktree}/src .venv/bin/python -m pytest
+      - cd /path/to/target_project/main && PYTHONPATH={worktree}/src /path/to/shared-runtime/bin/python -m pytest
   code_only:
     commands:
-      - cd /path/to/target_project/main && PYTHONPATH={worktree}/src .venv/bin/python -m pytest
+      - cd /path/to/target_project/main && PYTHONPATH={worktree}/src /path/to/shared-runtime/bin/python -m pytest
   documentation:
     commands:
-      - cd /path/to/target_project/main && PYTHONPATH={worktree}/src .venv/bin/python -m pytest
+      - cd /path/to/target_project/main && PYTHONPATH={worktree}/src /path/to/shared-runtime/bin/python -m pytest
 
 budget:
   max_executor_attempts_per_task: 2
@@ -235,6 +235,8 @@ Important config fields:
 - `release_finalization_policy`: policy-owned finalization mode. Use `pr_preparation` when you want a safe PR handoff without automatic push or merge; `local_merge` and `push_feature` are opt-in release-finish policies.
 - `verification_profiles`: named command sets task contracts can reference.
 - `budget`: deterministic limits used during planning and review.
+
+## Shared Verification Runtime
 
 Worktrees normally do not contain their own `.venv`. Prefer verification commands that use a configured shared runtime from the main checkout while pointing imports or source paths at the task worktree. The `{worktree}` placeholder is the intended convention for worktree-aware commands; until every executor path expands it, use explicit absolute paths or wrapper scripts that receive the worktree path from project config. Avoid commands such as `.venv/bin/python` that assume the virtual environment exists inside each isolated worktree.
 
@@ -948,7 +950,7 @@ Run-backlog evidence records artifact paths when produced, including:
 - release budget (`release_budget.json`);
 - release tuning (`release_tuning.md`).
 
-Planner contract generation can still fail deterministic admission today. The implemented repair path is one bounded normalization pass before stop: add missing required evidence such as `git diff` and changed-files lists, normalize worktree-local `.venv` commands to configured shared-runtime commands, preserve scope and intent, then rerun deterministic contract validation. If the repaired contract still fails, release execution stops with the admission evidence trail instead of silently bypassing the gate. Hard stops include unsafe release IDs, forbidden path changes, generated-artifact, lockfile, or migration scope changes, missing hard evidence, weak stop conditions, and whole-repo scope. Reviewer- and supervisor-output normalization extensions remain planned and should not be documented as shipped.
+Planner contract generation can still fail deterministic admission today. The implemented repair path is one bounded normalization pass before stop: add missing required evidence such as `git diff` and changed-files lists, normalize worktree-local `.venv` commands to configured shared-runtime commands, preserve scope and intent, then rerun deterministic contract validation. Safe normalization accepts direct `.venv/bin/python ...` and allowlisted env-prefixed forms such as `PYTHONPATH=... .venv/bin/python ...`; commands with shell operators, substitutions, or non-allowlisted prefixes are refused. If the repaired contract still fails, release execution stops with the admission evidence trail instead of silently bypassing the gate. Hard stops include unsafe release IDs, forbidden path changes, generated-artifact, lockfile, or migration scope changes, missing hard evidence, weak stop conditions, and whole-repo scope. Reviewer- and supervisor-output normalization extensions remain planned and should not be documented as shipped.
 
 ### `agent-loop status`
 

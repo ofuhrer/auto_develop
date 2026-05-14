@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -621,6 +622,82 @@ def test_run_task_uses_verification_profile_and_writes_phase3_evidence(tmp_path)
     assert "test -f benches/result.txt" in (result.bundle_path / "verification.log").read_text(
         encoding="utf-8"
     )
+
+
+def test_run_task_uses_shared_verification_runtime_for_worktree_commands(tmp_path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "README.md").write_text("# test\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "verification_runtime": {"python_path": sys.executable, "env": {"SHARED_RT": "1"}},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    contract_path = tmp_path / "contract.yaml"
+    _write_yaml(
+        contract_path,
+        {
+            "task_id": "demo-shared-runtime-0001",
+            "release_id": "v0.1.0",
+            "title": "Create docs result with shared runtime verification",
+            "budget_class": "S",
+            "objective": "Create a result document.",
+            "allowed_files": ["docs/**"],
+            "forbidden_changes": [],
+            "required_evidence": ["git diff", "test output"],
+            "verification": {
+                "commands": [
+                    '.venv/bin/python -c "import os, pathlib; assert os.environ[\'SHARED_RT\']==\'1\'; assert pathlib.Path(\'docs/result.md\').exists(); assert not pathlib.Path(\'.venv/bin/python\').exists()"'
+                ]
+            },
+            "stop_conditions": ["Verification fails twice."],
+        },
+    )
+
+    result = run_task(
+        project_id="demo",
+        contract_path=contract_path,
+        config_dir=config_dir,
+        runs_dir=tmp_path / "runs",
+        executor=FakeExecutor(),
+        now=datetime(2026, 5, 12, 12, 5, tzinfo=UTC),
+    )
+
+    assert result.decision.decision == "accepted"
+    verification_log = (result.bundle_path / "verification.log").read_text(encoding="utf-8")
+    assert sys.executable in verification_log
+    assert "cwd=" in verification_log
+    assert "resolved_command=" in verification_log
+    assert "exit_code=0" in verification_log
+    assert "failure_reason=<none>" in verification_log
+    assert "env_additions=SHARED_RT=1" in verification_log
+    assert "original_command=.venv/bin/python -c " in verification_log
 
 
 def test_run_task_can_commit_merge_and_push_accepted_changes(tmp_path) -> None:

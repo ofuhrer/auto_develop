@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
 import time
@@ -28,9 +29,13 @@ def run_process(
     stream_callback: Callable[[str, str], None] | None = None,
     heartbeat_callback: Callable[[float], None] | None = None,
     heartbeat_interval_seconds: float = 120.0,
+    env_additions: dict[str, str] | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> ProcessOutput:
     started_at = clock()
+    env = os.environ.copy()
+    if env_additions:
+        env.update(env_additions)
     if stream_callback is not None:
         return _run_process_streamed(
             command,
@@ -41,6 +46,7 @@ def run_process(
             stream_callback=stream_callback,
             heartbeat_callback=heartbeat_callback,
             heartbeat_interval_seconds=heartbeat_interval_seconds,
+            env=env,
             started_at=started_at,
             clock=clock,
         )
@@ -53,6 +59,7 @@ def run_process(
             capture_output=True,
             shell=shell,
             input=input_text,
+            env=env,
             check=False,
         )
         return ProcessOutput(
@@ -83,6 +90,7 @@ def _run_process_streamed(
     stream_callback: Callable[[str, str], None],
     heartbeat_callback: Callable[[float], None] | None,
     heartbeat_interval_seconds: float,
+    env: dict[str, str],
     started_at: float,
     clock: Callable[[], float],
 ) -> ProcessOutput:
@@ -94,6 +102,7 @@ def _run_process_streamed(
         stdin=subprocess.PIPE if input_text is not None else None,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=env,
     )
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []

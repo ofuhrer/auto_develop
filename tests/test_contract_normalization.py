@@ -6,7 +6,11 @@ import pytest
 from pydantic import ValidationError
 
 from agentic_devloop.config import discover_safe_verification_runtime
-from agentic_devloop.contracts import normalize_contract_request, normalize_task_contract_payload
+from agentic_devloop.contracts import (
+    is_safe_worktree_python_verification_command,
+    normalize_contract_request,
+    normalize_task_contract_payload,
+)
 from agentic_devloop.models import (
     ContractNormalizationDecision,
     ContractNormalizationOutcome,
@@ -296,3 +300,48 @@ def test_normalize_contract_request_rewrites_worktree_local_venv_only_with_safe_
         == ".venv/bin/python -m pytest tests/test_contract_normalization.py"
     )
     assert all(field.path != "verification.commands[0]" for field in without_runtime.changed_fields)
+
+
+def test_normalize_contract_request_refuses_unsafe_worktree_python_command() -> None:
+    contract = _task_contract("demo-1005")
+    contract["verification"] = {"commands": [".venv/bin/python -m pytest tests/test_contract_normalization.py | tee out.log"]}
+    request = ContractNormalizationRequest.model_validate(
+        {
+            "release_id": "demo-release",
+            "task_id": "demo-1005",
+            "rationale": "Repair runtime command.",
+            "before_snapshot": {"contract": contract},
+        }
+    )
+    config = ProjectConfig.model_validate(
+        {
+            "project_id": "demo",
+            "repo_path": "/tmp/demo",
+            "default_base_branch": "main",
+            "worktree_root": "/tmp/worktrees",
+            "verification_runtime": {"python_path": "/shared/.venv/bin/python"},
+            "executor": {"type": "codex_cli", "model": "worker", "max_walltime_minutes": 5},
+            "verification_profiles": {"default": {"commands": ["true"]}},
+            "budget": {
+                "max_executor_attempts_per_task": 1,
+                "max_strong_model_calls_per_release": 1,
+                "max_changed_files_per_task": 5,
+                "max_diff_lines_per_task": 100,
+            },
+        }
+    )
+
+    outcome = normalize_contract_request(request, project_config=config)
+
+    assert outcome.decision == ContractNormalizationDecision.REFUSED
+    assert outcome.after_snapshot is None
+    assert outcome.changed_fields == []
+    assert outcome.refusal_reasons == [ContractNormalizationRefusalReason.UNSAFE_NORMALIZATION]
+
+
+def test_is_safe_worktree_python_verification_command_detects_safe_and_unsafe_forms() -> None:
+    assert is_safe_worktree_python_verification_command(".venv/bin/python -m pytest tests/test_contract_normalization.py")
+    assert is_safe_worktree_python_verification_command("./.venv/bin/python -m pytest -q")
+    assert is_safe_worktree_python_verification_command("PYTHONPATH=src .venv/bin/python -m pytest")
+    assert not is_safe_worktree_python_verification_command("FOO=bar .venv/bin/python -m pytest")
+    assert not is_safe_worktree_python_verification_command(".venv/bin/python -m pytest tests/test_contract_normalization.py | tee out.log")

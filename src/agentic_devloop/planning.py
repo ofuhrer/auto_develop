@@ -9,7 +9,7 @@ from typing import Any, Protocol
 
 from agentic_devloop.budget import reserve_strong_model_call
 from agentic_devloop.config import load_project_config
-from agentic_devloop.contracts import normalize_contract_request
+from agentic_devloop.contracts import is_safe_worktree_python_verification_command, normalize_contract_request
 from agentic_devloop.execution_strategy import (
     ExecutionStrategyAction as SelectorExecutionStrategyAction,
     ExecutionStrategySelection,
@@ -1214,7 +1214,12 @@ def _contract_needs_runtime_normalization(
 ) -> bool:
     if project_config is None:
         return False
-    return any(command.startswith(".venv/bin/python") for command in contract.verification.commands)
+    for command in contract.verification.commands:
+        if command.startswith(".venv/bin/python") or command.startswith("./.venv/bin/python"):
+            return True
+        if ".venv/bin/python" in command and is_safe_worktree_python_verification_command(command):
+            return True
+    return False
 
 
 def validate_generated_contracts(
