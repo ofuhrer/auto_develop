@@ -29,6 +29,20 @@ PYTHONPATH=/path/to/auto_develop/worktrees/<task-worktree>/src /path/to/auto_dev
 
 For external target repositories, put the same pattern in that project's `verification_profiles` and point the Python executable at the shared runtime for the target or control repository. Keep the worktree-specific part in `PYTHONPATH` or an equivalent wrapper, not in a per-worktree virtual environment.
 
+## Cost-Runtime Governance
+
+The cost-runtime governor is a routing seam, not a billing system. It consumes local release evidence from `release_metrics.json` and `release_tuning.md`, writes a typed `supervisor_decisions/cost_runtime_governance__<release-id>.json` artifact, and uses that artifact to choose decomposed execution, review-capped execution, or a one-shot routing recommendation for the next release.
+
+Validation is strict:
+
+- `budget_class` must be one of `XS`, `S`, `M`, `L`, or `XL`;
+- `selected_model_role` must validate as a lower-snake-or-kebab-case identifier;
+- `selected_action` and `outcome` must match;
+- `validators_to_rerun` must be non-empty and remain inspectable in the decision artifact;
+- missing or unreadable metrics trigger the conservative decomposed fallback instead of a guessed routing choice.
+
+The decision uses only local release metrics and tuning outputs. It does not implement billed-cost accounting, provider-token telemetry, or broad context retrieval, and it must not bypass hard gates.
+
 ## Common Commands
 
 Run the full test suite:
