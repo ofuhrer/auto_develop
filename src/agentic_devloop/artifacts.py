@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+from agentic_devloop.models import ContextBundle
 from agentic_devloop.process import run_process
+
+
+def write_worker_context_manifest(*, bundle_path: Path, context: ContextBundle) -> Path:
+    manifest_path = bundle_path / "worker_context_manifest.json"
+    payload = context.to_manifest_payload()
+    payload["artifact_path"] = str(manifest_path)
+    manifest_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return manifest_path
 
 
 def cleanup_task_artifacts(

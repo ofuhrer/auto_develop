@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from agentic_devloop.config import load_project_config
-from agentic_devloop.context import enforce_context_budget, load_context_bundle
+from agentic_devloop.context import build_phase_context_bundle, enforce_context_budget
 from agentic_devloop.conflict_repair import conflicted_files, write_conflict_repair_prompt
 from agentic_devloop.evidence import (
     EvidenceCollector,
@@ -38,6 +38,7 @@ from agentic_devloop.models import (
     CommandResult,
     Decision,
     ConflictRepairResult,
+    ContextPhase,
     EvidenceBundle,
     ExecutorAttempt,
     ExecutorConfig,
@@ -94,6 +95,7 @@ from agentic_devloop.supervisor_decisions import (
 from agentic_devloop.process import run_process
 from agentic_devloop.worktree import create_worktree
 from agentic_devloop.yaml_io import load_yaml_model
+from agentic_devloop.artifacts import write_worker_context_manifest
 
 
 @dataclass(frozen=True)
@@ -397,7 +399,12 @@ def run_task(
     )
 
     _report(progress, f"event=prompt_build_started task={task.task_id}")
-    context = load_context_bundle(config, task)
+    context = build_phase_context_bundle(
+        config,
+        task,
+        phase=ContextPhase.WORKER,
+        max_chars=config.budget.max_context_chars_per_task,
+    )
     enforce_context_budget(context, config.budget.max_context_chars_per_task)
     _report(progress, f"event=context_loaded task={task.task_id} sections={len(context.sections)} chars={context.total_chars}")
     prompt_path = write_executor_prompt(task, scratch_dir / "executor_prompt.md", context)
@@ -454,6 +461,7 @@ def run_task(
             executor_result=executor_result,
             verification_log_path=verification_log_path,
         )
+        write_worker_context_manifest(bundle_path=bundle.bundle_path, context=context)
         decision = ReviewDecision(
             task_id=task.task_id,
             decision=Decision.ESCALATED,
@@ -543,6 +551,7 @@ def run_task(
         executor_result=executor_result,
         verification_log_path=scratch_dir / "verification.log",
     )
+    write_worker_context_manifest(bundle_path=bundle.bundle_path, context=context)
     decision = deterministic_review(
         task=task,
         budget=config.budget,
