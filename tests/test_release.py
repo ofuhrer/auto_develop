@@ -4943,6 +4943,206 @@ def test_run_release_feature_review_convergence_limit_final_adjudication_allows_
     assert sample["continuation_decision_path"]
 
 
+def test_run_release_feature_review_convergence_limit_final_verification_failure_blocks_accept_and_defer(
+    tmp_path: Path,
+) -> None:
+    repo = _repo_with_initial_commit(tmp_path / "repo")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    _write_yaml(
+        config_dir / "demo.yaml",
+        {
+            "project_id": "demo",
+            "repo_path": str(repo),
+            "repo_state_path": "repo_state/demo",
+            "default_base_branch": "main",
+            "worktree_root": str(tmp_path / "worktrees"),
+            "executor": {
+                "type": "codex_cli",
+                "model": "gpt-5.3-codex-spark",
+                "max_walltime_minutes": 5,
+            },
+            "model_roles": {
+                "worker": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+                "reviewer": {
+                    "type": "codex_cli",
+                    "model": "gpt-5.3-codex-spark",
+                    "max_walltime_minutes": 5,
+                },
+            },
+            "verification_profiles": {"default": {"commands": ["false"]}, "rerun": {"commands": ["true"]}},
+            "feature_review_max_repair_loops": 1,
+            "budget": {
+                "max_executor_attempts_per_task": 2,
+                "max_strong_model_calls_per_release": 10,
+                "max_changed_files_per_task": 8,
+                "max_diff_lines_per_task": 600,
+            },
+        },
+    )
+
+    contracts_dir = tmp_path / "contracts"
+    contracts_dir.mkdir()
+    _write_yaml(
+        contracts_dir / "demo-0001.yaml",
+        _task_contract("demo-0001", allowed_files=["docs/demo-0001.md"]).model_dump(mode="json"),
+    )
+
+    decisions = [
+            FeatureReviewDecision.model_validate(
+                {
+                    "release_id": "v0.1.0",
+                    "reviewer": "strong_model",
+                    "summary": "Still has a verify-only and follow-up finding.",
+                    "recommendation": "require_repairs",
+                    "accepted_risks": [],
+                    "rerun_verification_commands": ["true"],
+                    "findings": [
+                    {
+                        "finding_id": "verification-only",
+                        "severity": "high",
+                        "summary": "Verify and rerun tests.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Rerun the suite."],
+                        "optional_follow_ups": [],
+                    },
+                    {
+                        "finding_id": "follow-up",
+                        "severity": "low",
+                        "summary": "Consider a backlog follow-up.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": [],
+                        "optional_follow_ups": ["Track follow-up work."],
+                        "evidence_paths": ["docs/demo-0001.md"],
+                    },
+                ],
+            }
+        ),
+            FeatureReviewDecision.model_validate(
+                {
+                    "release_id": "v0.1.0",
+                    "reviewer": "strong_model",
+                    "summary": "Same findings after repair attempt.",
+                    "recommendation": "require_repairs",
+                    "accepted_risks": [],
+                    "rerun_verification_commands": ["true"],
+                    "findings": [
+                    {
+                        "finding_id": "verification-only",
+                        "severity": "high",
+                        "summary": "Verify and rerun tests.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": ["Rerun the suite."],
+                        "optional_follow_ups": [],
+                    },
+                    {
+                        "finding_id": "follow-up",
+                        "severity": "low",
+                        "summary": "Consider a backlog follow-up.",
+                        "affected_files": ["docs/demo-0001.md"],
+                        "required_repairs": [],
+                        "optional_follow_ups": ["Track follow-up work."],
+                        "evidence_paths": ["docs/demo-0001.md"],
+                    },
+                ],
+            }
+        ),
+    ]
+
+    class FakeBackendResult:
+        def __init__(self, decision: FeatureReviewDecision) -> None:
+            self.decision = decision
+
+    def fake_invoke_feature_reviewer(*_args, **_kwargs):
+        if not decisions:
+            raise AssertionError("unexpected reviewer invocation")
+        return FakeBackendResult(decisions.pop(0))
+
+    from agentic_devloop.feature_review import FeatureReviewConvergenceResult, FeatureReviewFindingConvergenceResult
+    from agentic_devloop.models import GeneratedContract
+
+    def fake_convergence(*_args, **_kwargs):
+        return FeatureReviewConvergenceResult(
+            findings=[
+                FeatureReviewFindingConvergenceResult(
+                    finding_id="verification-only",
+                    classification="blocker",
+                    selected_action="repair",
+                    matched_previous_finding_id=None,
+                    repeated_by_finding_id=True,
+                    adjacent_similarity=1.0,
+                    verification_false_positive_candidate=False,
+                ),
+                FeatureReviewFindingConvergenceResult(
+                    finding_id="follow-up",
+                    classification="backlog_follow_up",
+                    selected_action="defer",
+                    matched_previous_finding_id=None,
+                    repeated_by_finding_id=False,
+                    adjacent_similarity=0.25,
+                    verification_false_positive_candidate=False,
+                ),
+            ],
+            blocking_finding_ids=["verification-only"],
+            accepted_finding_ids=[],
+            deferred_finding_ids=["follow-up"],
+            false_positive_candidate_ids=[],
+        )
+
+    repair_counter = {"n": 0}
+
+    def fake_generate_repairs(*_args, **_kwargs):
+        repair_counter["n"] += 1
+        task_id = f"repair-{repair_counter['n']:02d}"
+        contract = _task_contract(task_id, allowed_files=["docs/demo-0001.md"])
+        return [
+            GeneratedContract(
+                task_id=task_id,
+                title=f"Repair {task_id}",
+                objective="Apply bounded repair.",
+                rationale="Repair contract generated for required finding.",
+                suggested_contract=contract,
+            )
+        ]
+
+    with (
+        patch("agentic_devloop.release.invoke_feature_reviewer", side_effect=fake_invoke_feature_reviewer),
+        patch("agentic_devloop.release.classify_feature_review_findings_for_convergence", side_effect=fake_convergence),
+        patch("agentic_devloop.release.generate_repair_contracts_for_required_findings", side_effect=fake_generate_repairs),
+    ):
+        result = run_release(
+            project_id="demo",
+            release_id="v0.1.0",
+            config_dir=config_dir,
+            contracts_dir=contracts_dir,
+            runs_dir=tmp_path / "runs",
+            executor=AllowedFilesExecutor(),
+            merge_on_accept=True,
+        )
+
+    assert result.decision == Decision.NEEDS_REVISION
+    summary = json.loads(result.summary_path.read_text(encoding="utf-8"))
+    assert Path(summary["final_integration_verification_path"]).exists()
+    recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
+    assert recheck["accepted_finding_ids"] == []
+    assert recheck["deferred_finding_ids"] == []
+    assert recheck["unresolved_finding_ids"] == ["follow-up", "verification-only"]
+
+    follow_up_path = supervisor_decision_artifact_path(
+        release_bundle_path=result.summary_path.parent,
+        decision_type=SupervisorDecisionType.FINAL_REVIEW_FINDING_ADJUDICATION,
+        decision_id="v0.1.0__final_review_finding__follow-up",
+    )
+    assert follow_up_path.exists()
+    loaded = load_supervisor_decision_artifact(follow_up_path)
+    assert isinstance(loaded, FinalReviewFindingAdjudicationDecision)
+    assert loaded.classification.value == "blocker"
+
+
 def test_run_release_feature_review_convergence_limit_uses_release_evidence_when_reviewer_evidence_paths_are_omitted(
     tmp_path: Path,
 ) -> None:

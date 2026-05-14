@@ -331,6 +331,7 @@ class FeatureReviewFindingClassificationDecision(SupervisorDecisionBase):
 class FinalReviewFindingAdjudicationClassification(StrEnum):
     BLOCKER = "blocker"
     ACCEPTED_RISK = "accepted_risk"
+    SOFT_OBSERVABILITY = "soft_observability"
     BACKLOG_FOLLOW_UP = "backlog_follow_up"
     DUPLICATE = "duplicate"
     FALSE_POSITIVE = "false_positive"
@@ -404,11 +405,12 @@ class FinalReviewFindingAdjudicationDecision(SupervisorDecisionBase):
             self.classification
             in {
                 FinalReviewFindingAdjudicationClassification.ACCEPTED_RISK,
+                FinalReviewFindingAdjudicationClassification.SOFT_OBSERVABILITY,
                 FinalReviewFindingAdjudicationClassification.VERIFICATION_ONLY,
             }
             and self.selected_action != FinalReviewFindingAdjudicationAction.ACCEPT
         ):
-            raise ValueError("accepted_risk and verification_only classifications require accept action")
+            raise ValueError("accepted_risk, soft_observability, and verification_only classifications require accept action")
         return self
 
 

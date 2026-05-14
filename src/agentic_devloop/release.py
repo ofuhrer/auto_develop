@@ -2430,7 +2430,7 @@ def _run_feature_review_and_repair_loop(
                 feature_review_recheck_path = write_feature_review_recheck(release_root, feature_review_recheck)
                 return build_result()
 
-            accepted_optional_ids, deferred_optional_ids = optional_recheck_ids()
+            accepted_optional_ids, deferred_optional_ids = optional_recheck_ids() if last_verification_ok else ([], [])
             accepted_required_ids = (
                 {
                     finding.finding_id
@@ -2469,6 +2469,10 @@ def _run_feature_review_and_repair_loop(
                     outcome = FinalReviewFindingAdjudicationOutcome.CONTINUE
                 elif raw_classification == "soft_finding":
                     classification = FinalReviewFindingAdjudicationClassification.ACCEPTED_RISK
+                    selected_action = FinalReviewFindingAdjudicationAction.ACCEPT
+                    outcome = FinalReviewFindingAdjudicationOutcome.CONTINUE
+                elif raw_classification == "soft_observability":
+                    classification = FinalReviewFindingAdjudicationClassification.SOFT_OBSERVABILITY
                     selected_action = FinalReviewFindingAdjudicationAction.ACCEPT
                     outcome = FinalReviewFindingAdjudicationOutcome.CONTINUE
                 elif raw_classification == "false_positive":
@@ -2516,6 +2520,7 @@ def _run_feature_review_and_repair_loop(
                         FinalReviewFindingAdjudicationClassification.SCOPE_EXPANSION,
                         FinalReviewFindingAdjudicationClassification.DUPLICATE,
                         FinalReviewFindingAdjudicationClassification.FALSE_POSITIVE,
+                        FinalReviewFindingAdjudicationClassification.SOFT_OBSERVABILITY,
                         FinalReviewFindingAdjudicationClassification.VERIFICATION_ONLY,
                     }
                     and not evidence_paths
