@@ -458,12 +458,65 @@ class ContextSection(StrictModel):
     content: str
 
 
+class ContextPhase(StrEnum):
+    WORKER = "worker"
+    REVIEW = "review"
+    REPAIR = "repair"
+
+
+class ContextTruncationRecord(StrictModel):
+    category: str = Field(min_length=1)
+    source_path: Path
+    original_chars: int = Field(ge=0)
+    included_chars: int = Field(ge=0)
+    omitted_chars: int = Field(ge=0)
+    reason: str = Field(min_length=1)
+
+
+class ContextBundleManifest(StrictModel):
+    phase: ContextPhase
+    included_categories: list[str] = Field(default_factory=list)
+    omitted_categories: list[str] = Field(default_factory=list)
+    chars_by_category: dict[str, int] = Field(default_factory=dict)
+    total_chars: int = Field(ge=0)
+    truncation_records: list[ContextTruncationRecord] = Field(default_factory=list)
+
+
 class ContextBundle(StrictModel):
     sections: list[ContextSection] = Field(default_factory=list)
+    manifest: ContextBundleManifest | None = None
 
     @property
     def total_chars(self) -> int:
         return sum(len(section.content) for section in self.sections)
+
+    @property
+    def included_categories(self) -> list[str]:
+        return [] if self.manifest is None else list(self.manifest.included_categories)
+
+    @property
+    def omitted_categories(self) -> list[str]:
+        return [] if self.manifest is None else list(self.manifest.omitted_categories)
+
+    @property
+    def chars_by_category(self) -> dict[str, int]:
+        return {} if self.manifest is None else dict(self.manifest.chars_by_category)
+
+    @property
+    def truncation_records(self) -> list[ContextTruncationRecord]:
+        return [] if self.manifest is None else list(self.manifest.truncation_records)
+
+    def to_manifest_payload(self) -> dict[str, object]:
+        if self.manifest is None:
+            return {
+                "phase": None,
+                "included_categories": [],
+                "omitted_categories": [],
+                "chars_by_category": {},
+                "total_chars": self.total_chars,
+                "truncation_records": [],
+            }
+        return self.manifest.model_dump(mode="json")
 
 
 class TaskRun(StrictModel):
