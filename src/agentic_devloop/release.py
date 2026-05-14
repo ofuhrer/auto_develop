@@ -123,14 +123,25 @@ from agentic_devloop.state_store import FinalReviewFollowUpMemoryReference, Stat
 from agentic_devloop.yaml_io import load_yaml_model
 
 
-def _load_supervisor_decision_artifact_silencing_legacy_warning(path: Path) -> StrictModel:
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message=r"^loaded legacy supervisor decision artifact without validators_to_rerun: .*$",
-            category=UserWarning,
-        )
-        return load_supervisor_decision_artifact(path)
+_LEGACY_SUPERVISOR_DECISION_WARNING_PREFIX = (
+    "loaded legacy supervisor decision artifact without validators_to_rerun:"
+)
+
+
+def _load_supervisor_decision_artifact_silencing_legacy_warning(path: Path) -> tuple[StrictModel, bool]:
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        loaded = load_supervisor_decision_artifact(path)
+    legacy_warning_loaded = False
+    for warning in caught:
+        if (
+            warning.category is UserWarning
+            and str(warning.message).startswith(_LEGACY_SUPERVISOR_DECISION_WARNING_PREFIX)
+        ):
+            legacy_warning_loaded = True
+            continue
+        warnings.warn(warning.message, warning.category, stacklevel=2)
+    return loaded, legacy_warning_loaded
 
 
 @dataclass(frozen=True)
@@ -808,6 +819,7 @@ def run_release(
         overlap_report=overlap_report,
         overlap_report_path=overlap_report_path,
         dependencies=dependencies,
+        progress=progress,
     )
     _report(
         progress,
@@ -2478,6 +2490,14 @@ def _run_feature_review_and_repair_loop(
                     selected_action = FinalReviewFindingAdjudicationAction.DEFER
                     outcome = FinalReviewFindingAdjudicationOutcome.STOP_FINDING
                 else:
+                    classification = FinalReviewFindingAdjudicationClassification.BLOCKER
+                    selected_action = FinalReviewFindingAdjudicationAction.REPAIR
+                    outcome = FinalReviewFindingAdjudicationOutcome.CONTINUE
+
+                if not last_verification_ok and selected_action in {
+                    FinalReviewFindingAdjudicationAction.ACCEPT,
+                    FinalReviewFindingAdjudicationAction.DEFER,
+                }:
                     classification = FinalReviewFindingAdjudicationClassification.BLOCKER
                     selected_action = FinalReviewFindingAdjudicationAction.REPAIR
                     outcome = FinalReviewFindingAdjudicationOutcome.CONTINUE
@@ -4945,6 +4965,7 @@ def _build_release_scheduling_decision(
     overlap_report: ReleaseOverlapReport,
     overlap_report_path: Path,
     dependencies: dict[str, list[str]],
+    progress: Callable[[str], None] | None = None,
 ) -> ReleaseSchedulingDecision:
     selected_action = _release_scheduling_action_for_execution_mode(
         execution_mode=execution_mode,
@@ -5005,6 +5026,7 @@ def _load_or_build_release_scheduling_decision(
     overlap_report: ReleaseOverlapReport,
     overlap_report_path: Path,
     dependencies: dict[str, list[str]],
+    progress: Callable[[str], None] | None = None,
 ) -> ReleaseSchedulingDecision:
     decision_path = _release_scheduling_decision_path(release_root, release_id)
     current_staleness_inputs = _release_scheduling_staleness_inputs(
@@ -5018,7 +5040,13 @@ def _load_or_build_release_scheduling_decision(
     )
     if decision_path.exists():
         try:
-            loaded = _load_supervisor_decision_artifact_silencing_legacy_warning(decision_path)
+            loaded, legacy_warning_loaded = _load_supervisor_decision_artifact_silencing_legacy_warning(decision_path)
+            if legacy_warning_loaded:
+                _report(
+                    progress,
+                    "event=legacy_supervisor_decision_artifact_loaded "
+                    f"type={SupervisorDecisionType.RELEASE_SCHEDULING.value} path={decision_path}",
+                )
         except Exception as error:  # noqa: BLE001 - bounded normalization handles typed reload safety.
             loaded = _normalize_release_scheduling_model_output_if_needed(
                 release_id=release_id,
