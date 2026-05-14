@@ -5,8 +5,8 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   subsystem failures, normalizes useful model output before strict validation, and
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
-current_focus: environment-repair-actions
-active_epic: environment-repair-actions
+current_focus: cost-runtime-governor
+active_epic: null
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -35,15 +35,9 @@ completed_epics:
 - review-convergence-adjudicator
 - shared-verification-runtime
 - review-stop-policy-hardening
+- environment-repair-actions
 blocked_epics: []
 candidate_epics:
-- id: environment-repair-actions
-  title: Repair safe verification-environment drift autonomously.
-  rationale: Stale editable installs, command-not-found errors, missing PYTHONPATH,
-    and dependency runtime drift should become bounded repair actions when project
-    policy declares a safe repair.
-  priority: 2
-  next_release_id: environment-repair-actions
 - id: cost-runtime-governor
   title: Turn release metrics into runtime and model-routing decisions.
   rationale: Retained metrics show high repeated context volume, expensive review
@@ -85,21 +79,56 @@ candidate_epics:
   priority: 8
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
-active_epics:
-- epic_id: environment-repair-actions
-  next_recommendations: []
-  retry_count: 0
-  repair_count: 0
-  outcome_references: []
-  finalization_outcome_references: []
-  unresolved_finding_references: []
-  final_review_follow_up_memories: []
-  state_review_snapshot_references: []
-  metrics_snapshot_references: []
-  tuning_report_references: []
-  updated_at: '2026-05-14T08:50:02.772768Z'
+active_epics: []
 reviewed_epics: []
 completed_epic_records:
+- epic_id: environment-repair-actions
+  status_reason: completed via feature/environment-repair-actions and merged into
+    main after six accepted tasks, green focused verification, and a green full suite;
+    the release finalization gate stopped on a mechanical scope-risk placeholder for
+    a 654-line task-5 overage, so landing required explicit supervisor judgment.
+  next_recommendations:
+  - Scope-risk placeholder decisions should be adjudicated by a capable supervisor
+    agent when verification is green and the task reviewer already accepted the overage.
+  - Task 5 introduced duplicated verification helper logic as a workaround around
+    import coupling; consolidate the helper boundary in a follow-up refactor.
+  - Long gpt-5.2 implementation tasks crossed 10 minutes; use metrics to tune task
+    granularity and model routing.
+  retry_count: 0
+  repair_count: 0
+  outcome_references:
+  - release_id: environment-repair-actions
+    outcome: accepted
+    run_summary_path: runs/20260514T072327Z_five_cycle_sprint/20260514T085239Z_environment-repair-actions_release/release_summary.json
+    recorded_at: '2026-05-14T09:40:00Z'
+  finalization_outcome_references:
+  - release_id: environment-repair-actions
+    outcome: accepted
+    branch: feature/environment-repair-actions
+    commit: d098c8787eee29d9d298c90ed46c72cd38b6e275
+    unresolved_finding_ids: []
+    recommended_backlog_state: completed
+    recorded_at: '2026-05-14T09:40:00Z'
+  unresolved_finding_references:
+  - finding_id: scope-risk-budget-placeholder
+    summary: Finalization was blocked by a deterministic scope-risk placeholder requiring
+      replan for task environment-repair-actions-0005 despite green verification and
+      accepted task review; the feature was manually landed after full-suite verification.
+    severity: moderate
+    source_path: runs/20260514T072327Z_five_cycle_sprint/20260514T085239Z_environment-repair-actions_release/supervisor_decisions/scope_risk_budget_policy__environment-repair-actions__scope_risk__environment-repair-actions-0005.json
+  final_review_follow_up_memories: []
+  state_review_snapshot_references:
+  - snapshot_path: runs/20260514T072327Z_five_cycle_sprint/20260514T084921Z_governor_state_refresh/state_review_snapshot.json
+    captured_at: '2026-05-14T08:49:21Z'
+  metrics_snapshot_references:
+  - metrics_path: runs/20260514T072327Z_five_cycle_sprint/20260514T085239Z_environment-repair-actions_release/release_metrics.json
+    recorded_at: '2026-05-14T09:40:00Z'
+    release_id: environment-repair-actions
+  tuning_report_references:
+  - tuning_report_path: runs/20260514T072327Z_five_cycle_sprint/20260514T085239Z_environment-repair-actions_release/release_tuning.md
+    recorded_at: '2026-05-14T09:40:00Z'
+    release_id: environment-repair-actions
+  updated_at: '2026-05-14T09:40:00Z'
 - epic_id: review-stop-policy-hardening
   status_reason: completed via feature/review-stop-policy-hardening and merged into
     main after accepted implementation, repair waves, full-suite verification, and
