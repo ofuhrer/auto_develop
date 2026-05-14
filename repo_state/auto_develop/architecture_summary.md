@@ -40,6 +40,8 @@ Prioritized architectural gaps:
 7. Governor cockpit expansion for full multi-epic visibility.
 8. Shared verification runtime, bounded environment repair, executor liveness supervision, target artifact ownership, and onboarding bootstrap.
 
+The current context-slimming epic is already shipping phase-aware bundles with manifest-backed size, inclusion, and omission records for worker/reviewer/repair phases. That keeps the shipped context compact and auditable, but it does not implement semantic retrieval/search, embeddings, or broader cross-run retrieval yet.
+
 The orchestrator owns policy, state, budgets, verification, evidence, roadmap governance, and finalization. Worker agents own implementation inside narrow task contracts. Humans provide goals and hard safety boundaries rather than routine approvals.
 
 Implemented seams:

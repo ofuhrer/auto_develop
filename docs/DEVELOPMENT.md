@@ -29,6 +29,19 @@ PYTHONPATH=/path/to/auto_develop/worktrees/<task-worktree>/src /path/to/auto_dev
 
 For external target repositories, put the same pattern in that project's `verification_profiles` and point the Python executable at the shared runtime for the target or control repository. Keep the worktree-specific part in `PYTHONPATH` or an equivalent wrapper, not in a per-worktree virtual environment.
 
+## Context Bundles
+
+The current worker/reviewer/repair path builds phase-aware context bundles instead of shipping the same broad context everywhere. Bundle evidence is persisted as `worker_context_manifest.json` in the task evidence directory.
+
+Each manifest records:
+
+- the phase that requested the bundle;
+- the included and omitted doc/state sections;
+- bundle size metrics such as total character count; and
+- deterministic truncation or omission records when a phase-specific bundle would otherwise exceed its current limit.
+
+These bundles are intentionally narrow. They help the executor shape context for a specific phase, but they do not implement semantic retrieval/search, embeddings, or broader cross-run retrieval.
+
 ## Cost-Runtime Governance
 
 The cost-runtime governor is a routing seam, not a billing system. It consumes local release evidence from `release_metrics.json` and `release_tuning.md`, writes a typed `supervisor_decisions/cost_runtime_governance__<release-id>.json` artifact, and uses that artifact to choose decomposed execution, review-capped execution, or a one-shot routing recommendation for the next release.
