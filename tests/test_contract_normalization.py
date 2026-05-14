@@ -342,5 +342,6 @@ def test_normalize_contract_request_refuses_unsafe_worktree_python_command() -> 
 def test_is_safe_worktree_python_verification_command_detects_safe_and_unsafe_forms() -> None:
     assert is_safe_worktree_python_verification_command(".venv/bin/python -m pytest tests/test_contract_normalization.py")
     assert is_safe_worktree_python_verification_command("./.venv/bin/python -m pytest -q")
-    assert not is_safe_worktree_python_verification_command("PYTHONPATH=src .venv/bin/python -m pytest")
+    assert is_safe_worktree_python_verification_command("PYTHONPATH=src .venv/bin/python -m pytest")
+    assert not is_safe_worktree_python_verification_command("FOO=bar .venv/bin/python -m pytest")
     assert not is_safe_worktree_python_verification_command(".venv/bin/python -m pytest tests/test_contract_normalization.py | tee out.log")
