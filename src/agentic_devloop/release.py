@@ -33,6 +33,7 @@ from agentic_devloop.feature_review import (
     generate_repair_contracts_for_required_findings,
     invoke_feature_reviewer,
     render_feature_review_prompt,
+    render_feature_review_prompt_bundle,
 )
 from agentic_devloop.git_finalize import (
     FinalizeResult,
@@ -327,6 +328,7 @@ class ReleaseRunResult:
     feature_review_stdout_path: Path | None = None
     feature_review_stderr_path: Path | None = None
     feature_review_metadata_path: Path | None = None
+    feature_review_bundle_manifest_paths: list[Path] = field(default_factory=list)
     feature_review_output_normalization_decision_path: Path | None = None
     feature_review_normalized_artifact_path: Path | None = None
     feature_review_proposals: list["FeatureReviewProposalRecord"] = field(default_factory=list)
@@ -349,6 +351,7 @@ class FeatureReviewLoopResult:
     feature_review_stdout_path: Path | None = None
     feature_review_stderr_path: Path | None = None
     feature_review_metadata_path: Path | None = None
+    feature_review_bundle_manifest_paths: list[Path] = field(default_factory=list)
     feature_review_output_normalization_decision_path: Path | None = None
     feature_review_normalized_artifact_path: Path | None = None
 
@@ -1201,6 +1204,7 @@ def run_release(
     feature_review_stdout_path: Path | None = None
     feature_review_stderr_path: Path | None = None
     feature_review_metadata_path: Path | None = None
+    feature_review_bundle_manifest_paths: list[Path] = []
     feature_review_output_normalization_decision_path: Path | None = None
     feature_review_normalized_artifact_path: Path | None = None
     scope_risk_budget_policy_decision_paths: list[Path] = []
@@ -1287,6 +1291,7 @@ def run_release(
         feature_review_stdout_path = feature_review_loop.feature_review_stdout_path
         feature_review_stderr_path = feature_review_loop.feature_review_stderr_path
         feature_review_metadata_path = feature_review_loop.feature_review_metadata_path
+        feature_review_bundle_manifest_paths = list(feature_review_loop.feature_review_bundle_manifest_paths)
         feature_review_output_normalization_decision_path = (
             feature_review_loop.feature_review_output_normalization_decision_path
         )
@@ -1493,6 +1498,7 @@ def run_release(
         feature_review_stdout_path=feature_review_stdout_path,
         feature_review_stderr_path=feature_review_stderr_path,
         feature_review_metadata_path=feature_review_metadata_path,
+        feature_review_bundle_manifest_paths=feature_review_bundle_manifest_paths,
         feature_review_output_normalization_decision_path=feature_review_output_normalization_decision_path,
         feature_review_normalized_artifact_path=feature_review_normalized_artifact_path,
         final_review_continuation_decision_path=final_review_continuation_decision_path,
@@ -2311,6 +2317,7 @@ def _run_feature_review_and_repair_loop(
     feature_review_stdout_path: Path | None = None
     feature_review_stderr_path: Path | None = None
     feature_review_metadata_path: Path | None = None
+    feature_review_bundle_manifest_paths: list[Path] = []
     feature_review_output_normalization_decision_path: Path | None = None
     feature_review_normalized_artifact_path: Path | None = None
     outstanding_required_finding_ids: set[str] = set()
@@ -2373,6 +2380,7 @@ def _run_feature_review_and_repair_loop(
             feature_review_stdout_path=feature_review_stdout_path,
             feature_review_stderr_path=feature_review_stderr_path,
             feature_review_metadata_path=feature_review_metadata_path,
+            feature_review_bundle_manifest_paths=list(feature_review_bundle_manifest_paths),
             feature_review_output_normalization_decision_path=feature_review_output_normalization_decision_path,
             feature_review_normalized_artifact_path=feature_review_normalized_artifact_path,
         )
@@ -2384,6 +2392,7 @@ def _run_feature_review_and_repair_loop(
         nonlocal feature_review_stdout_path
         nonlocal feature_review_stderr_path
         nonlocal feature_review_metadata_path
+        nonlocal feature_review_bundle_manifest_paths
         nonlocal feature_review_output_normalization_decision_path
         nonlocal feature_review_normalized_artifact_path
         attempt_dir = output_root / f"attempt_{attempt:02d}"
@@ -2398,11 +2407,18 @@ def _run_feature_review_and_repair_loop(
                 runs_dir=runs_dir,
                 release_objective=_release_objective_from_contracts(source_contracts),
             )
-            prompt = render_feature_review_prompt(
+            prompt, manifest = render_feature_review_prompt_bundle(
                 context=context,
                 repo_path=config.repo_path,
                 runs_dir=runs_dir,
             )
+            attempt_dir.mkdir(parents=True, exist_ok=True)
+            manifest_path = attempt_dir / "feature_review_bundle_manifest.json"
+            prompt_path = attempt_dir / "feature_review_prompt.md"
+            manifest["artifact_paths"]["prompt_path"] = str(prompt_path)
+            manifest["artifact_paths"]["bundle_manifest_path"] = str(manifest_path)
+            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            feature_review_bundle_manifest_paths.append(manifest_path)
             backend = invoke_feature_reviewer(
                 config=reviewer_config,
                 repo_path=config.repo_path,
@@ -2414,6 +2430,19 @@ def _run_feature_review_and_repair_loop(
             feature_review_stdout_path = getattr(backend, "stdout_path", None)
             feature_review_stderr_path = getattr(backend, "stderr_path", None)
             feature_review_metadata_path = getattr(backend, "metadata_path", None)
+            try:
+                loaded_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                loaded_manifest = None
+            if isinstance(loaded_manifest, dict):
+                if feature_review_stdout_path is not None:
+                    loaded_manifest.setdefault("artifact_paths", {})["stdout_path"] = str(feature_review_stdout_path)
+                if feature_review_stderr_path is not None:
+                    loaded_manifest.setdefault("artifact_paths", {})["stderr_path"] = str(feature_review_stderr_path)
+                if feature_review_metadata_path is not None:
+                    loaded_manifest.setdefault("artifact_paths", {})["metadata_path"] = str(feature_review_metadata_path)
+                loaded_manifest.setdefault("artifact_paths", {})["review_output_dir"] = str(attempt_dir)
+                manifest_path.write_text(json.dumps(loaded_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             (
                 decision,
                 feature_review_output_normalization_decision_path,
@@ -4459,6 +4488,7 @@ def _write_release_summary(
     feature_review_stdout_path: Path | None,
     feature_review_stderr_path: Path | None,
     feature_review_metadata_path: Path | None,
+    feature_review_bundle_manifest_paths: list[Path],
     feature_review_output_normalization_decision_path: Path | None,
     feature_review_normalized_artifact_path: Path | None,
     final_review_continuation_decision_path: Path,
@@ -4497,6 +4527,10 @@ def _write_release_summary(
         "feature_review_stdout_path": str(feature_review_stdout_path) if feature_review_stdout_path else None,
         "feature_review_stderr_path": str(feature_review_stderr_path) if feature_review_stderr_path else None,
         "feature_review_metadata_path": str(feature_review_metadata_path) if feature_review_metadata_path else None,
+        "feature_review_bundle_manifest_paths": [str(path) for path in feature_review_bundle_manifest_paths],
+        "feature_review_latest_bundle_manifest_path": (
+            str(feature_review_bundle_manifest_paths[-1]) if feature_review_bundle_manifest_paths else None
+        ),
         "feature_review_output_normalization_decision_path": (
             str(feature_review_output_normalization_decision_path)
             if feature_review_output_normalization_decision_path

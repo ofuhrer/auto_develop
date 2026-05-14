@@ -2923,6 +2923,15 @@ def test_run_release_feature_review_repair_loop_records_artifacts(tmp_path: Path
     assert result.decision == Decision.ACCEPTED
     assert summary["feature_review_path"] is not None
     assert summary["feature_review_recheck_path"] is not None
+    assert summary["feature_review_bundle_manifest_paths"]
+    manifest_path = Path(summary["feature_review_bundle_manifest_paths"][0])
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert "included_categories" in manifest
+    assert "omitted_categories" in manifest
+    assert "size_metrics" in manifest
+    assert "truncation_records" in manifest
+    assert "artifact_paths" in manifest
     recheck = json.loads(Path(summary["feature_review_recheck_path"]).read_text(encoding="utf-8"))
     assert recheck["stop_reason"] == "resolved"
 
