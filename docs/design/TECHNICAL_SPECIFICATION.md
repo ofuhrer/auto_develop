@@ -750,7 +750,7 @@ Implemented re-check stop taxonomy for `feature_review_recheck.json`:
 
 `FeatureReviewRecheckRecord.stop_reason` is constrained to this enumerated set.
 
-When the re-check stops with `blocked_by_hard_gate` during final adjudication, the release writes a `FinalReviewContinuationDecision` with a more specific `hard_stop_reason`. Implemented values distinguish missing required release evidence artifacts from schema-invalid reviewer output: `missing_release_evidence` vs `schema_invalid_reviewer_output` (see `event=final_review_missing_release_evidence` and `event=final_review_schema_invalid_reviewer_output` in the raw logs).
+When the re-check stops with `blocked_by_hard_gate` during final adjudication, the release writes a `FinalReviewContinuationDecision` with a more specific `hard_stop_reason`. Implemented values distinguish missing required release evidence artifacts from schema-invalid reviewer output: `missing_release_evidence` vs `schema_invalid_reviewer_output` (see `event=final_review_missing_release_evidence` and `event=final_review_schema_invalid_reviewer_output` in the raw logs). When final adjudication emits per-finding supervisor decisions, the continuation decision includes `finding_adjudication_paths` so downstream tools can traverse `runs/<run-id>/supervisor_decisions/final_review_finding_adjudication__*.json` artifacts without re-scanning the directory.
 
 `FeatureReviewRecheckRecord.accepted_finding_ids` and
 `FeatureReviewRecheckRecord.deferred_finding_ids` are intentionally distinct.

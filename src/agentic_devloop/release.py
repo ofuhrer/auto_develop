@@ -2159,10 +2159,14 @@ def _run_feature_review_and_repair_loop(
             )
             feature_review_decision = decision
             feature_review_path = write_feature_review_decision(release_root, decision)
+            unresolved_finding_ids = (
+                [finding.finding_id for finding in decision.findings]
+                or [f"{release_id}:feature_review_classification_failed"]
+            )
+            unresolved_finding_ids.insert(0, f"{release_id}:schema_invalid_reviewer_output")
             feature_review_recheck = FeatureReviewRecheckRecord(
                 release_id=release_id,
-                unresolved_finding_ids=[finding.finding_id for finding in decision.findings]
-                or [f"{release_id}:feature_review_classification_failed"],
+                unresolved_finding_ids=unresolved_finding_ids,
                 resolved_finding_ids=[],
                 accepted_finding_ids=[],
                 stop_reason="blocked_by_hard_gate",
@@ -2353,10 +2357,14 @@ def _run_feature_review_and_repair_loop(
                 )
                 feature_review_decision = decision
                 feature_review_path = write_feature_review_decision(release_root, decision)
+                unresolved_finding_ids = (
+                    [finding.finding_id for finding in decision.findings]
+                    or [f"{release_id}:feature_review_classification_failed"]
+                )
+                unresolved_finding_ids.insert(0, f"{release_id}:schema_invalid_reviewer_output")
                 feature_review_recheck = FeatureReviewRecheckRecord(
                     release_id=release_id,
-                    unresolved_finding_ids=[finding.finding_id for finding in decision.findings]
-                    or [f"{release_id}:feature_review_classification_failed"],
+                    unresolved_finding_ids=unresolved_finding_ids,
                     resolved_finding_ids=[],
                     accepted_finding_ids=[],
                     stop_reason="blocked_by_hard_gate",
