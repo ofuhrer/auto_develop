@@ -1,0 +1,51 @@
+task_id: environment-repair-actions-0006
+release_id: environment-repair-actions
+title: Document implemented environment repair behavior
+task_type: documentation
+budget_class: S
+objective: Document implemented verification-environment repair behavior, including
+  safe policy-declared actions, supervisor decision artifacts, validators_to_rerun,
+  retry budget effects, refusal boundaries, and current non-goals such as executor
+  liveness and broader runtime-supervisor capabilities.
+allowed_files:
+- docs/USER_GUIDE.md
+- docs/DEVELOPMENT.md
+- docs/design/SUPERVISOR_DECISIONS.md
+- docs/design/ARCHITECTURE.md
+forbidden_changes:
+- Do not describe planned executor liveness or broader runtime-supervisor capabilities
+  as implemented.
+- Do not change CLI examples unrelated to environment repair.
+- Do not modify code or tests in this documentation task.
+- Do not claim dependency installation, network repair, credential repair, or source-file
+  mutation is supported.
+required_evidence:
+- git diff
+- changed-files list
+- documentation diff review
+- git diff --check output
+verification:
+  commands:
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if docs require behavior not implemented by environment-repair-actions-0001
+  through environment-repair-actions-0005.
+- Stop if the documentation cannot identify where repair decision artifacts are written
+  and what validators rerun.
+- Stop if implementation status versus planned capability is ambiguous.
+- Stop if changes require files outside allowed_files.
+non_goals:
+- Do not add new repair behavior.
+- Do not change tests.
+- Do not update objective or contract examples unless separately requested.
+scientific_assumptions:
+- Not applicable; documentation task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- environment-repair-actions-0003
+- environment-repair-actions-0004
+- environment-repair-actions-0005

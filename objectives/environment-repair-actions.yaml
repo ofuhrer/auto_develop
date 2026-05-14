@@ -1,0 +1,30 @@
+release_id: environment-repair-actions
+title: Autonomous Verification Environment Repair Actions
+objective: Implement bounded, policy-declared environment repair actions for safe
+  verification-environment drift, including stale editable installs, missing PYTHONPATH/import
+  context, command-not-found failures, and shared-runtime drift, with typed supervisor
+  decisions, evidence artifacts, validator reruns, and hard refusal boundaries for
+  unsafe or undeclared repairs.
+non_goals:
+- Do not broaden the selected epic beyond its stated acceptance criteria.
+acceptance_criteria:
+- Runtime supervisor receives structured verification-environment failure inputs from
+  release/task evidence, including failed command, exit code, stdout/stderr excerpts,
+  resolved runtime metadata, worktree path, project config, and prior repair attempts.
+- Safe repair actions are policy-declared and bounded, at minimum covering shared-runtime
+  command rewrite or env prefix repair, missing PYTHONPATH/import context, stale editable
+  install guidance when allowed, and command-not-found diagnostics that can be repaired
+  without changing task scope.
+- Each attempted repair writes a typed supervisor decision artifact with selected
+  action, rationale, evidence paths, fallback plan, retry budget impact, and validators
+  to rerun.
+- Repaired verification commands rerun deterministic validators and cannot bypass
+  contract admission, allowed-file boundaries, forbidden changes, hard evidence requirements,
+  final verification, or finalization policy.
+- Unsafe repairs, missing policy, dependency installation requiring unapproved network/credentials,
+  or repeated repair exhaustion stop with explicit evidence rather than silent fallback.
+- Focused tests cover repairable missing import context, repairable shared-runtime/env-prefix
+  drift, command-not-found classification, refusal when repair is not policy-declared,
+  retry-budget exhaustion, and release resume after successful repair.
+- Documentation updates distinguish implemented environment repair behavior from planned
+  executor liveness and broader runtime-supervisor capabilities.

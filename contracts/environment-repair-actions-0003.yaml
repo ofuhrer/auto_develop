@@ -1,0 +1,55 @@
+task_id: environment-repair-actions-0003
+release_id: environment-repair-actions
+title: Write typed environment repair decisions
+task_type: code_only
+budget_class: M
+objective: Add strict environment-repair supervisor decision fields and writer/loader
+  coverage for selected policy action, outcome, rationale, source evidence paths,
+  fallback plan, retry budget impact, validators_to_rerun, and refusal reason. Decisions
+  must cover apply-and-retry, capture-only, escalate, and stop outcomes.
+allowed_files:
+- src/agentic_devloop/supervisor_decisions.py
+- src/agentic_devloop/runtime_supervisor.py
+- src/agentic_devloop/environment_repair.py
+- tests/test_supervisor_decisions.py
+- tests/test_supervisor_decision_artifacts.py
+- tests/test_runtime_supervisor.py
+- tests/test_environment_repair.py
+forbidden_changes:
+- Do not loosen strict schema validation for existing supervisor decision types.
+- Do not add legacy warning-only fallbacks for new environment repair decisions.
+- Do not apply verification repairs from the supervisor decision writer.
+- Do not change model-output normalization, planning repair, or review adjudication
+  schemas except where shared helpers require narrow compatibility.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_supervisor_decisions.py tests/test_supervisor_decision_artifacts.py
+  tests/test_runtime_supervisor.py tests/test_environment_repair.py
+- git diff --check output
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_supervisor_decisions.py tests/test_supervisor_decision_artifacts.py
+    tests/test_runtime_supervisor.py tests/test_environment_repair.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if new decision artifacts can be loaded with missing validators_to_rerun.
+- Stop if retry budget impact is not explicit for apply-and-retry decisions.
+- Stop if refusal decisions omit the policy basis or source evidence paths.
+- Stop if changes require weakening strict validation for existing artifacts.
+- Stop if scope or verification cannot remain within the generated contract.
+non_goals:
+- Do not mutate verification commands.
+- Do not integrate release resume.
+- Do not update docs.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- environment-repair-actions-0001
+- environment-repair-actions-0002

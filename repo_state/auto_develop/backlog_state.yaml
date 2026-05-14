@@ -6,7 +6,7 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
 current_focus: environment-repair-actions
-active_epic: null
+active_epic: environment-repair-actions
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -85,15 +85,27 @@ candidate_epics:
   priority: 8
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
-active_epics: []
+active_epics:
+- epic_id: environment-repair-actions
+  next_recommendations: []
+  retry_count: 0
+  repair_count: 0
+  outcome_references: []
+  finalization_outcome_references: []
+  unresolved_finding_references: []
+  final_review_follow_up_memories: []
+  state_review_snapshot_references: []
+  metrics_snapshot_references: []
+  tuning_report_references: []
+  updated_at: '2026-05-14T08:50:02.772768Z'
 reviewed_epics: []
 completed_epic_records:
 - epic_id: review-stop-policy-hardening
   status_reason: completed via feature/review-stop-policy-hardening and merged into
     main after accepted implementation, repair waves, full-suite verification, and
     a final manual classifier fix for no-op required-repair wording; bounded final
-    review convergence, final verification ordering, summary/state exposure, and
-    documentation are implemented.
+    review convergence, final verification ordering, summary/state exposure, and documentation
+    are implemented.
   next_recommendations:
   - Treat no-op reviewer required-repair phrases as normalized advisory findings;
     the final manual fix should become part of future reviewer-output normalization

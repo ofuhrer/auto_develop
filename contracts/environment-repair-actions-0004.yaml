@@ -1,0 +1,61 @@
+task_id: environment-repair-actions-0004
+release_id: environment-repair-actions
+title: Apply bounded verification repairs and rerun validators
+task_type: code_only
+budget_class: L
+objective: When verification fails with a policy-declared repairable environment drift,
+  apply only the selected bounded repair, write the supervisor decision artifact,
+  decrement retry budget, and rerun the deterministic validators listed in the decision.
+  Supported repairs must cover missing PYTHONPATH/import context, shared-runtime command
+  rewrite or env prefix repair, and command-not-found diagnostics repairable without
+  changing task scope.
+allowed_files:
+- src/agentic_devloop/environment_repair.py
+- src/agentic_devloop/verification.py
+- src/agentic_devloop/orchestrator.py
+- tests/test_environment_repair.py
+- tests/test_verification.py
+- tests/test_orchestrator.py
+forbidden_changes:
+- Do not bypass contract admission, allowed-file boundaries, forbidden changes, required
+  evidence checks, final verification, or finalization policy.
+- Do not mark verification successful without rerunning the failed validator command
+  or configured deterministic validator set.
+- Do not install missing executables or dependencies.
+- Do not fetch network resources or use credentials.
+- Do not repair shell commands containing unsafe operators unless existing safety
+  helpers classify the rewrite as safe.
+- Do not modify task source files as part of environment repair.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_environment_repair.py tests/test_verification.py tests/test_orchestrator.py
+- git diff --check output
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_environment_repair.py tests/test_verification.py tests/test_orchestrator.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if repaired verification can skip any configured validator that would have
+  run without repair.
+- Stop if repair mutation affects source files, contracts, finalization policy, or
+  allowed_files.
+- Stop if command-not-found handling requires dependency installation, PATH broadening
+  beyond declared safe runtime paths, network access, or credentials.
+- Stop if repair retries are not recorded in evidence with before/after commands and
+  validator results.
+non_goals:
+- Do not implement release resume after process interruption.
+- Do not update documentation.
+- Do not add broad executor liveness supervision.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- environment-repair-actions-0002
+- environment-repair-actions-0003

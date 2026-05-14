@@ -1,0 +1,56 @@
+task_id: environment-repair-actions-0002
+release_id: environment-repair-actions
+title: Capture structured verification environment failures
+task_type: code_only
+budget_class: M
+objective: 'When verification fails in task execution, collect a typed environment-repair
+  input artifact from deterministic evidence: failed command, exit code, stdout/stderr
+  excerpts, resolved command/runtime metadata, worktree path, project config identity,
+  verification log paths, and prior repair attempts. Do not apply repairs in this
+  task.'
+allowed_files:
+- src/agentic_devloop/environment_repair.py
+- src/agentic_devloop/verification.py
+- src/agentic_devloop/evidence.py
+- src/agentic_devloop/orchestrator.py
+- tests/test_environment_repair.py
+- tests/test_verification.py
+- tests/test_orchestrator.py
+forbidden_changes:
+- Do not change success criteria for verification commands.
+- Do not skip or reorder configured verification commands.
+- Do not write evidence outside the run/task evidence directory.
+- Do not include full unbounded stdout/stderr; keep excerpts bounded by existing log
+  excerpt limits or a typed limit.
+- Do not perform repair actions or retries in this task.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_environment_repair.py tests/test_verification.py tests/test_orchestrator.py
+- git diff --check output
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_environment_repair.py tests/test_verification.py tests/test_orchestrator.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if failure capture can mask the original verification exit code.
+- Stop if stdout/stderr capture is unbounded or omits artifact paths needed for review.
+- Stop if project config serialization would leak credentials or unrestricted environment
+  values.
+- Stop if implementation requires changing contract admission, finalization, or release
+  scheduling behavior.
+non_goals:
+- Do not add policy-decision artifacts.
+- Do not rerun validators.
+- Do not implement release resume.
+- Do not update user documentation.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- environment-repair-actions-0001

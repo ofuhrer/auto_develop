@@ -1,0 +1,49 @@
+task_id: environment-repair-actions-0001
+release_id: environment-repair-actions
+title: Define verification environment repair policy models
+task_type: code_only
+budget_class: M
+objective: Add typed verification-environment repair input, policy, action, and refusal
+  models plus deterministic classifiers for the minimum required repair categories.
+  Do not execute repairs or modify orchestration flow in this task.
+allowed_files:
+- src/agentic_devloop/environment_repair.py
+- src/agentic_devloop/models.py
+- tests/test_environment_repair.py
+forbidden_changes:
+- Do not change VerificationRunner command execution behavior.
+- Do not change run-task or run-release orchestration flow.
+- Do not install dependencies or add network-dependent repair behavior.
+- Do not allow policy entries that broaden task allowed_files or contract scope.
+- Do not modify existing runtime supervisor decision artifact schema in this task.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_environment_repair.py
+- git diff --check output
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_environment_repair.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if classification requires parsing arbitrary shell syntax beyond the existing
+  verification command safety helpers.
+- Stop if any proposed policy action can install packages, fetch network resources,
+  access credentials, edit source files, or expand allowed_files.
+- Stop if repair categories cannot be represented as typed data with explicit refusal
+  reasons.
+- Stop if implementation requires changes outside allowed_files.
+non_goals:
+- Do not rerun validators after repair.
+- Do not write supervisor decision artifacts.
+- Do not integrate with release resume.
+- Do not update documentation.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on: []

@@ -1,0 +1,58 @@
+task_id: environment-repair-actions-0005
+release_id: environment-repair-actions
+title: Enforce repair refusal budget and release resume semantics
+task_type: code_only
+budget_class: L
+objective: Ensure unsafe repairs, missing policy, dependency installation requiring
+  unapproved network or credentials, and repeated repair exhaustion stop with explicit
+  evidence. Add release resume behavior that recognizes a completed successful environment
+  repair and continues through normal validator/finalization gates without bypassing
+  them.
+allowed_files:
+- src/agentic_devloop/environment_repair.py
+- src/agentic_devloop/runtime_supervisor.py
+- src/agentic_devloop/orchestrator.py
+- src/agentic_devloop/release.py
+- tests/test_environment_repair.py
+- tests/test_runtime_supervisor.py
+- tests/test_orchestrator.py
+- tests/test_release.py
+forbidden_changes:
+- Do not expand the set of safe repair actions beyond policy declarations from earlier
+  tasks.
+- Do not allow resume to skip changed-file checks, final verification, feature review,
+  or finalization policy.
+- Do not delete or overwrite prior repair decision artifacts during resume.
+- Do not treat missing policy as a warning.
+- Do not increase executor attempts or retry budget silently.
+required_evidence:
+- git diff
+- changed-files list
+- pytest output for tests/test_environment_repair.py tests/test_runtime_supervisor.py
+  tests/test_orchestrator.py tests/test_release.py
+- git diff --check output
+verification:
+  commands:
+  - PYTHONPATH=src /Users/fuhrer/Desktop/auto_develop/main/.venv/bin/python -m pytest
+    tests/test_environment_repair.py tests/test_runtime_supervisor.py tests/test_orchestrator.py
+    tests/test_release.py
+  - git diff --check
+  profile: null
+stop_conditions:
+- Stop if retry-budget exhaustion can fall back to an untyped failure or silent retry.
+- Stop if missing policy, network requirement, credential requirement, or unsafe shell
+  rewrite can proceed without a STOP decision artifact.
+- Stop if release resume can bypass any hard gate that a fresh run would enforce.
+- Stop if implementation requires changing cleanup behavior or deleting run evidence.
+non_goals:
+- Do not add new repair classifications.
+- Do not update docs.
+- Do not implement long-running executor liveness repair.
+scientific_assumptions:
+- Not applicable; developer tooling orchestration task.
+fixture_changes_allowed: false
+tolerance_changes_allowed: false
+benchmark_delta_required: false
+remote_dispatch: null
+depends_on:
+- environment-repair-actions-0004
