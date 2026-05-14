@@ -6,7 +6,6 @@ active_goal: Enable a freshly onboarded auto_develop checkout and target reposit
   stops only for major hard-policy problems.
 governor_mode: autonomous_first
 current_focus: shared-verification-runtime
-active_epic: shared-verification-runtime
 completed_epics:
 - release-governor-1
 - adaptive-model-hierarchy
@@ -44,10 +43,10 @@ candidate_epics:
   next_release_id: shared-verification-runtime
 - id: review-stop-policy-hardening
   title: Bound reviewer churn with explicit stop and adjudication policy.
-  rationale: The five-cycle dogfood run spent repeated repair waves on adjacent
-    review findings after deterministic verification was already green; the governor
-    needs accept, defer, block, or follow-up decisions instead of unbounded review
-    convergence attempts.
+  rationale: The five-cycle dogfood run spent repeated repair waves on adjacent review
+    findings after deterministic verification was already green; the governor needs
+    accept, defer, block, or follow-up decisions instead of unbounded review convergence
+    attempts.
   priority: 2
   next_release_id: review-stop-policy-hardening
 - id: environment-repair-actions
@@ -60,16 +59,14 @@ candidate_epics:
 - id: cost-runtime-governor
   title: Turn release metrics into runtime and model-routing decisions.
   rationale: Retained metrics show high repeated context volume, expensive review
-    churn, and no actual billed-cost accounting; the governor should use those
-    signals to choose one-shot versus decomposed execution, cap review waves, and
-    route models.
+    churn, and no actual billed-cost accounting; the governor should use those signals
+    to choose one-shot versus decomposed execution, cap review waves, and route models.
   priority: 4
   next_release_id: cost-runtime-governor
 - id: context-slimming-and-retrieval
   title: Build phase-specific context bundles for workers, reviewers, and repairs.
-  rationale: Repair and review tasks often received large roadmap/design context
-    bundles even when they only needed a finding, touched files, tests, and prior
-    evidence.
+  rationale: Repair and review tasks often received large roadmap/design context bundles
+    even when they only needed a finding, touched files, tests, and prior evidence.
   priority: 5
   next_release_id: context-slimming-and-retrieval
 - id: executor-liveness-supervision
@@ -80,10 +77,10 @@ candidate_epics:
   next_release_id: executor-liveness-supervision
 - id: multi-epic-cockpit-log
   title: Provide one tail-able cockpit log across repeated epic cycles.
-  rationale: Operators still correlate parent governor logs, child release logs,
-    raw logs, review artifacts, and state refresh artifacts manually; one structured
-    log should show what is being implemented, repaired, reviewed, finalized, and
-    why the loop stopped.
+  rationale: Operators still correlate parent governor logs, child release logs, raw
+    logs, review artifacts, and state refresh artifacts manually; one structured log
+    should show what is being implemented, repaired, reviewed, finalized, and why
+    the loop stopped.
   priority: 7
   next_release_id: multi-epic-cockpit-log
 - id: target-artifact-ownership
@@ -100,18 +97,7 @@ candidate_epics:
   priority: 9
   next_release_id: onboarding-bootstrap
 recent_run_summaries: []
-active_epics:
-- epic_id: shared-verification-runtime
-  next_recommendations: []
-  retry_count: 0
-  repair_count: 0
-  outcome_references: []
-  finalization_outcome_references: []
-  unresolved_finding_references: []
-  state_review_snapshot_references: []
-  metrics_snapshot_references: []
-  tuning_report_references: []
-  updated_at: '2026-05-14T01:33:13Z'
+active_epics: []
 reviewed_epics: []
 completed_epic_records:
 - epic_id: review-convergence-adjudicator
@@ -140,6 +126,7 @@ completed_epic_records:
       judgment and full-suite verification rather than another automated review wave.
     severity: high
     source_path: runs/review-convergence-adjudicator-cycle/20260514T005002Z_review-convergence-adjudicator_release/feature_review_recheck.json
+  final_review_follow_up_memories: []
   state_review_snapshot_references: []
   metrics_snapshot_references:
   - metrics_path: runs/review-convergence-adjudicator-cycle/20260514T005002Z_review-convergence-adjudicator_release/release_metrics.json
@@ -171,6 +158,7 @@ completed_epic_records:
       test suites.
     severity: moderate
     source_path: runs/soft-scope-budget-policy-cycle/20260513T223837Z_soft-scope-budget-policy_release/feature_review_recheck.json
+  final_review_follow_up_memories: []
   state_review_snapshot_references: []
   metrics_snapshot_references:
   - metrics_path: runs/soft-scope-budget-policy-cycle/20260513T223837Z_soft-scope-budget-policy_release/release_metrics.json
@@ -200,6 +188,7 @@ completed_epic_records:
       final required findings were repaired manually and verified with the full suite.
     severity: moderate
     source_path: runs/governor-cockpit-v2-cycle/20260513T215731Z_governor-cockpit-v2_release/feature_review_recheck.json
+  final_review_follow_up_memories: []
   state_review_snapshot_references: []
   metrics_snapshot_references:
   - metrics_path: runs/governor-cockpit-v2-cycle/20260513T215731Z_governor-cockpit-v2_release/release_metrics.json
@@ -235,6 +224,7 @@ completed_epic_records:
       after final verification passed.
     severity: low
     source_path: runs/20260513T212009Z_planner-admission-repair_release/feature_review_recheck.json
+  final_review_follow_up_memories: []
   state_review_snapshot_references: []
   metrics_snapshot_references:
   - metrics_path: runs/20260513T212009Z_planner-admission-repair_release/release_metrics.json
@@ -266,6 +256,7 @@ completed_epic_records:
       dependencies; recovered manually from evidence and verified from the main runtime.
     severity: moderate
     source_path: runs/20260513T210532Z_governor-state-refresh_governor-state-refresh-0005/governor-state-refresh-0005/evidence/verification.log
+  final_review_follow_up_memories: []
   state_review_snapshot_references: []
   metrics_snapshot_references: []
   tuning_report_references: []
@@ -289,6 +280,7 @@ completed_epic_records:
       convergence limit, showing the need for supervisor-owned final adjudication.
     severity: moderate
     source_path: runs/20260513T195414Z_planner-normalization-generalization_release/feature_review_recheck.json
+  final_review_follow_up_memories: []
   state_review_snapshot_references: []
   metrics_snapshot_references: []
   tuning_report_references: []
@@ -308,6 +300,7 @@ completed_epic_records:
     recorded_at: '2026-05-13T20:05:00Z'
   finalization_outcome_references: []
   unresolved_finding_references: []
+  final_review_follow_up_memories: []
   state_review_snapshot_references: []
   metrics_snapshot_references: []
   tuning_report_references: []
@@ -327,6 +320,7 @@ completed_epic_records:
     recorded_at: '2026-05-13T19:05:00Z'
   finalization_outcome_references: []
   unresolved_finding_references: []
+  final_review_follow_up_memories: []
   state_review_snapshot_references: []
   metrics_snapshot_references: []
   tuning_report_references: []
@@ -350,6 +344,7 @@ completed_epic_records:
       evidence handoff.
     severity: moderate
     source_path: runs/20260513T155654Z_multi-epic-run-governor-hardening_release/release_review.md
+  final_review_follow_up_memories: []
   state_review_snapshot_references: []
   metrics_snapshot_references: []
   tuning_report_references: []
@@ -374,22 +369,20 @@ notes:
 - 'Dogfood finding: one-shot high-capability agents produced coherent implementations
   faster than over-decomposed contract batches. Prioritize supervisor-owned execution
   strategy and normalization before expanding multi-epic autonomy.'
-- 'Five-cycle dogfood review: 7 release attempts, 51 worker/reviewer task runs,
-  183.5 executor minutes, 28.0 verification minutes, 1.84M prompt characters,
-  1.57M injected context characters, and 25.3MB of raw stderr/audit chatter.
-  Main bottlenecks were shared runtime drift, repeated review convergence churn,
-  coarse context slicing, incomplete cost governance, and manual finalization/state
-  compaction.'
+- 'Five-cycle dogfood review: 7 release attempts, 51 worker/reviewer task runs, 183.5
+  executor minutes, 28.0 verification minutes, 1.84M prompt characters, 1.57M injected
+  context characters, and 25.3MB of raw stderr/audit chatter. Main bottlenecks were
+  shared runtime drift, repeated review convergence churn, coarse context slicing,
+  incomplete cost governance, and manual finalization/state compaction.'
 - 'Completed gap: hard file-count and diff-size budgets now produce supervisor-adjudicated
   scope-risk findings after hard gates pass, so broad-but-mechanical changes are no
   longer stopped automatically unless they cross a hard safety boundary.'
 - 'Current top gap: shared verification runtime. Recent cycles still needed worktree-safe
-  absolute runtime commands and worker-side `.venv` assumptions created false
-  failures or noisy environment reports.'
-- 'Next sequencing: shared-verification-runtime, review-stop-policy-hardening,
-  environment-repair-actions, cost-runtime-governor, context-slimming-and-retrieval,
-  executor-liveness-supervision, multi-epic-cockpit-log, target-artifact-ownership,
-  onboarding-bootstrap.'
+  absolute runtime commands and worker-side `.venv` assumptions created false failures
+  or noisy environment reports.'
+- 'Next sequencing: shared-verification-runtime, review-stop-policy-hardening, environment-repair-actions,
+  cost-runtime-governor, context-slimming-and-retrieval, executor-liveness-supervision,
+  multi-epic-cockpit-log, target-artifact-ownership, onboarding-bootstrap.'
 - Hard file-count and diff-size budgets are implemented as scope-risk signals for
   supervisor adjudication unless they cross configured hard-policy boundaries; broad
   mechanical changes require stronger verification, not automatic rejection.
