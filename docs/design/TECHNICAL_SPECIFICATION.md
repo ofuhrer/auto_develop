@@ -647,7 +647,7 @@ This review loop is intentionally agentic. Deterministic code should assemble ev
 
 ### Final Adjudication After Repair Budget Exhaustion
 
-When bounded repair waves stop because the retry budget is exhausted or the loop otherwise converges without resolving every finding, the release performs a final integration verification rerun on the integrated feature branch before the supervisor writes final adjudication records. The supervisor then persists `review_finding_adjudication` artifacts under `runs/<run-id>/supervisor_decisions/` alongside the `feature_review.json` / `feature_review_recheck.json` trail and classifies the remaining findings.
+When bounded repair waves stop because the retry budget is exhausted or the loop otherwise converges without resolving every finding, the release performs a final integration verification rerun on the integrated feature branch before the supervisor writes final adjudication records. The supervisor then persists `final_review_finding_adjudication` artifacts under `runs/<run-id>/supervisor_decisions/` alongside the `feature_review.json` / `feature_review_recheck.json` trail and classifies the remaining findings.
 
 Final adjudication rules:
 

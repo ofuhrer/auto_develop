@@ -29,7 +29,7 @@ Implemented decision types:
 
 - `release_scheduling`
 - `repair_loop_continuation`
-- `review_finding_adjudication`
+- `final_review_finding_adjudication`
 - `soft_budget_acceptance`
 - `contract_normalization`
 - `environment_repair`
@@ -49,12 +49,12 @@ should be used.
   report hash, base-branch commit, execution mode, and release-input hash used
   to detect stale scheduling artifacts.
 
-`repair_loop_continuation` and `review_finding_adjudication` are the decision
+`repair_loop_continuation` and `final_review_finding_adjudication` are the decision
 types that carry release-local review convergence behavior:
 
 - `repair_loop_continuation` records whether a bounded repair pass should keep
   going, stop, or split after a reviewer pass or repair attempt;
-- `review_finding_adjudication` records the supervisor's final release-local
+- `final_review_finding_adjudication` records the supervisor's final release-local
   classification after the final integration verification rerun on the
   integrated feature branch, including blocker, soft finding, false positive,
   verification-only, duplicate, scope expansion, or backlog follow-up
