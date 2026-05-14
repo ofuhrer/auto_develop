@@ -594,21 +594,22 @@ def classify_feature_review_findings_for_convergence(
     classified: list[FeatureReviewFindingConvergenceResult] = []
     required_repair_ids: set[str] = set()
     for finding in decision.findings:
-        if not finding.required_repairs and not finding.optional_follow_ups:
+        required_repairs = _effective_required_repairs(finding.required_repairs)
+        if not required_repairs and not finding.optional_follow_ups:
             raise FeatureReviewClassificationError(
                 "feature review finding "
                 f"{finding.finding_id} must include required_repairs or optional_follow_ups"
             )
-        if finding.required_repairs:
+        if required_repairs:
             required_repair_ids.add(finding.finding_id)
         previous_match, repeated_by_id, adjacent_similarity = _match_previous_finding(
             finding=finding,
             previous_findings=previous_findings,
         )
         verification_false_positive_candidate = (
-            verification_passed and bool(finding.required_repairs) and _is_verification_only_finding(finding)
+            verification_passed and bool(required_repairs) and _is_verification_only_finding(finding)
         )
-        if finding.required_repairs:
+        if required_repairs:
             result = FeatureReviewFindingConvergenceResult(
                 finding_id=finding.finding_id,
                 classification="blocker",
@@ -692,6 +693,24 @@ def classify_feature_review_findings_for_convergence(
             item.finding_id for item in classified if item.verification_false_positive_candidate
         ),
     )
+
+
+def _effective_required_repairs(required_repairs: list[str]) -> list[str]:
+    no_op_prefixes = (
+        "none",
+        "no repair",
+        "no required repair",
+        "not required",
+    )
+    effective: list[str] = []
+    for repair in required_repairs:
+        normalized = repair.strip().lower()
+        if not normalized:
+            continue
+        if any(normalized.startswith(prefix) for prefix in no_op_prefixes):
+            continue
+        effective.append(repair)
+    return effective
 
 
 def _repair_scope_finding(finding: FeatureReviewFinding) -> FeatureReviewFinding:

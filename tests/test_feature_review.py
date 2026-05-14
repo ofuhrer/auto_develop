@@ -604,6 +604,40 @@ def test_classify_feature_review_findings_for_convergence_preserves_required_rep
     assert result.false_positive_candidate_ids == ["required-1"]
 
 
+def test_classify_feature_review_findings_for_convergence_ignores_noop_required_repairs() -> None:
+    decision = FeatureReviewDecision.model_validate(
+        {
+            "release_id": "rel-8a",
+            "reviewer": "strong_model",
+            "summary": "Advisory observability finding.",
+            "recommendation": "approve_with_repairs",
+            "accepted_risks": [],
+            "rerun_verification_commands": [],
+            "findings": [
+                {
+                    "finding_id": "noop-required-1",
+                    "severity": "low",
+                    "summary": "Monitoring wording could be narrower.",
+                    "affected_files": ["src/agentic_devloop/feature_review.py"],
+                    "required_repairs": ["None (acceptable if intended)."],
+                    "optional_follow_ups": ["Consider narrowing observability marker detection."],
+                }
+            ],
+        }
+    )
+    result = classify_feature_review_findings_for_convergence(
+        decision=decision,
+        previous_decisions=[],
+        verification_passed=True,
+    )
+
+    finding = result.findings[0]
+    assert finding.classification == "soft_observability"
+    assert finding.selected_action == "accept"
+    assert result.blocking_finding_ids == []
+    assert result.accepted_finding_ids == ["noop-required-1"]
+
+
 def test_classify_feature_review_findings_for_convergence_marks_duplicate_by_finding_id() -> None:
     previous = FeatureReviewDecision.model_validate(
         {
